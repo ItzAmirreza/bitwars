@@ -224,6 +224,26 @@ export class VFX {
     }
   }
 
+  // ── Projectile trail ──
+  emitProjectileTrail(x: number, y: number, z: number, colorHex: number): void {
+    const col = new THREE.Color(colorHex);
+    for (let i = 0; i < 2 && this.particles.length < MAX_PARTICLES; i++) {
+      this.particles.push({
+        x: x + (Math.random() - 0.5) * 0.15,
+        y: y + (Math.random() - 0.5) * 0.15,
+        z: z + (Math.random() - 0.5) * 0.15,
+        vx: (Math.random() - 0.5) * 1.5,
+        vy: (Math.random() - 0.5) * 1.5 + 0.3,
+        vz: (Math.random() - 0.5) * 1.5,
+        r: col.r, g: col.g, b: col.b,
+        life: 0,
+        maxLife: 0.15 + Math.random() * 0.2,
+        size: 4 + Math.random() * 4,
+        gravity: false,
+      });
+    }
+  }
+
   // ── Bullet tracer ──
   emitTracer(from: THREE.Vector3, to: THREE.Vector3, color: number): void {
     const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]);

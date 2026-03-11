@@ -20,35 +20,39 @@ pub struct Rotation {
 struct WeaponDef {
     damage: i32,
     radius: f32,
-    fire_rate: f32, // shots per second
+    fire_rate: f32,        // shots per second
     max_ammo: i32,
     max_range: f32,
+    projectile_speed: f32, // 0.0 = hitscan, >0 = projectile (units/sec)
 }
 
 const WEAPON_DEFS: [WeaponDef; 3] = [
-    // Rifle: fast, precise, moderate damage
+    // Rifle: fast, precise, moderate damage (hitscan)
     WeaponDef {
         damage: 25,
         radius: 0.0,
         fire_rate: 5.0,
         max_ammo: 30,
         max_range: 80.0,
+        projectile_speed: 0.0,
     },
-    // Shotgun: slow, spread, close range
+    // Shotgun: slow, spread, close range (hitscan)
     WeaponDef {
         damage: 12,
         radius: 1.5,
         fire_rate: 1.0,
         max_ammo: 8,
         max_range: 30.0,
+        projectile_speed: 0.0,
     },
-    // RPG: very slow, explosive, high damage
+    // RPG: very slow, explosive, high damage (projectile)
     WeaponDef {
         damage: 80,
         radius: 3.5,
         fire_rate: 0.5,
         max_ammo: 4,
         max_range: 80.0,
+        projectile_speed: 40.0,
     },
 ];
 
@@ -479,6 +483,19 @@ pub fn fire_weapon(
     wstate.last_fire_time = ctx.timestamp;
     ctx.db.player_weapon_state().identity().update(wstate);
 
+    // 4b. Projectile weapons: skip hit validation, just record shot event
+    if def.projectile_speed > 0.0 {
+        ctx.db.shot_event().insert(ShotEvent {
+            id: 0,
+            shooter: sender,
+            origin,
+            direction,
+            weapon,
+            fired_at: ctx.timestamp,
+        });
+        return Ok(());
+    }
+
     // 5. Validate + apply player hits
     let dir_len = (direction.x * direction.x
         + direction.y * direction.y
@@ -739,6 +756,144 @@ pub fn cleanup_shots(ctx: &ReducerContext) -> Result<(), String> {
 
     for id in stale {
         ctx.db.shot_event().id().delete(&id);
+    }
+
+    Ok(())
+}
+
+/// Handle projectile impact: validates travel time, applies damage and block destruction.
+/// Called by clients when a client-side simulated projectile collides.
+#[reducer]
+pub fn projectile_impact(
+    ctx: &ReducerContext,
+    shot_origin: Vec3,
+    impact_pos: Vec3,
+    _direction: Vec3,
+    weapon: u8,
+    travel_time_ms: u32,
+    hit_players: Vec<Identity>,
+    hit_blocks: Vec<Vec3>,
+) -> Result<(), String> {
+    let sender = ctx.sender();
+    let player = ctx
+        .db
+        .player()
+        .identity()
+        .find(sender)
+        .ok_or("Not registered")?;
+
+    if weapon >= NUM_WEAPONS {
+        return Err("Invalid weapon".to_string());
+    }
+
+    if player.health <= 0 {
+        return Err("Cannot impact while dead".to_string());
+    }
+
+    let def = &WEAPON_DEFS[weapon as usize];
+
+    // Must be a projectile weapon
+    if def.projectile_speed <= 0.0 {
+        return Err("Not a projectile weapon".to_string());
+    }
+
+    // Travel time validation: expected = distance / speed
+    let dx = impact_pos.x - shot_origin.x;
+    let dy = impact_pos.y - shot_origin.y;
+    let dz = impact_pos.z - shot_origin.z;
+    let distance = (dx * dx + dy * dy + dz * dz).sqrt();
+    let expected_time_ms = (distance / def.projectile_speed * 1000.0) as u32;
+
+    // Allow 50%-300% of expected time (gravity curves path, network jitter)
+    let min_time = expected_time_ms / 2;
+    let max_time = expected_time_ms.saturating_mul(3).max(500); // at least 500ms tolerance
+    if travel_time_ms < min_time || travel_time_ms > max_time {
+        log::warn!(
+            "Projectile travel time mismatch: got {}ms, expected ~{}ms (dist={:.1})",
+            travel_time_ms, expected_time_ms, distance
+        );
+        // Don't hard-reject, just log — gravity and bouncing make timing imprecise
+    }
+
+    // Impact must be within max_range of origin (with tolerance for gravity arc)
+    let impact_dist_sq = dist_sq(&shot_origin, &impact_pos);
+    let max_range = def.max_range + 10.0; // generous tolerance for arced paths
+    if impact_dist_sq > max_range * max_range {
+        return Err("Impact too far from origin".to_string());
+    }
+
+    // Validate + apply player hits (targets must be near impact position)
+    for target_id in &hit_players {
+        if *target_id == sender {
+            continue;
+        }
+
+        if let Some(target) = ctx.db.player().identity().find(*target_id) {
+            if target.health <= 0 || !target.online {
+                continue;
+            }
+
+            // Target must be near impact position (within radius + tolerance)
+            let target_dist_sq = dist_sq(&impact_pos, &target.pos);
+            let hit_range = def.radius + 5.0;
+            if target_dist_sq > hit_range * hit_range {
+                continue;
+            }
+
+            // Apply server-defined damage
+            let new_health = (target.health - def.damage).max(0);
+            ctx.db.player().identity().update(Player {
+                health: new_health,
+                ..target
+            });
+
+            // Handle kill
+            if new_health == 0 {
+                if let Some(attacker) = ctx.db.player().identity().find(sender) {
+                    ctx.db.player().identity().update(Player {
+                        kills: attacker.kills + 1,
+                        ..attacker
+                    });
+                }
+                if let Some(dead) = ctx.db.player().identity().find(*target_id) {
+                    ctx.db.player().identity().update(Player {
+                        deaths: dead.deaths + 1,
+                        ..dead
+                    });
+                }
+                log::info!("{:?} killed {:?} with projectile", sender, target_id);
+            }
+        }
+    }
+
+    // Validate + apply block destruction (blocks must be near impact)
+    if hit_blocks.len() > 500 {
+        return Err("Too many blocks".to_string());
+    }
+    for block in &hit_blocks {
+        let bx = block.x as i32;
+        let by = block.y as i32;
+        let bz = block.z as i32;
+
+        if !block_in_bounds(bx, by, bz) {
+            continue;
+        }
+
+        // Blocks must be near impact position
+        let block_dist_sq = dist_sq(&impact_pos, block);
+        let max_block_range = def.radius + 5.0;
+        if block_dist_sq > max_block_range * max_block_range {
+            continue;
+        }
+
+        ctx.db.destroyed_block().insert(DestroyedBlock {
+            id: 0,
+            x: bx,
+            y: by,
+            z: bz,
+            destroyed_by: sender,
+            destroyed_at: ctx.timestamp,
+        });
     }
 
     Ok(())

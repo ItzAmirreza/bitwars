@@ -1,6 +1,18 @@
 import * as THREE from 'three';
 import { VoxelWorld } from './VoxelWorld';
 
+export interface ProjectileConfig {
+  speed: number;           // units/sec (Infinity = hitscan)
+  gravity: number;         // downward acceleration (0 = no drop)
+  size: number;            // visual radius of projectile mesh
+  trailLength: number;     // trail particle spacing (0 = no trail)
+  trailColor: number;      // trail color hex
+  lightIntensity: number;  // point light intensity (0 = none)
+  lightColor: number;      // point light color hex
+  lightRange: number;      // point light range
+  lifetime: number;        // max seconds before despawn
+}
+
 export interface Weapon {
   name: string;
   damage: number;
@@ -10,13 +22,26 @@ export interface Weapon {
   maxAmmo: number;
   color: string;
   recoil: number;
+  projectile: ProjectileConfig;
 }
 
 // Client-side weapon stats (used for prediction/VFX only — server is authority for damage/ammo)
 export const WEAPONS: Weapon[] = [
-  { name: 'Rifle',   damage: 25, radius: 0,   fireRate: 5,   ammo: 30, maxAmmo: 30, color: '#4488ff', recoil: 0.02 },
-  { name: 'Shotgun', damage: 12, radius: 1.5, fireRate: 1,   ammo: 8,  maxAmmo: 8,  color: '#ff8844', recoil: 0.06 },
-  { name: 'RPG',     damage: 80, radius: 3.5, fireRate: 0.5, ammo: 4,  maxAmmo: 4,  color: '#ff4444', recoil: 0.1  },
+  {
+    name: 'Rifle', damage: 25, radius: 0, fireRate: 5, ammo: 30, maxAmmo: 30,
+    color: '#4488ff', recoil: 0.02,
+    projectile: { speed: Infinity, gravity: 0, size: 0, trailLength: 0, trailColor: 0, lightIntensity: 0, lightColor: 0, lightRange: 0, lifetime: 0 },
+  },
+  {
+    name: 'Shotgun', damage: 12, radius: 1.5, fireRate: 1, ammo: 8, maxAmmo: 8,
+    color: '#ff8844', recoil: 0.06,
+    projectile: { speed: Infinity, gravity: 0, size: 0, trailLength: 0, trailColor: 0, lightIntensity: 0, lightColor: 0, lightRange: 0, lifetime: 0 },
+  },
+  {
+    name: 'RPG', damage: 80, radius: 3.5, fireRate: 0.5, ammo: 4, maxAmmo: 4,
+    color: '#ff4444', recoil: 0.1,
+    projectile: { speed: 40, gravity: 2, size: 0.15, trailLength: 0.5, trailColor: 0xff6600, lightIntensity: 3, lightColor: 0xff4400, lightRange: 8, lifetime: 5 },
+  },
 ];
 
 /** Result of a weapon fire — used by Engine to trigger VFX/audio and server sync */
@@ -28,6 +53,7 @@ export interface FireResult {
   hitPlayerIds: string[];
   origin: THREE.Vector3;
   direction: THREE.Vector3;
+  isProjectile: boolean;
 }
 
 // Player hitbox: axis-aligned bounding box (width 0.6, height 1.9, centered at feet+0.95)
@@ -101,6 +127,29 @@ export class WeaponSystem {
     // Raycast from camera center
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
     const origin = this.camera.position.clone();
+
+    // Recoil (camera) — use YXZ euler to match FPSControls and avoid yaw drift
+    const recoilEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+    recoilEuler.setFromQuaternion(this.camera.quaternion);
+    recoilEuler.x += (Math.random() - 0.5) * this.weapon.recoil;
+    recoilEuler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, recoilEuler.x));
+    this.camera.quaternion.setFromEuler(recoilEuler);
+
+    // Projectile weapon: skip raycast, return early with spawn data
+    if (isFinite(this.weapon.projectile.speed)) {
+      return {
+        weaponIndex: this.currentWeapon,
+        hitPos: null,
+        destroyedBlocks: [],
+        tracerEnd: origin.clone().add(dir.clone().multiplyScalar(80)),
+        hitPlayerIds: [],
+        origin,
+        direction: dir,
+        isProjectile: true,
+      };
+    }
+
+    // Hitscan path: instant raycast
     const hit = this.raycastVoxels(origin, dir, 80);
 
     const destroyed: FireResult['destroyedBlocks'] = [];
@@ -136,14 +185,7 @@ export class WeaponSystem {
     }
 
     // Player hit detection: AABB raycast against other players
-    const hitPlayerIds = this.raycastPlayers(origin, dir);
-
-    // Recoil (camera) — use YXZ euler to match FPSControls and avoid yaw drift
-    const recoilEuler = new THREE.Euler(0, 0, 0, 'YXZ');
-    recoilEuler.setFromQuaternion(this.camera.quaternion);
-    recoilEuler.x += (Math.random() - 0.5) * this.weapon.recoil;
-    recoilEuler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, recoilEuler.x));
-    this.camera.quaternion.setFromEuler(recoilEuler);
+    const hitPlayerIds = this.raycastPlayers(origin, dir, 80);
 
     return {
       weaponIndex: this.currentWeapon,
@@ -153,6 +195,7 @@ export class WeaponSystem {
       hitPlayerIds,
       origin,
       direction: dir,
+      isProjectile: false,
     };
   }
 
@@ -162,8 +205,7 @@ export class WeaponSystem {
   }
 
   /** Raycast against other players' AABB hitboxes, return hit player IDs */
-  private raycastPlayers(origin: THREE.Vector3, direction: THREE.Vector3): string[] {
-    const maxRange = this.weapon.radius > 0 ? 80 : 80; // all weapons max 80
+  raycastPlayers(origin: THREE.Vector3, direction: THREE.Vector3, maxRange: number): string[] {
     const hitIds: string[] = [];
 
     for (const [id, group] of this.otherPlayers) {
@@ -187,7 +229,7 @@ export class WeaponSystem {
   }
 
   /** Ray-AABB intersection test, returns t (distance along ray) or null */
-  private rayAABB(
+  rayAABB(
     origin: THREE.Vector3, dir: THREE.Vector3,
     minX: number, minY: number, minZ: number,
     maxX: number, maxY: number, maxZ: number,
@@ -210,7 +252,7 @@ export class WeaponSystem {
     return tmin >= 0 ? tmin : tmax;
   }
 
-  private raycastVoxels(
+  raycastVoxels(
     origin: THREE.Vector3,
     direction: THREE.Vector3,
     maxDist: number,

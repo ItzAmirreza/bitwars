@@ -1,4 +1,11 @@
 import * as THREE from 'three';
+import type { VoxelWorld } from './VoxelWorld';
+
+// Player collision constants
+const PLAYER_HALF_WIDTH = 0.3;
+const STEP_HEIGHT = 0.6;
+const WALL_CLIMB_SPEED = 4.0;
+const WALL_CHECK_DIST = 0.1;
 
 export class FPSControls {
   camera: THREE.PerspectiveCamera;
@@ -17,6 +24,7 @@ export class FPSControls {
   isSprinting = false;
   isCrouching = false;
   isSliding = false;
+  isClimbing = false;
   headBobX = 0;
   headBobY = 0;
   stepTriggered = false;
@@ -51,6 +59,7 @@ export class FPSControls {
   // Sprint/crouch keys
   private shiftDown = false;
   private ctrlDown = false;
+  private spaceHeld = false;
 
   // Sprint toggle
   private sprintToggleActive = false;
@@ -180,6 +189,7 @@ export class FPSControls {
         }
         break;
       case 'Space':
+        this.spaceHeld = true;
         if (this.onGround || this.coyoteTimer > 0 || this.isSliding) {
           this.executeJump();
         } else {
@@ -201,17 +211,179 @@ export class FPSControls {
         if (!this.sprintToggleSetting) this.shiftDown = false;
         break;
       case 'ControlLeft': case 'ControlRight': this.ctrlDown = false; break;
+      case 'Space': this.spaceHeld = false; break;
     }
   };
 
-  update(delta: number, getHeight: (x: number, z: number) => number): void {
+  // Check if player AABB is against a wall on any side
+  private isAgainstWall(world: VoxelWorld): boolean {
+    const footY = this.camera.position.y - this.currentEyeHeight;
+    const playerHeight = this.isCrouching ? this.crouchHeight : this.standHeight;
+    const cx = this.camera.position.x;
+    const cz = this.camera.position.z;
+    const checkDist = PLAYER_HALF_WIDTH + WALL_CHECK_DIST;
+
+    // Check multiple Y levels within the player's body
+    for (let yOff = 0.2; yOff < playerHeight - 0.1; yOff += 0.5) {
+      const by = Math.floor(footY + yOff);
+      // 4 cardinal directions
+      if (world.getBlock(Math.floor(cx + checkDist), by, Math.floor(cz)) !== 0) return true;
+      if (world.getBlock(Math.floor(cx - checkDist), by, Math.floor(cz)) !== 0) return true;
+      if (world.getBlock(Math.floor(cx), by, Math.floor(cz + checkDist)) !== 0) return true;
+      if (world.getBlock(Math.floor(cx), by, Math.floor(cz - checkDist)) !== 0) return true;
+    }
+    return false;
+  }
+
+  // Horizontal collision: resolve movement against voxel blocks
+  private moveWithCollision(dx: number, dz: number, world: VoxelWorld): void {
+    const footY = this.camera.position.y - this.currentEyeHeight;
+    const playerHeight = this.isCrouching ? this.crouchHeight : this.standHeight;
+    const pos = this.camera.position;
+
+    // Y range for collision checks (above step height)
+    const minBY = Math.floor(footY + STEP_HEIGHT);
+    const maxBY = Math.floor(footY + playerHeight - 0.01);
+
+    // Resolve X axis
+    let newX = pos.x + dx;
+    const xMinB = Math.floor(newX - PLAYER_HALF_WIDTH);
+    const xMaxB = Math.floor(newX + PLAYER_HALF_WIDTH);
+    const zMinB = Math.floor(pos.z - PLAYER_HALF_WIDTH);
+    const zMaxB = Math.floor(pos.z + PLAYER_HALF_WIDTH);
+
+    let collidedX = false;
+    xLoop:
+    for (let bx = xMinB; bx <= xMaxB; bx++) {
+      for (let by = minBY; by <= maxBY; by++) {
+        for (let bz = zMinB; bz <= zMaxB; bz++) {
+          if (world.getBlock(bx, by, bz) !== 0) {
+            collidedX = true;
+            if (dx > 0) newX = bx - PLAYER_HALF_WIDTH - 0.001;
+            else newX = bx + 1 + PLAYER_HALF_WIDTH + 0.001;
+            break xLoop;
+          }
+        }
+      }
+    }
+
+    // Resolve Z axis (using resolved X)
+    let newZ = pos.z + dz;
+    const zxMinB = Math.floor(newX - PLAYER_HALF_WIDTH);
+    const zxMaxB = Math.floor(newX + PLAYER_HALF_WIDTH);
+    const zzMinB = Math.floor(newZ - PLAYER_HALF_WIDTH);
+    const zzMaxB = Math.floor(newZ + PLAYER_HALF_WIDTH);
+
+    let collidedZ = false;
+    zLoop:
+    for (let bx = zxMinB; bx <= zxMaxB; bx++) {
+      for (let by = minBY; by <= maxBY; by++) {
+        for (let bz = zzMinB; bz <= zzMaxB; bz++) {
+          if (world.getBlock(bx, by, bz) !== 0) {
+            collidedZ = true;
+            if (dz > 0) newZ = bz - PLAYER_HALF_WIDTH - 0.001;
+            else newZ = bz + 1 + PLAYER_HALF_WIDTH + 0.001;
+            break zLoop;
+          }
+        }
+      }
+    }
+
+    pos.x = newX;
+    pos.z = newZ;
+    if (collidedX) this.hVelX = 0;
+    if (collidedZ) this.hVelZ = 0;
+  }
+
+  // Ceiling collision: prevent jumping through blocks above
+  private checkCeiling(world: VoxelWorld): void {
+    if (this.velocity.y <= 0) return;
+    const footY = this.camera.position.y - this.currentEyeHeight;
+    const playerHeight = this.isCrouching ? this.crouchHeight : this.standHeight;
+    const headY = Math.floor(footY + playerHeight);
+    const pos = this.camera.position;
+
+    const minBX = Math.floor(pos.x - PLAYER_HALF_WIDTH);
+    const maxBX = Math.floor(pos.x + PLAYER_HALF_WIDTH);
+    const minBZ = Math.floor(pos.z - PLAYER_HALF_WIDTH);
+    const maxBZ = Math.floor(pos.z + PLAYER_HALF_WIDTH);
+
+    for (let bx = minBX; bx <= maxBX; bx++) {
+      for (let bz = minBZ; bz <= maxBZ; bz++) {
+        if (world.getBlock(bx, headY, bz) !== 0) {
+          // Push down so head is just below the block
+          this.camera.position.y = headY - playerHeight + this.currentEyeHeight - 0.001;
+          this.velocity.y = 0;
+          return;
+        }
+      }
+    }
+  }
+
+  // Get the ground height using multi-point sampling
+  private getGroundLevel(world: VoxelWorld): number {
+    const footY = this.camera.position.y - this.currentEyeHeight;
+    const scanY = footY + STEP_HEIGHT + 1;
+    const cx = this.camera.position.x;
+    const cz = this.camera.position.z;
+    const hw = PLAYER_HALF_WIDTH - 0.01;
+
+    // Sample 5 points: center + 4 corners
+    let maxGround = -Infinity;
+    const points = [
+      [cx, cz],
+      [cx - hw, cz - hw],
+      [cx + hw, cz - hw],
+      [cx - hw, cz + hw],
+      [cx + hw, cz + hw],
+    ];
+    for (const [sx, sz] of points) {
+      const top = world.getGroundHeightBelow(sx, scanY, sz);
+      const h = top >= 0 ? top + 1 : 0;
+      if (h > maxGround) maxGround = h;
+    }
+    return maxGround;
+  }
+
+  // Check if there's headroom to stand up
+  private canStandUp(world: VoxelWorld): boolean {
+    const footY = this.camera.position.y - this.currentEyeHeight;
+    const cx = this.camera.position.x;
+    const cz = this.camera.position.z;
+    const hw = PLAYER_HALF_WIDTH - 0.01;
+
+    // Check blocks at standing head level
+    const headY = Math.floor(footY + this.standHeight);
+    const points = [
+      [cx, cz],
+      [cx - hw, cz - hw],
+      [cx + hw, cz - hw],
+      [cx - hw, cz + hw],
+      [cx + hw, cz + hw],
+    ];
+    for (const [sx, sz] of points) {
+      if (world.getBlock(Math.floor(sx), headY, Math.floor(sz)) !== 0) return false;
+    }
+    return true;
+  }
+
+  update(delta: number, world: VoxelWorld): void {
     // Capture pre-gravity vertical velocity for landing detection
     const prevVelY = this.velocity.y;
 
     // Sprint state
     const wantsSprint = this.sprintToggleSetting ? this.sprintToggleActive : this.shiftDown;
     this.isSprinting = wantsSprint && this.moveForward && !this.isCrouching && this.onGround && !this.isSliding;
-    this.isCrouching = this.ctrlDown;
+
+    // Crouch with headroom check
+    if (this.ctrlDown) {
+      this.isCrouching = true;
+    } else if (this.isCrouching) {
+      // Only uncrouch if there's headroom
+      if (this.canStandUp(world)) {
+        this.isCrouching = false;
+      }
+    }
 
     // Auto-cancel sprint toggle if player stops or crouches
     if (this.sprintToggleSetting && this.sprintToggleActive && (!this.moveForward || this.isCrouching)) {
@@ -316,14 +488,51 @@ export class FPSControls {
       this.horizontalSpeed = Math.sqrt(this.hVelX * this.hVelX + this.hVelZ * this.hVelZ);
     }
 
-    // Apply horizontal velocity
-    this.camera.position.x += this.hVelX * delta;
-    this.camera.position.z += this.hVelZ * delta;
+    // Apply horizontal velocity with collision detection
+    this.moveWithCollision(this.hVelX * delta, this.hVelZ * delta, world);
 
     // Variable gravity
     const grav = this.velocity.y > 0 ? this.gravityAscending : this.gravity;
     this.velocity.y += grav * delta;
     this.camera.position.y += this.velocity.y * delta;
+
+    // Ceiling collision
+    this.checkCeiling(world);
+
+    // Wall climbing: hold space while airborne and against a wall
+    if (!this.onGround && this.spaceHeld && this.isAgainstWall(world)) {
+      this.isClimbing = true;
+      this.velocity.y = WALL_CLIMB_SPEED;
+      // Wall friction on horizontal movement
+      this.hVelX *= 0.9;
+      this.hVelZ *= 0.9;
+    } else {
+      this.isClimbing = false;
+    }
+
+    // Mantle: when climbing and head clears the wall top, boost onto the ledge
+    if (this.isClimbing) {
+      const footY = this.camera.position.y - this.currentEyeHeight;
+      const playerHeight = this.isCrouching ? this.crouchHeight : this.standHeight;
+      const headBlockY = Math.floor(footY + playerHeight);
+      const footBlockY = Math.floor(footY);
+
+      // Check if head is clear but feet are at block level (at the top of the wall)
+      const headClear = world.getBlock(
+        Math.floor(this.camera.position.x), headBlockY, Math.floor(this.camera.position.z)
+      ) === 0;
+      const feetAtBlock = world.getBlock(
+        Math.floor(this.camera.position.x), footBlockY, Math.floor(this.camera.position.z)
+      ) !== 0;
+
+      if (headClear && feetAtBlock) {
+        // Mantle: place player on top of the block
+        this.camera.position.y = footBlockY + 1 + this.currentEyeHeight;
+        this.velocity.y = 1;
+        this.isClimbing = false;
+        this.onGround = true;
+      }
+    }
 
     // Coyote time
     if (this.onGround) {
@@ -340,8 +549,8 @@ export class FPSControls {
       }
     }
 
-    // Ground collision
-    const groundHeight = getHeight(this.camera.position.x, this.camera.position.z) + this.currentEyeHeight;
+    // Ground collision (Y-aware)
+    const groundHeight = this.getGroundLevel(world) + this.currentEyeHeight;
     const wasOnGround = this.onGround;
 
     this.justLanded = false;

@@ -7,6 +7,8 @@ import { VFX } from './VFX';
 import { WeaponModel } from './WeaponModel';
 import { PostFX } from './PostFX';
 import { PhysicsSystem } from './PhysicsSystem';
+import { ProjectileManager } from './ProjectileManager';
+import type { ProjectileImpact } from './ProjectileManager';
 import type { DbConnection } from '../module_bindings';
 import type { GameSettings } from '../store';
 
@@ -45,6 +47,7 @@ export class Engine {
   private weaponModel: WeaponModel;
   private postfx: PostFX;
   private physics: PhysicsSystem;
+  private projectileManager: ProjectileManager;
 
   // Lighting
   private sun: THREE.DirectionalLight;
@@ -62,6 +65,7 @@ export class Engine {
   private mouseDown = false;
   private lastPositionUpdate = 0;
   private otherPlayers: Map<string, THREE.Group> = new Map();
+  private localIdentity: string | null = null;
   private health = 100;
   private kills = 0;
   private deaths = 0;
@@ -75,10 +79,12 @@ export class Engine {
     container: HTMLElement,
     conn: DbConnection | null,
     onStateChange: (state: EngineState) => void,
+    localIdentity: string | null = null,
   ) {
     this.container = container;
     this.conn = conn;
     this.onStateChange = onStateChange;
+    this.localIdentity = localIdentity;
     this.clock = new THREE.Clock();
 
     const w = container.clientWidth;
@@ -161,6 +167,12 @@ export class Engine {
 
     // ── Physics ──
     this.physics = new PhysicsSystem(this.scene, this.world, this.vfx, this.audio);
+
+    // ── Projectiles ──
+    this.projectileManager = new ProjectileManager(
+      this.scene, this.world, this.weapons, this.vfx, this.otherPlayers,
+      (impact) => this.handleProjectileImpact(impact),
+    );
 
     // ── Weapon Model ──
     this.weaponModel = new WeaponModel(w / h);
@@ -245,15 +257,25 @@ export class Engine {
     const isShotgun = result.weaponIndex === 1;
     const isRPG = result.weaponIndex === 2;
 
-    // Audio
+    // Audio (always plays on fire)
     if (isRifle) this.audio.playRifle();
     else if (isShotgun) this.audio.playShotgun();
     else if (isRPG) this.audio.playRPGLaunch();
 
-    // VFX
+    // Muzzle flash + shake + recoil (always)
     this.vfx.emitMuzzleFlash();
     this.vfx.shake(isRPG ? 1.5 : isShotgun ? 0.8 : 0.3);
     this.weaponModel.triggerRecoil(WEAPONS[result.weaponIndex].recoil);
+
+    if (result.isProjectile) {
+      // ── PROJECTILE PATH ──
+      // Spawn projectile, sync fire (ammo deduction only, no hits)
+      this.projectileManager.spawnLocal(result.weaponIndex, result.origin, result.direction);
+      this.syncFireToServer(result);
+      return;
+    }
+
+    // ── HITSCAN PATH (unchanged) ──
 
     // Tracer (rifle)
     if (isRifle && result.tracerEnd) {
@@ -311,6 +333,54 @@ export class Engine {
     this.world.rebuildDirtyChunks(this.scene);
   }
 
+  /** Handle projectile impact (called by ProjectileManager when a local projectile hits) */
+  private handleProjectileImpact(impact: ProjectileImpact): void {
+    const w = WEAPONS[impact.weaponIndex];
+
+    // Audio
+    this.audio.playBlockBreak();
+    if (w.radius > 0) {
+      setTimeout(() => this.audio.playExplosion(), 80);
+    }
+
+    // Hit marker
+    if (impact.destroyedBlocks.length > 0 || impact.hitPlayerIds.length > 0) {
+      this.hitMarkerTimer = 0.2;
+    }
+
+    // Block debris VFX (cap for perf)
+    const blocks = impact.destroyedBlocks;
+    const max = 15;
+    const sampled = blocks.length > max
+      ? blocks.sort(() => Math.random() - 0.5).slice(0, max) : blocks;
+    for (const b of sampled) {
+      this.vfx.emitBlockDebris(b.x, b.y, b.z, BLOCK_COLORS[b.blockType] || 0x808080);
+    }
+
+    // Impact + explosion VFX
+    this.vfx.emitImpact(impact.hitPos.x, impact.hitPos.y, impact.hitPos.z);
+    if (w.radius > 0) {
+      this.vfx.emitExplosion(impact.hitPos.x, impact.hitPos.y, impact.hitPos.z, w.radius);
+    }
+
+    // Physics: falling blocks + explosion force
+    const fallen = this.physics.checkFalling(impact.destroyedBlocks);
+    if (fallen.length > 0) this.syncPhysicsBlocksToServer(fallen);
+
+    if (w.radius > 0) {
+      this.physics.applyExplosionForce(
+        impact.hitPos.x, impact.hitPos.y, impact.hitPos.z,
+        w.radius * 2, w.damage * 1.5,
+      );
+    }
+
+    // Rebuild affected chunks
+    this.world.rebuildDirtyChunks(this.scene);
+
+    // Server sync: projectile impact
+    this.syncImpactToServer(impact);
+  }
+
   // ── SERVER SYNC ──
 
   private syncDestroyedBlocks(): void {
@@ -353,6 +423,32 @@ export class Engine {
     });
   }
 
+  /** Send projectile impact to server for damage/block validation */
+  private syncImpactToServer(impact: ProjectileImpact): void {
+    if (!this.conn) return;
+
+    // Convert hex player IDs to Identity objects
+    const hitPlayerIdentities: any[] = [];
+    for (const hexId of impact.hitPlayerIds) {
+      for (const p of this.conn.db.player.iter()) {
+        if ((p as any).identity.toHexString() === hexId) {
+          hitPlayerIdentities.push((p as any).identity);
+          break;
+        }
+      }
+    }
+
+    this.conn.reducers.projectileImpact({
+      shotOrigin: { x: impact.origin.x, y: impact.origin.y, z: impact.origin.z },
+      impactPos: { x: impact.hitPos.x, y: impact.hitPos.y, z: impact.hitPos.z },
+      direction: { x: impact.direction.x, y: impact.direction.y, z: impact.direction.z },
+      weapon: impact.weaponIndex,
+      travelTimeMs: Math.round(impact.travelTimeMs),
+      hitPlayers: hitPlayerIdentities,
+      hitBlocks: impact.destroyedBlocks.map((b) => ({ x: b.x, y: b.y, z: b.z })),
+    });
+  }
+
   private setupServerListeners(): void {
     if (!this.conn) return;
 
@@ -373,11 +469,8 @@ export class Engine {
     // Player tracking
     this.conn.db.player.onUpdate((_ctx: unknown, _old: unknown, player: any) => {
       const id = player.identity.toHexString();
-      const myId = this.conn ? Array.from(this.conn.db.player.iter()).find(
-        (p: any) => p.username && p.online,
-      )?.identity.toHexString() : null;
 
-      if (myId && id === myId) {
+      if (this.localIdentity && id === this.localIdentity) {
         const oldHealth = this.health;
         this.health = player.health;
         this.kills = player.kills;
@@ -398,8 +491,47 @@ export class Engine {
       }
     });
 
+    this.conn.db.player.onInsert((_ctx: unknown, player: any) => {
+      const id = player.identity.toHexString();
+      if (id === this.localIdentity) return;
+      if (player.online) {
+        this.updateOtherPlayer(id, player.pos, player.rot, player.username);
+      }
+    });
+
     this.conn.db.player.onDelete((_ctx: unknown, player: any) => {
       this.removeOtherPlayer(player.identity.toHexString());
+    });
+
+    // Render players already online when Engine starts
+    for (const player of this.conn.db.player.iter()) {
+      const id = (player as any).identity.toHexString();
+      if (id === this.localIdentity) continue;
+      if ((player as any).online && (player as any).username) {
+        this.updateOtherPlayer(id, (player as any).pos, (player as any).rot, (player as any).username);
+      }
+    }
+
+    // Remote shot events: render tracers or spawn projectiles for other players
+    this.conn.db.shot_event.onInsert((_ctx: unknown, shot: any) => {
+      const shooterId = shot.shooter.toHexString();
+      if (shooterId === this.localIdentity) return; // Skip our own shots
+
+      const weaponIdx = shot.weapon as number;
+      const w = WEAPONS[weaponIdx];
+      if (!w) return;
+
+      const origin = new THREE.Vector3(shot.origin.x, shot.origin.y, shot.origin.z);
+      const dir = new THREE.Vector3(shot.direction.x, shot.direction.y, shot.direction.z);
+
+      if (isFinite(w.projectile.speed)) {
+        // Projectile weapon: spawn flying projectile
+        this.projectileManager.spawnRemote(weaponIdx, origin, dir, performance.now());
+      } else {
+        // Hitscan: render instant tracer
+        const end = origin.clone().add(dir.clone().normalize().multiplyScalar(80));
+        this.vfx.emitTracer(origin, end, parseInt(w.color.replace('#', ''), 16));
+      }
     });
 
     // Server-authoritative ammo sync
@@ -415,10 +547,7 @@ export class Engine {
   private syncAmmoFromServer(state: any): void {
     if (!this.conn) return;
     // Only sync our own weapon state
-    const myId = Array.from(this.conn.db.player.iter()).find(
-      (p: any) => p.username && p.online,
-    )?.identity.toHexString();
-    if (!myId || state.identity.toHexString() !== myId) return;
+    if (!this.localIdentity || state.identity.toHexString() !== this.localIdentity) return;
 
     // Update local weapon ammo from server state
     WEAPONS[0].ammo = state.ammoRifle;
@@ -467,7 +596,11 @@ export class Engine {
 
   // ── HELPERS ──
 
-  private getGroundHeight(x: number, z: number): number {
+  private getGroundHeight(x: number, z: number, footY?: number): number {
+    if (footY !== undefined) {
+      const top = this.world.getGroundHeightBelow(x, footY, z);
+      return top >= 0 ? top + 1 : 0;
+    }
     const top = this.world.getHighestBlock(x, z);
     return top >= 0 ? top + 1 : 0;
   }
@@ -506,7 +639,7 @@ export class Engine {
     }
 
     // Update systems
-    this.controls.update(delta, (x, z) => this.getGroundHeight(x, z));
+    this.controls.update(delta, this.world);
 
     // Landing impact effects
     if (this.controls.justLanded) {
@@ -545,6 +678,9 @@ export class Engine {
       this.syncPhysicsBlocksToServer(pendingSync);
       this.world.rebuildDirtyChunks(this.scene);
     }
+
+    // Projectiles
+    this.projectileManager.update(delta);
 
     // VFX
     this.vfx.update(delta);
@@ -651,6 +787,7 @@ export class Engine {
     window.removeEventListener('resize', this.onResize);
     this.controls.dispose();
     this.vfx.dispose();
+    this.projectileManager.dispose();
     this.physics.dispose();
     this.weaponModel.dispose();
     this.postfx.dispose();

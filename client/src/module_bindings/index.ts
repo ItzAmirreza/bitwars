@@ -37,6 +37,7 @@ import {
 import CleanupShotsReducer from "./cleanup_shots_reducer";
 import DestroyBlocksPhysicsReducer from "./destroy_blocks_physics_reducer";
 import FireWeaponReducer from "./fire_weapon_reducer";
+import ProjectileImpactReducer from "./projectile_impact_reducer";
 import ReloadWeaponReducer from "./reload_weapon_reducer";
 import RespawnReducer from "./respawn_reducer";
 import SendChatReducer from "./send_chat_reducer";
@@ -130,6 +131,7 @@ const reducersSchema = __reducers(
   __reducerSchema("cleanup_shots", CleanupShotsReducer),
   __reducerSchema("destroy_blocks_physics", DestroyBlocksPhysicsReducer),
   __reducerSchema("fire_weapon", FireWeaponReducer),
+  __reducerSchema("projectile_impact", ProjectileImpactReducer),
   __reducerSchema("reload_weapon", ReloadWeaponReducer),
   __reducerSchema("respawn", RespawnReducer),
   __reducerSchema("send_chat", SendChatReducer),

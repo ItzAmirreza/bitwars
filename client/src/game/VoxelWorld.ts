@@ -113,6 +113,17 @@ export class VoxelWorld {
     return -1;
   }
 
+  /** Highest solid block Y at (x,z) at or below footY. Returns -1 if none. */
+  getGroundHeightBelow(x: number, footY: number, z: number): number {
+    const bx = Math.floor(x), bz = Math.floor(z);
+    if (bx < 0 || bx >= this.sizeX || bz < 0 || bz >= this.sizeZ) return -1;
+    const startY = Math.min(Math.floor(footY), this.sizeY - 1);
+    for (let y = startY; y >= 0; y--) {
+      if (this.getBlock(bx, y, bz) !== 0) return y;
+    }
+    return -1;
+  }
+
   // ── Chunk system ──
 
   private chunkIdx(cx: number, cy: number, cz: number): number {

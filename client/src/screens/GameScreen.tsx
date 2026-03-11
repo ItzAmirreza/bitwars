@@ -13,7 +13,7 @@ const WEAPON_DATA = [
 export function GameScreen() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
-  const { connection, setScreen, settings, showSettings, setShowSettings } = useGameStore();
+  const { connection, setScreen, settings, showSettings, setShowSettings, identity } = useGameStore();
 
   const [state, setState] = useState<EngineState>({
     weapon: 0,
@@ -34,7 +34,7 @@ export function GameScreen() {
     const container = canvasRef.current;
     if (!container || engineRef.current) return;
 
-    engineRef.current = new Engine(container, connection, setState);
+    engineRef.current = new Engine(container, connection, setState, identity);
     engineRef.current.updateSettings(settings);
 
     return () => {
