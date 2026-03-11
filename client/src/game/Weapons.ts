@@ -12,25 +12,34 @@ export interface Weapon {
   recoil: number;
 }
 
+// Client-side weapon stats (used for prediction/VFX only — server is authority for damage/ammo)
 export const WEAPONS: Weapon[] = [
-  { name: 'Rifle',   damage: 1,  radius: 0,   fireRate: 5,   ammo: 30, maxAmmo: 30, color: '#4488ff', recoil: 0.02 },
-  { name: 'Shotgun', damage: 3,  radius: 1.5, fireRate: 1,   ammo: 8,  maxAmmo: 8,  color: '#ff8844', recoil: 0.06 },
-  { name: 'RPG',     damage: 10, radius: 3.5, fireRate: 0.5, ammo: 4,  maxAmmo: 4,  color: '#ff4444', recoil: 0.1  },
+  { name: 'Rifle',   damage: 25, radius: 0,   fireRate: 5,   ammo: 30, maxAmmo: 30, color: '#4488ff', recoil: 0.02 },
+  { name: 'Shotgun', damage: 12, radius: 1.5, fireRate: 1,   ammo: 8,  maxAmmo: 8,  color: '#ff8844', recoil: 0.06 },
+  { name: 'RPG',     damage: 80, radius: 3.5, fireRate: 0.5, ammo: 4,  maxAmmo: 4,  color: '#ff4444', recoil: 0.1  },
 ];
 
-/** Result of a weapon fire — used by Engine to trigger VFX/audio */
+/** Result of a weapon fire — used by Engine to trigger VFX/audio and server sync */
 export interface FireResult {
   weaponIndex: number;
   hitPos: { x: number; y: number; z: number } | null;
   destroyedBlocks: { x: number; y: number; z: number; blockType: number }[];
   tracerEnd: THREE.Vector3;
+  hitPlayerIds: string[];
+  origin: THREE.Vector3;
+  direction: THREE.Vector3;
 }
+
+// Player hitbox: axis-aligned bounding box (width 0.6, height 1.9, centered at feet+0.95)
+const PLAYER_HITBOX_HALF_W = 0.4;
+const PLAYER_HITBOX_HEIGHT = 1.9;
 
 export class WeaponSystem {
   currentWeapon = 0;
   private lastFireTime = 0;
   private camera: THREE.PerspectiveCamera;
   private world: VoxelWorld;
+  private otherPlayers: Map<string, THREE.Group> = new Map();
 
   constructor(camera: THREE.PerspectiveCamera, world: VoxelWorld) {
     this.camera = camera;
@@ -46,6 +55,11 @@ export class WeaponSystem {
       if (e.code === 'Digit2') this.switchTo(1);
       if (e.code === 'Digit3') this.switchTo(2);
     });
+  }
+
+  /** Set reference to other players map for hit detection */
+  setOtherPlayers(players: Map<string, THREE.Group>): void {
+    this.otherPlayers = players;
   }
 
   get weapon(): Weapon { return WEAPONS[this.currentWeapon]; }
@@ -64,11 +78,16 @@ export class WeaponSystem {
     return this.currentWeapon;
   }
 
+  /** Update ammo from server state */
+  setAmmo(ammo: number): void {
+    this.weapon.ammo = ammo;
+  }
+
   /**
    * Fire the current weapon. Returns a FireResult if fired,
    * or null if on cooldown / no ammo.
-   * Block destruction is applied to the world — caller handles
-   * VFX, audio, and server sync.
+   * Block destruction is applied to the local world (client prediction).
+   * Caller handles VFX, audio, and server sync.
    */
   fire(): FireResult | null {
     const now = performance.now();
@@ -77,7 +96,7 @@ export class WeaponSystem {
     if (this.weapon.ammo <= 0) return null;
 
     this.lastFireTime = now;
-    this.weapon.ammo--;
+    this.weapon.ammo--; // Client prediction — server is authority
 
     // Raycast from camera center
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
@@ -116,6 +135,9 @@ export class WeaponSystem {
       }
     }
 
+    // Player hit detection: AABB raycast against other players
+    const hitPlayerIds = this.raycastPlayers(origin, dir);
+
     // Recoil (camera) — use YXZ euler to match FPSControls and avoid yaw drift
     const recoilEuler = new THREE.Euler(0, 0, 0, 'YXZ');
     recoilEuler.setFromQuaternion(this.camera.quaternion);
@@ -128,11 +150,64 @@ export class WeaponSystem {
       hitPos: hit,
       destroyedBlocks: destroyed,
       tracerEnd,
+      hitPlayerIds,
+      origin,
+      direction: dir,
     };
   }
 
   reload(): void {
+    // Client-side prediction only; actual reload goes through server
     this.weapon.ammo = this.weapon.maxAmmo;
+  }
+
+  /** Raycast against other players' AABB hitboxes, return hit player IDs */
+  private raycastPlayers(origin: THREE.Vector3, direction: THREE.Vector3): string[] {
+    const maxRange = this.weapon.radius > 0 ? 80 : 80; // all weapons max 80
+    const hitIds: string[] = [];
+
+    for (const [id, group] of this.otherPlayers) {
+      // Player model position is at feet level
+      const pos = group.position;
+      // AABB: center at (pos.x, pos.y + height/2, pos.z)
+      const minX = pos.x - PLAYER_HITBOX_HALF_W;
+      const maxX = pos.x + PLAYER_HITBOX_HALF_W;
+      const minY = pos.y;
+      const maxY = pos.y + PLAYER_HITBOX_HEIGHT;
+      const minZ = pos.z - PLAYER_HITBOX_HALF_W;
+      const maxZ = pos.z + PLAYER_HITBOX_HALF_W;
+
+      const t = this.rayAABB(origin, direction, minX, minY, minZ, maxX, maxY, maxZ);
+      if (t !== null && t >= 0 && t <= maxRange) {
+        hitIds.push(id);
+      }
+    }
+
+    return hitIds;
+  }
+
+  /** Ray-AABB intersection test, returns t (distance along ray) or null */
+  private rayAABB(
+    origin: THREE.Vector3, dir: THREE.Vector3,
+    minX: number, minY: number, minZ: number,
+    maxX: number, maxY: number, maxZ: number,
+  ): number | null {
+    const invX = dir.x !== 0 ? 1 / dir.x : (dir.x >= 0 ? Infinity : -Infinity);
+    const invY = dir.y !== 0 ? 1 / dir.y : (dir.y >= 0 ? Infinity : -Infinity);
+    const invZ = dir.z !== 0 ? 1 / dir.z : (dir.z >= 0 ? Infinity : -Infinity);
+
+    const t1 = (minX - origin.x) * invX;
+    const t2 = (maxX - origin.x) * invX;
+    const t3 = (minY - origin.y) * invY;
+    const t4 = (maxY - origin.y) * invY;
+    const t5 = (minZ - origin.z) * invZ;
+    const t6 = (maxZ - origin.z) * invZ;
+
+    const tmin = Math.max(Math.min(t1, t2), Math.min(t3, t4), Math.min(t5, t6));
+    const tmax = Math.min(Math.max(t1, t2), Math.max(t3, t4), Math.max(t5, t6));
+
+    if (tmax < 0 || tmin > tmax) return null;
+    return tmin >= 0 ? tmin : tmax;
   }
 
   private raycastVoxels(

@@ -35,10 +35,9 @@ import {
 
 // Import all reducer arg schemas
 import CleanupShotsReducer from "./cleanup_shots_reducer";
-import DestroyBlockReducer from "./destroy_block_reducer";
-import DestroyBlocksReducer from "./destroy_blocks_reducer";
+import DestroyBlocksPhysicsReducer from "./destroy_blocks_physics_reducer";
 import FireWeaponReducer from "./fire_weapon_reducer";
-import HitPlayerReducer from "./hit_player_reducer";
+import ReloadWeaponReducer from "./reload_weapon_reducer";
 import RespawnReducer from "./respawn_reducer";
 import SendChatReducer from "./send_chat_reducer";
 import SetUsernameReducer from "./set_username_reducer";
@@ -50,6 +49,8 @@ import UpdatePositionReducer from "./update_position_reducer";
 import ChatMessageRow from "./chat_message_table";
 import DestroyedBlockRow from "./destroyed_block_table";
 import PlayerRow from "./player_table";
+import PlayerMovementRow from "./player_movement_table";
+import PlayerWeaponStateRow from "./player_weapon_state_table";
 import ShotEventRow from "./shot_event_table";
 
 /** Type-only namespace exports for generated type groups. */
@@ -89,6 +90,28 @@ const tablesSchema = __schema({
       { name: 'player_identity_key', constraint: 'unique', columns: ['identity'] },
     ],
   }, PlayerRow),
+  player_movement: __table({
+    name: 'player_movement',
+    indexes: [
+      { name: 'identity', algorithm: 'btree', columns: [
+        'identity',
+      ] },
+    ],
+    constraints: [
+      { name: 'player_movement_identity_key', constraint: 'unique', columns: ['identity'] },
+    ],
+  }, PlayerMovementRow),
+  player_weapon_state: __table({
+    name: 'player_weapon_state',
+    indexes: [
+      { name: 'identity', algorithm: 'btree', columns: [
+        'identity',
+      ] },
+    ],
+    constraints: [
+      { name: 'player_weapon_state_identity_key', constraint: 'unique', columns: ['identity'] },
+    ],
+  }, PlayerWeaponStateRow),
   shot_event: __table({
     name: 'shot_event',
     indexes: [
@@ -105,10 +128,9 @@ const tablesSchema = __schema({
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("cleanup_shots", CleanupShotsReducer),
-  __reducerSchema("destroy_block", DestroyBlockReducer),
-  __reducerSchema("destroy_blocks", DestroyBlocksReducer),
+  __reducerSchema("destroy_blocks_physics", DestroyBlocksPhysicsReducer),
   __reducerSchema("fire_weapon", FireWeaponReducer),
-  __reducerSchema("hit_player", HitPlayerReducer),
+  __reducerSchema("reload_weapon", ReloadWeaponReducer),
   __reducerSchema("respawn", RespawnReducer),
   __reducerSchema("send_chat", SendChatReducer),
   __reducerSchema("set_username", SetUsernameReducer),

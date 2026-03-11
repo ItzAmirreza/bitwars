@@ -151,6 +151,7 @@ export class Engine {
 
     // ── Weapons ──
     this.weapons = new WeaponSystem(this.camera, this.world);
+    this.weapons.setOtherPlayers(this.otherPlayers);
 
     // ── Audio ──
     this.audio = new AudioSystem();
@@ -216,7 +217,12 @@ export class Engine {
     if (e.button === 0) this.mouseDown = false;
   };
   private onKeyDown = (e: KeyboardEvent): void => {
-    if (e.code === 'KeyR') { this.weapons.reload(); this.audio.playReload(); }
+    if (e.code === 'KeyR') {
+      this.weapons.reload(); // Client prediction
+      this.audio.playReload();
+      // Server-authoritative reload
+      if (this.conn) this.conn.reducers.reloadWeapon({});
+    }
     if (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3') {
       const idx = parseInt(e.code.charAt(5)) - 1;
       if (idx !== this.lastWeaponIndex) {
@@ -280,12 +286,17 @@ export class Engine {
       }
     }
 
-    // Server sync destroyed blocks
-    this.syncDestroyedToServer(result.destroyedBlocks);
+    // Player hit marker
+    if (result.hitPlayerIds.length > 0) {
+      this.hitMarkerTimer = 0.2;
+    }
+
+    // Server sync: unified fire_weapon reducer with hit players and blocks
+    this.syncFireToServer(result);
 
     // Physics: check for falling blocks above
     const fallen = this.physics.checkFalling(result.destroyedBlocks);
-    if (fallen.length > 0) this.syncDestroyedToServer(fallen);
+    if (fallen.length > 0) this.syncPhysicsBlocksToServer(fallen);
 
     // Apply explosion force to falling blocks
     if (result.hitPos && WEAPONS[result.weaponIndex].radius > 0) {
@@ -309,16 +320,37 @@ export class Engine {
     }
   }
 
-  private syncDestroyedToServer(blocks: { x: number; y: number; z: number }[]): void {
-    if (!this.conn || blocks.length === 0) return;
-    if (blocks.length === 1) {
-      const b = blocks[0];
-      this.conn.reducers.destroyBlock({ x: b.x, y: b.y, z: b.z });
-    } else {
-      this.conn.reducers.destroyBlocks({
-        blocks: blocks.map((b) => ({ x: b.x, y: b.y, z: b.z })),
-      });
+  /** Send fire event to server with hit players and destroyed blocks */
+  private syncFireToServer(result: { weaponIndex: number; destroyedBlocks: { x: number; y: number; z: number }[]; hitPlayerIds: string[]; origin: THREE.Vector3; direction: THREE.Vector3 }): void {
+    if (!this.conn) return;
+
+    // Convert hex player IDs to Identity objects
+    const hitPlayerIdentities: any[] = [];
+    for (const hexId of result.hitPlayerIds) {
+      // Find the player in the DB by matching hex identity
+      for (const p of this.conn.db.player.iter()) {
+        if ((p as any).identity.toHexString() === hexId) {
+          hitPlayerIdentities.push((p as any).identity);
+          break;
+        }
+      }
     }
+
+    this.conn.reducers.fireWeapon({
+      origin: { x: result.origin.x, y: result.origin.y, z: result.origin.z },
+      direction: { x: result.direction.x, y: result.direction.y, z: result.direction.z },
+      weapon: result.weaponIndex,
+      hitPlayers: hitPlayerIdentities,
+      hitBlocks: result.destroyedBlocks.map((b) => ({ x: b.x, y: b.y, z: b.z })),
+    });
+  }
+
+  /** Sync physics-triggered block destruction (falling, cascades) */
+  private syncPhysicsBlocksToServer(blocks: { x: number; y: number; z: number }[]): void {
+    if (!this.conn || blocks.length === 0) return;
+    this.conn.reducers.destroyBlocksPhysics({
+      blocks: blocks.map((b) => ({ x: b.x, y: b.y, z: b.z })),
+    });
   }
 
   private setupServerListeners(): void {
@@ -332,7 +364,7 @@ export class Engine {
 
         // Falling blocks from remote destruction
         const fallen = this.physics.checkFalling([block]);
-        if (fallen.length > 0) this.syncDestroyedToServer(fallen);
+        if (fallen.length > 0) this.syncPhysicsBlocksToServer(fallen);
 
         this.world.rebuildDirtyChunks(this.scene);
       }
@@ -369,6 +401,29 @@ export class Engine {
     this.conn.db.player.onDelete((_ctx: unknown, player: any) => {
       this.removeOtherPlayer(player.identity.toHexString());
     });
+
+    // Server-authoritative ammo sync
+    this.conn.db.player_weapon_state.onInsert((_ctx: unknown, state: any) => {
+      this.syncAmmoFromServer(state);
+    });
+    this.conn.db.player_weapon_state.onUpdate((_ctx: unknown, _old: unknown, state: any) => {
+      this.syncAmmoFromServer(state);
+    });
+  }
+
+  /** Update local ammo from server weapon state */
+  private syncAmmoFromServer(state: any): void {
+    if (!this.conn) return;
+    // Only sync our own weapon state
+    const myId = Array.from(this.conn.db.player.iter()).find(
+      (p: any) => p.username && p.online,
+    )?.identity.toHexString();
+    if (!myId || state.identity.toHexString() !== myId) return;
+
+    // Update local weapon ammo from server state
+    WEAPONS[0].ammo = state.ammoRifle;
+    WEAPONS[1].ammo = state.ammoShotgun;
+    WEAPONS[2].ammo = state.ammoRpg;
   }
 
   // ── OTHER PLAYERS ──
@@ -487,7 +542,7 @@ export class Engine {
     // Sync blocks that fell from deferred structural checks
     const pendingSync = this.physics.getPendingSync();
     if (pendingSync.length > 0) {
-      this.syncDestroyedToServer(pendingSync);
+      this.syncPhysicsBlocksToServer(pendingSync);
       this.world.rebuildDirtyChunks(this.scene);
     }
 
@@ -561,7 +616,7 @@ export class Engine {
       this.camera.updateProjectionMatrix();
     }
 
-    // Push state to HUD
+    // Push state to HUD (use server ammo for current weapon)
     const wp = WEAPONS[this.weapons.currentWeapon];
     const pc = this.conn
       ? Array.from(this.conn.db.player.iter()).filter((p: any) => p.online).length : 1;

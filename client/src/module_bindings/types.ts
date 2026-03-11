@@ -48,6 +48,25 @@ export const Player = __t.object("Player", {
 });
 export type Player = __Infer<typeof Player>;
 
+export const PlayerMovementState = __t.object("PlayerMovementState", {
+  identity: __t.identity(),
+  get lastPos() {
+    return Vec3;
+  },
+  lastUpdate: __t.timestamp(),
+  violationCount: __t.u32(),
+});
+export type PlayerMovementState = __Infer<typeof PlayerMovementState>;
+
+export const PlayerWeaponState = __t.object("PlayerWeaponState", {
+  identity: __t.identity(),
+  ammoRifle: __t.i32(),
+  ammoShotgun: __t.i32(),
+  ammoRpg: __t.i32(),
+  lastFireTime: __t.timestamp(),
+});
+export type PlayerWeaponState = __Infer<typeof PlayerWeaponState>;
+
 export const Rotation = __t.object("Rotation", {
   yaw: __t.f32(),
   pitch: __t.f32(),

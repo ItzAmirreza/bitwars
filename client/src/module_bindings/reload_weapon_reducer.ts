@@ -10,20 +10,4 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-import {
-  Vec3,
-} from "./types";
-
-export default {
-  get origin() {
-    return Vec3;
-  },
-  get direction() {
-    return Vec3;
-  },
-  weapon: __t.u8(),
-  hitPlayers: __t.array(__t.identity()),
-  get hitBlocks() {
-    return __t.array(Vec3);
-  },
-};
+export default {};

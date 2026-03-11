@@ -9,9 +9,16 @@ import {
   type AlgebraicTypeType as __AlgebraicTypeType,
   type Infer as __Infer,
 } from "spacetimedb";
+import {
+  Vec3,
+} from "./types";
 
-export default {
-  x: __t.i32(),
-  y: __t.i32(),
-  z: __t.i32(),
-};
+
+export default __t.row({
+  identity: __t.identity().primaryKey(),
+  get lastPos() {
+    return Vec3.name("last_pos");
+  },
+  lastUpdate: __t.timestamp().name("last_update"),
+  violationCount: __t.u32().name("violation_count"),
+});

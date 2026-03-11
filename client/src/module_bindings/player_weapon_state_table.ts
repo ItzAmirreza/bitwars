@@ -10,7 +10,10 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export default {
-  targetIdentity: __t.identity(),
-  damage: __t.i32(),
-};
+export default __t.row({
+  identity: __t.identity().primaryKey(),
+  ammoRifle: __t.i32().name("ammo_rifle"),
+  ammoShotgun: __t.i32().name("ammo_shotgun"),
+  ammoRpg: __t.i32().name("ammo_rpg"),
+  lastFireTime: __t.timestamp().name("last_fire_time"),
+});

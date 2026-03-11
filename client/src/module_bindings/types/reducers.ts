@@ -7,20 +7,18 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import CleanupShotsReducer from "../cleanup_shots_reducer";
-import DestroyBlockReducer from "../destroy_block_reducer";
-import DestroyBlocksReducer from "../destroy_blocks_reducer";
+import DestroyBlocksPhysicsReducer from "../destroy_blocks_physics_reducer";
 import FireWeaponReducer from "../fire_weapon_reducer";
-import HitPlayerReducer from "../hit_player_reducer";
+import ReloadWeaponReducer from "../reload_weapon_reducer";
 import RespawnReducer from "../respawn_reducer";
 import SendChatReducer from "../send_chat_reducer";
 import SetUsernameReducer from "../set_username_reducer";
 import UpdatePositionReducer from "../update_position_reducer";
 
 export type CleanupShotsParams = __Infer<typeof CleanupShotsReducer>;
-export type DestroyBlockParams = __Infer<typeof DestroyBlockReducer>;
-export type DestroyBlocksParams = __Infer<typeof DestroyBlocksReducer>;
+export type DestroyBlocksPhysicsParams = __Infer<typeof DestroyBlocksPhysicsReducer>;
 export type FireWeaponParams = __Infer<typeof FireWeaponReducer>;
-export type HitPlayerParams = __Infer<typeof HitPlayerReducer>;
+export type ReloadWeaponParams = __Infer<typeof ReloadWeaponReducer>;
 export type RespawnParams = __Infer<typeof RespawnReducer>;
 export type SendChatParams = __Infer<typeof SendChatReducer>;
 export type SetUsernameParams = __Infer<typeof SetUsernameReducer>;
