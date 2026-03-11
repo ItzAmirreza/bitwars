@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 
 /**
- * Fullscreen shader overlay for screen effects:
- * - Atmospheric dark vignette (always on)
- * - Red damage pulse with chromatic-style distortion
- * - Speed lines hint when moving fast
+ * Fullscreen shader overlay for warzone screen effects:
+ * - Moody dark vignette with amber tint
+ * - Red damage pulse with distortion
+ * - Animated film grain
+ * - Subtle dust haze
+ * - Faint scanlines
  */
 
 const VERTEX = /* glsl */ `
@@ -21,40 +23,50 @@ uniform float uTime;
 
 varying vec2 vUv;
 
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
 void main() {
     vec2 uv = vUv;
     vec2 center = uv - 0.5;
     float dist = length(center) * 2.0;
 
-    // ── Base atmospheric vignette ──
-    float baseVignette = smoothstep(0.5, 1.5, dist);
-    float baseAlpha = baseVignette * 0.25;
-    vec3 baseColor = vec3(0.0);
+    // ── Warzone vignette — wider, darker, with slight amber tint ──
+    float vignette = smoothstep(0.3, 1.6, dist);
+    vec3 vignetteColor = vec3(0.03, 0.02, 0.01) * vignette;
+    float vignetteAlpha = vignette * 0.45;
 
-    // ── Damage red pulse ──
+    // ── Subtle dust haze overlay ──
+    float haze = 0.015 + 0.008 * sin(uTime * 0.25 + uv.x * 4.0) * cos(uTime * 0.18 + uv.y * 3.0);
+    haze += 0.005 * sin(uTime * 0.4 + uv.y * 6.0);
+    vec3 hazeColor = vec3(0.12, 0.10, 0.07);
+
+    // ── Damage red pulse (enhanced) ──
     float dmg = uDamage;
-    float pulse = 0.75 + 0.25 * sin(uTime * 18.0);
-    float damageRing = smoothstep(0.15, 0.9, dist) * dmg * pulse;
+    float pulse = 0.7 + 0.3 * sin(uTime * 20.0);
+    float damageRing = smoothstep(0.1, 0.85, dist) * dmg * pulse;
 
-    // Slight warping at edges when damaged
-    float warp = dmg * 0.012 * dist;
+    // Edge warping when damaged
+    float warp = dmg * 0.015 * dist;
     vec2 warpedUv = center * (1.0 + warp) + 0.5;
     float warpDist = length(warpedUv - 0.5) * 2.0;
-    float edgeDistort = smoothstep(0.6, 1.0, warpDist) * dmg * 0.3;
+    float edgeDistort = smoothstep(0.5, 1.0, warpDist) * dmg * 0.35;
 
-    // Combine
-    vec3 damageColor = vec3(0.9, 0.05, 0.02) * damageRing;
-    float damageAlpha = damageRing * 0.65 + edgeDistort;
+    vec3 damageColor = vec3(0.95, 0.05, 0.0) * damageRing;
+    float damageAlpha = damageRing * 0.7 + edgeDistort;
 
-    // Final
-    vec3 color = baseColor + damageColor;
-    float alpha = baseAlpha + damageAlpha;
+    // ── Film grain — animated ──
+    float grain = hash(uv * 500.0 + fract(uTime * 7.13)) * 0.07 - 0.035;
 
-    // Grain noise for texture
-    float grain = fract(sin(dot(uv * uTime * 0.1, vec2(12.9898, 78.233))) * 43758.5453);
-    alpha += grain * 0.015;
+    // ── Faint scanlines ──
+    float scanline = sin(uv.y * 900.0) * 0.006;
 
-    gl_FragColor = vec4(color, clamp(alpha, 0.0, 0.85));
+    // ── Combine ──
+    vec3 color = vignetteColor + damageColor + hazeColor * haze;
+    float alpha = vignetteAlpha + damageAlpha + haze + abs(grain) * 0.5 + scanline;
+
+    gl_FragColor = vec4(color, clamp(alpha, 0.0, 0.88));
 }
 `;
 
@@ -63,6 +75,7 @@ export class PostFX {
   private camera: THREE.OrthographicCamera;
   private material: THREE.ShaderMaterial;
   private damageAmount = 0;
+  enabled = true;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -95,6 +108,7 @@ export class PostFX {
   }
 
   render(renderer: THREE.WebGLRenderer): void {
+    if (!this.enabled) return;
     renderer.render(this.scene, this.camera);
   }
 

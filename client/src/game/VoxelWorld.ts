@@ -5,18 +5,29 @@ import * as THREE from 'three';
 export const CHUNK = 16;
 
 export const BlockType = {
-  Air: 0, Dirt: 1, Stone: 2, Grass: 3, Sand: 4, Wood: 5, Brick: 6, Leaves: 7,
+  Air: 0,
+  Concrete: 1,
+  DarkConcrete: 2,
+  Asphalt: 3,
+  Rebar: 4,
+  Brick: 5,
+  Metal: 6,
+  Rubble: 7,
+  Dirt: 8,
+  Sand: 9,
 } as const;
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
 
 export const BLOCK_COLORS: Record<number, number> = {
-  [BlockType.Dirt]: 0x8b6914,
-  [BlockType.Stone]: 0x808080,
-  [BlockType.Grass]: 0x4a8c2a,
-  [BlockType.Sand]: 0xc2b280,
-  [BlockType.Wood]: 0x6b4226,
-  [BlockType.Brick]: 0x8b4513,
-  [BlockType.Leaves]: 0x2d6b1e,
+  [BlockType.Concrete]: 0x7a7a78,
+  [BlockType.DarkConcrete]: 0x5a5a58,
+  [BlockType.Asphalt]: 0x2a2a2e,
+  [BlockType.Rebar]: 0x8b4513,
+  [BlockType.Brick]: 0x6b3a2a,
+  [BlockType.Metal]: 0x4a4e52,
+  [BlockType.Rubble]: 0x6a6258,
+  [BlockType.Dirt]: 0x5a4e3a,
+  [BlockType.Sand]: 0x9a8e72,
 };
 
 // ── Noise helpers ──
@@ -134,7 +145,11 @@ export class VoxelWorld {
           // Build new
           const m = this.buildChunkMesh(cx, cy, cz);
           this.meshes[i] = m;
-          if (m) scene.add(m);
+          if (m) {
+            m.castShadow = true;
+            m.receiveShadow = true;
+            scene.add(m);
+          }
           this.dirty[i] = false;
         }
       }
@@ -155,14 +170,17 @@ export class VoxelWorld {
         for (let z = z0; z < z1; z++) {
           const b = this.getBlock(x, y, z);
           if (b === 0) continue;
-          c.setHex(BLOCK_COLORS[b] || 0xffffff);
+          c.setHex(BLOCK_COLORS[b] || 0x808080);
+
+          // Subtle per-block color variation for gritty feel
+          const variation = (hash2d(x * 7 + y, z * 13 + y) - 0.5) * 0.06;
+          c.r = Math.max(0, Math.min(1, c.r + variation));
+          c.g = Math.max(0, Math.min(1, c.g + variation));
+          c.b = Math.max(0, Math.min(1, c.b + variation));
+
           if (this.getBlock(x + 1, y, z) === 0) addFace(pos, nrm, col, c, x + 1, y, z, 0);
           if (this.getBlock(x - 1, y, z) === 0) addFace(pos, nrm, col, c, x, y, z, 1);
-          if (this.getBlock(x, y + 1, z) === 0) {
-            const tc = b === BlockType.Grass ? new THREE.Color(0x5ca03a)
-                     : b === BlockType.Leaves ? new THREE.Color(0x3a8a28) : c;
-            addFace(pos, nrm, col, tc, x, y + 1, z, 2);
-          }
+          if (this.getBlock(x, y + 1, z) === 0) addFace(pos, nrm, col, c, x, y + 1, z, 2);
           if (this.getBlock(x, y - 1, z) === 0) addFace(pos, nrm, col, c, x, y, z, 3);
           if (this.getBlock(x, y, z + 1) === 0) addFace(pos, nrm, col, c, x, y, z + 1, 4);
           if (this.getBlock(x, y, z - 1) === 0) addFace(pos, nrm, col, c, x, y, z, 5);
@@ -182,171 +200,472 @@ export class VoxelWorld {
   // ── Terrain generation ──
 
   generateTerrain(): void {
-    // Phase 1: heightmap
+    // Phase 1: base terrain — flat urban warzone
     for (let x = 0; x < this.sizeX; x++) {
       for (let z = 0; z < this.sizeZ; z++) {
         const h = this.heightAt(x, z);
         for (let y = 0; y <= h; y++) {
           let bt: number;
-          if (y === 0) bt = BlockType.Stone;
-          else if (y < h - 3) bt = BlockType.Stone;
-          else if (y < h) bt = BlockType.Dirt;
-          else bt = h <= 5 ? BlockType.Sand : BlockType.Grass;
+          if (y <= 1) bt = BlockType.DarkConcrete;
+          else if (y < h - 1) bt = BlockType.Concrete;
+          else bt = BlockType.Asphalt;
           this.setBlock(x, y, z, bt);
         }
       }
     }
-    // Phase 2: trees
-    for (let x = 3; x < this.sizeX - 3; x++) {
-      for (let z = 3; z < this.sizeZ - 3; z++) {
-        if (this.getBlock(x, this.heightAt(x, z), z) !== BlockType.Grass) continue;
-        if (hash2d(x * 31 + 17, z * 17 + 31) < 0.025) {
-          this.buildTree(x, this.heightAt(x, z), z);
-        }
-      }
-    }
-    // Phase 3: structures
+
+    // Phase 2: roads
+    this.buildRoads();
+
+    // Phase 3: craters
+    this.buildCraters();
+
+    // Phase 4: structures
     this.placeStructures();
+
+    // Phase 5: rubble piles
+    this.buildRubblePiles();
+
+    // Phase 6: barricades/cover
+    this.buildBarricades();
+
+    // Phase 7: vehicle husks
+    this.buildVehicles();
   }
 
   heightAt(x: number, z: number): number {
     const nx = x / this.sizeX, nz = z / this.sizeZ;
-    let h = fbm(nx * 4 + 0.5, nz * 4 + 0.5) * 10;
-    h += fbm(nx * 2 + 100, nz * 2 + 100) * 6;
-    // Mountains near edges
-    const edge = Math.min(x, z, this.sizeX - 1 - x, this.sizeZ - 1 - z) / 30;
+    // Much flatter terrain
+    let h = 4 + fbm(nx * 3 + 0.5, nz * 3 + 0.5) * 3;
+    h += fbm(nx * 6 + 50, nz * 6 + 50) * 1.5;
+
+    // Slight elevation near edges (rubble mounds)
+    const edge = Math.min(x, z, this.sizeX - 1 - x, this.sizeZ - 1 - z) / 20;
     const ef = 1 - Math.min(1, edge);
-    h += ef * ef * fbm(nx * 1.5 + 200, nz * 1.5 + 200) * 16;
+    h += ef * ef * 4;
+
     // Flat spawn area
     const dx = x - this.sizeX / 2, dz = z - this.sizeZ / 2;
     const cd = Math.sqrt(dx * dx + dz * dz);
-    if (cd < 22) h = lrp(7, h, sm(cd / 22));
-    return Math.floor(Math.max(2, Math.min(h + 4, this.sizeY - 10)));
+    if (cd < 18) h = lrp(5, h, sm(cd / 18));
+
+    return Math.floor(Math.max(2, Math.min(h, 12)));
   }
 
-  // ── Structure builders ──
+  // ── Roads ──
 
-  private buildTree(x: number, gy: number, z: number): void {
-    const th = 4 + Math.floor(hash2d(x * 13 + 7, z * 7 + 13) * 3);
-    for (let y = 1; y <= th; y++) this.setBlock(x, gy + y, z, BlockType.Wood);
-    const cy = gy + th;
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dy = -1; dy <= 2; dy++) {
-        for (let dz = -2; dz <= 2; dz++) {
-          if (dx === 0 && dz === 0 && dy <= 0) continue;
-          if (Math.abs(dx) + Math.abs(dz) + Math.max(0, dy) > 3) continue;
-          if (hash2d((x + dx) * 7 + dy, (z + dz) * 11) < 0.15) continue;
-          const bx = x + dx, by = cy + dy, bz = z + dz;
-          if (this.getBlock(bx, by, bz) === 0) this.setBlock(bx, by, bz, BlockType.Leaves);
+  private buildRoads(): void {
+    const roadPositions = [40, 64, 88]; // N-S and E-W roads
+    const roadWidth = 3;
+
+    for (const rx of roadPositions) {
+      for (let z = 0; z < this.sizeZ; z++) {
+        for (let w = -Math.floor(roadWidth / 2); w <= Math.floor(roadWidth / 2); w++) {
+          const x = rx + w;
+          if (x < 0 || x >= this.sizeX) continue;
+          const h = this.heightAt(x, z);
+          this.setBlock(x, h, z, BlockType.Asphalt);
+          // Road markings (center line)
+          if (w === 0 && z % 8 < 4) {
+            this.setBlock(x, h, z, BlockType.Sand); // faded yellow marking
+          }
+        }
+      }
+    }
+
+    for (const rz of roadPositions) {
+      for (let x = 0; x < this.sizeX; x++) {
+        for (let w = -Math.floor(roadWidth / 2); w <= Math.floor(roadWidth / 2); w++) {
+          const z = rz + w;
+          if (z < 0 || z >= this.sizeZ) continue;
+          const h = this.heightAt(x, z);
+          this.setBlock(x, h, z, BlockType.Asphalt);
+          if (w === 0 && x % 8 < 4) {
+            this.setBlock(x, h, z, BlockType.Sand);
+          }
         }
       }
     }
   }
 
-  private buildHouse(ox: number, oy: number, oz: number, w = 5, d = 5, h = 4): void {
-    for (let x = 0; x < w; x++) {
-      for (let y = 0; y < h; y++) {
-        for (let z = 0; z < d; z++) {
-          const wall = x === 0 || x === w - 1 || z === 0 || z === d - 1;
-          const roof = y === h - 1;
-          const door = x === Math.floor(w / 2) && z === 0 && y < 2;
-          if (door) continue;
-          if (roof) this.setBlock(ox + x, oy + y, oz + z, BlockType.Wood);
-          else if (wall) this.setBlock(ox + x, oy + y, oz + z, BlockType.Brick);
+  // ── Craters ──
+
+  private buildCraters(): void {
+    const craters = [
+      [25, 55, 5], [70, 30, 4], [45, 85, 6], [95, 60, 5],
+      [55, 45, 3], [80, 95, 4], [30, 105, 5], [105, 40, 4],
+      [60, 75, 6], [15, 80, 3], [90, 15, 4], [50, 110, 5],
+    ];
+
+    for (const [cx, cz, r] of craters) {
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dz = -r; dz <= r; dz++) {
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist > r) continue;
+          const x = cx + dx, z = cz + dz;
+          if (x < 0 || x >= this.sizeX || z < 0 || z >= this.sizeZ) continue;
+
+          const depth = Math.floor((1 - dist / r) * (r * 0.6));
+          const surfaceH = this.heightAt(x, z);
+
+          // Dig crater
+          for (let y = surfaceH; y > Math.max(1, surfaceH - depth); y--) {
+            this.setBlock(x, y, z, BlockType.Air);
+          }
+
+          // Crater floor
+          const floorY = Math.max(1, surfaceH - depth);
+          this.setBlock(x, floorY, z, dist < r * 0.6 ? BlockType.Dirt : BlockType.Rubble);
+
+          // Rim: slight buildup
+          if (dist > r * 0.7 && dist <= r) {
+            this.setBlock(x, surfaceH + 1, z, BlockType.Rubble);
+          }
         }
       }
     }
   }
 
-  private buildTower(ox: number, oy: number, oz: number, h = 10): void {
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < 4; x++) {
-        for (let z = 0; z < 4; z++) {
-          const wall = x === 0 || x === 3 || z === 0 || z === 3;
-          if (wall) this.setBlock(ox + x, oy + y, oz + z, BlockType.Stone);
-        }
-      }
-    }
-    // Platform top
-    for (let x = -1; x <= 4; x++) {
-      for (let z = -1; z <= 4; z++) {
-        this.setBlock(ox + x, oy + h, oz + z, BlockType.Stone);
-      }
-    }
-    // Battlements
-    for (let x = -1; x <= 4; x++) {
-      for (let z = -1; z <= 4; z++) {
-        const edge = x === -1 || x === 4 || z === -1 || z === 4;
-        if (edge && (x + z) % 2 === 0) this.setBlock(ox + x, oy + h + 1, oz + z, BlockType.Stone);
-      }
-    }
-  }
-
-  private buildFortress(ox: number, oy: number, oz: number): void {
-    const w = 17, d = 17, h = 5;
-    // Walls
-    for (let i = 0; i < w; i++) {
-      for (let j = 0; j < h; j++) {
-        this.setBlock(ox + i, oy + j, oz, BlockType.Brick);
-        this.setBlock(ox + i, oy + j, oz + d - 1, BlockType.Brick);
-        this.setBlock(ox, oy + j, oz + i, BlockType.Brick);
-        this.setBlock(ox + w - 1, oy + j, oz + i, BlockType.Brick);
-      }
-    }
-    // Corner towers
-    const corners = [[0, 0], [w - 1, 0], [0, d - 1], [w - 1, d - 1]];
-    for (const [cx, cz] of corners) {
-      for (let j = 0; j < h + 3; j++) {
-        this.setBlock(ox + cx, oy + j, oz + cz, BlockType.Stone);
-        if (cx > 0) this.setBlock(ox + cx - 1, oy + j, oz + cz, BlockType.Stone);
-        else this.setBlock(ox + cx + 1, oy + j, oz + cz, BlockType.Stone);
-        if (cz > 0) this.setBlock(ox + cx, oy + j, oz + cz - 1, BlockType.Stone);
-        else this.setBlock(ox + cx, oy + j, oz + cz + 1, BlockType.Stone);
-      }
-    }
-    // Gate
-    for (let j = 0; j < 3; j++) {
-      this.setBlock(ox + 8, oy + j, oz, BlockType.Air);
-      this.setBlock(ox + 9, oy + j, oz, BlockType.Air);
-    }
-    // Floor
-    for (let i = 1; i < w - 1; i++) {
-      for (let k = 1; k < d - 1; k++) {
-        if (this.getBlock(ox + i, oy - 1, oz + k) === BlockType.Air) {
-          this.setBlock(ox + i, oy - 1, oz + k, BlockType.Stone);
-        }
-      }
-    }
-  }
-
-  private buildWall(x1: number, y: number, z1: number, x2: number, z2: number, h = 4): void {
-    const dx = Math.sign(x2 - x1), dz = Math.sign(z2 - z1);
-    const len = Math.max(Math.abs(x2 - x1), Math.abs(z2 - z1));
-    for (let i = 0; i <= len; i++) {
-      const bx = x1 + dx * i, bz = z1 + dz * i;
-      for (let j = 0; j < h; j++) {
-        this.setBlock(bx, y + j, bz, BlockType.Brick);
-      }
-    }
-  }
+  // ── Structures ──
 
   private placeStructures(): void {
-    const hAt = (x: number, z: number) => this.heightAt(x, z);
-    // Houses
-    const houses = [[30, 40], [90, 30], [40, 100], [100, 90], [70, 50], [55, 80], [85, 70]];
-    for (const [x, z] of houses) {
-      if (x < this.sizeX && z < this.sizeZ) this.buildHouse(x, hAt(x, z) + 1, z);
+    // Ruined buildings
+    this.buildRuinedBuilding(20, 25, 8, 8, 3);
+    this.buildRuinedBuilding(48, 55, 10, 8, 4);
+    this.buildRuinedBuilding(75, 20, 7, 7, 2);
+    this.buildRuinedBuilding(95, 50, 9, 6, 3);
+    this.buildRuinedBuilding(35, 90, 8, 10, 4);
+    this.buildRuinedBuilding(100, 85, 6, 8, 2);
+    this.buildRuinedBuilding(15, 65, 7, 6, 3);
+    this.buildRuinedBuilding(70, 100, 10, 10, 3);
+    this.buildRuinedBuilding(55, 30, 6, 6, 2);
+    this.buildRuinedBuilding(110, 110, 8, 7, 3);
+
+    // Bombed towers
+    this.buildBombedTower(28, 45, 14);
+    this.buildBombedTower(85, 35, 12);
+    this.buildBombedTower(42, 110, 16);
+    this.buildBombedTower(105, 70, 10);
+    this.buildBombedTower(18, 100, 13);
+
+    // Central command post
+    this.buildCommandPost(54, 54);
+  }
+
+  private buildRuinedBuilding(ox: number, oz: number, w: number, d: number, floors: number): void {
+    const baseY = this.heightAt(ox, oz);
+    const storyH = 4;
+    const totalH = floors * storyH;
+
+    for (let x = 0; x < w; x++) {
+      for (let z = 0; z < d; z++) {
+        for (let y = 0; y < totalH; y++) {
+          const bx = ox + x, bz = oz + z, by = baseY + 1 + y;
+          if (bx >= this.sizeX || bz >= this.sizeZ || by >= this.sizeY) continue;
+
+          const isWall = x === 0 || x === w - 1 || z === 0 || z === d - 1;
+          const isFloor = y > 0 && y % storyH === 0;
+          const isDoor = (x === Math.floor(w / 2) || x === Math.floor(w / 2) + 1) && z === 0 && y < 3;
+
+          // Destruction: random holes in walls and floors
+          const destructionChance = hash2d(bx * 17 + by, bz * 31 + by);
+
+          if (isDoor) continue;
+
+          if (isFloor && !isWall) {
+            // Floor slab with holes
+            if (destructionChance > 0.25) {
+              this.setBlock(bx, by, bz, BlockType.Concrete);
+            }
+          } else if (isWall) {
+            // Wall with damage holes (30% missing in upper floors)
+            const dmgThreshold = y > storyH * 2 ? 0.30 : y > storyH ? 0.18 : 0.08;
+            if (destructionChance > dmgThreshold) {
+              this.setBlock(bx, by, bz, destructionChance > 0.85 ? BlockType.Brick : BlockType.Concrete);
+            } else if (y > totalH - 3) {
+              // Exposed rebar at damaged edges
+              if (hash2d(bx * 3, bz * 5 + by) > 0.5) {
+                this.setBlock(bx, by, bz, BlockType.Rebar);
+              }
+            }
+          }
+        }
+      }
     }
-    // Towers
-    const towers = [[20, 20], [110, 110], [25, 100], [105, 20], [60, 115]];
-    for (const [x, z] of towers) {
-      if (x + 4 < this.sizeX && z + 4 < this.sizeZ) this.buildTower(x, hAt(x, z) + 1, z, 8 + Math.floor(hash2d(x, z) * 4));
+
+    // Rubble around base
+    for (let dx = -2; dx <= w + 1; dx++) {
+      for (let dz = -2; dz <= d + 1; dz++) {
+        const bx = ox + dx, bz = oz + dz;
+        if (bx < 0 || bx >= this.sizeX || bz < 0 || bz >= this.sizeZ) continue;
+        if (dx >= 0 && dx < w && dz >= 0 && dz < d) continue; // skip interior
+        if (hash2d(bx * 19, bz * 23) < 0.35) {
+          const by = this.heightAt(bx, bz) + 1;
+          if (by < this.sizeY) {
+            this.setBlock(bx, by, bz, BlockType.Rubble);
+            if (hash2d(bx * 7, bz * 11) < 0.2 && by + 1 < this.sizeY) {
+              this.setBlock(bx, by + 1, bz, BlockType.Rubble);
+            }
+          }
+        }
+      }
     }
-    // Fortress
-    this.buildFortress(78, hAt(85, 85) + 1, 78);
-    // Walls
-    this.buildWall(48, hAt(48, 22) + 1, 22, 68, 22, 4);
-    this.buildWall(22, hAt(22, 48) + 1, 48, 22, 68, 4);
+  }
+
+  private buildBombedTower(ox: number, oz: number, height: number): void {
+    const baseY = this.heightAt(ox, oz);
+    const tw = 5;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < tw; x++) {
+        for (let z = 0; z < tw; z++) {
+          const bx = ox + x, bz = oz + z, by = baseY + 1 + y;
+          if (bx >= this.sizeX || bz >= this.sizeZ || by >= this.sizeY) continue;
+
+          const isWall = x === 0 || x === tw - 1 || z === 0 || z === tw - 1;
+          if (!isWall) continue;
+
+          // Top section is jagged/destroyed
+          if (y > height - 4) {
+            const keep = hash2d(bx * 13 + y, bz * 7 + y);
+            if (keep < 0.4) continue; // 40% destroyed at top
+            this.setBlock(bx, by, bz, keep > 0.8 ? BlockType.Rebar : BlockType.Concrete);
+          } else {
+            // One side partially collapsed
+            const collapseChance = (x === 0 && y > height / 2) ? 0.35 : 0.05;
+            if (hash2d(bx * 11 + y, bz * 17) > collapseChance) {
+              this.setBlock(bx, by, bz, BlockType.Concrete);
+            }
+          }
+        }
+      }
+    }
+
+    // Platform at bottom and mid
+    for (let x = 0; x < tw; x++) {
+      for (let z = 0; z < tw; z++) {
+        const bx = ox + x, bz = oz + z;
+        if (bx >= this.sizeX || bz >= this.sizeZ) continue;
+        this.setBlock(bx, baseY + 1, bz, BlockType.DarkConcrete);
+        if (baseY + 1 + Math.floor(height / 2) < this.sizeY) {
+          this.setBlock(bx, baseY + 1 + Math.floor(height / 2), bz, BlockType.Concrete);
+        }
+      }
+    }
+  }
+
+  private buildCommandPost(ox: number, oz: number): void {
+    const baseY = this.heightAt(ox + 10, oz + 10);
+    const w = 20, d = 20, h = 6;
+
+    // Thick walls (2 blocks)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        for (let z = 0; z < d; z++) {
+          const bx = ox + x, bz = oz + z, by = baseY + 1 + y;
+          if (bx >= this.sizeX || bz >= this.sizeZ || by >= this.sizeY) continue;
+
+          const outerWall = x === 0 || x === w - 1 || z === 0 || z === d - 1;
+          const innerWall = x === 1 || x === w - 2 || z === 1 || z === d - 2;
+          const isRoof = y === h - 1;
+          const isFloor = y === 0;
+
+          // Gates
+          const isGate = (x >= 8 && x <= 11) && z === 0 && y < 4;
+          const isBackGate = (x >= 8 && x <= 11) && z === d - 1 && y < 4;
+          if (isGate || isBackGate) continue;
+
+          if (isFloor) {
+            this.setBlock(bx, by, bz, BlockType.DarkConcrete);
+          } else if (isRoof && x > 1 && x < w - 2 && z > 1 && z < d - 2) {
+            // Partially destroyed roof
+            if (hash2d(bx * 11, bz * 13) > 0.3) {
+              this.setBlock(bx, by, bz, BlockType.Concrete);
+            }
+          } else if (outerWall) {
+            const dmg = hash2d(bx * 7 + y, bz * 11);
+            if (dmg > 0.12) {
+              this.setBlock(bx, by, bz, BlockType.Concrete);
+            }
+          } else if (innerWall && (x <= 1 || x >= w - 2 || z <= 1 || z >= d - 2)) {
+            this.setBlock(bx, by, bz, BlockType.Concrete);
+          }
+        }
+      }
+    }
+
+    // Corner watchtower positions
+    const corners = [[0, 0], [w - 4, 0], [0, d - 4], [w - 4, d - 4]];
+    for (const [cx, cz] of corners) {
+      for (let y = 0; y < h + 3; y++) {
+        for (let x = 0; x < 4; x++) {
+          for (let z = 0; z < 4; z++) {
+            const bx = ox + cx + x, bz = oz + cz + z, by = baseY + 1 + y;
+            if (bx >= this.sizeX || bz >= this.sizeZ || by >= this.sizeY) continue;
+            const isEdge = x === 0 || x === 3 || z === 0 || z === 3;
+            if (isEdge) {
+              this.setBlock(bx, by, bz, BlockType.DarkConcrete);
+            }
+            // Platform at top
+            if (y === h + 2) {
+              this.setBlock(bx, by, bz, BlockType.Concrete);
+            }
+          }
+        }
+      }
+    }
+
+    // Sandbag perimeter outside
+    for (let x = -2; x <= w + 1; x++) {
+      for (let z = -2; z <= d + 1; z++) {
+        if (x >= 0 && x < w && z >= 0 && z < d) continue;
+        const bx = ox + x, bz = oz + z;
+        if (bx < 0 || bx >= this.sizeX || bz < 0 || bz >= this.sizeZ) continue;
+        if (hash2d(bx * 23, bz * 29) < 0.3) {
+          const by = this.heightAt(bx, bz) + 1;
+          if (by < this.sizeY) {
+            this.setBlock(bx, by, bz, BlockType.Sand);
+            if (hash2d(bx * 3, bz * 5) < 0.5 && by + 1 < this.sizeY) {
+              this.setBlock(bx, by + 1, bz, BlockType.Sand);
+            }
+          }
+        }
+      }
+    }
+
+    // Interior dividing walls
+    for (let y = 0; y < 3; y++) {
+      for (let z = 3; z < d - 3; z++) {
+        const bx = ox + 10, bz = oz + z, by = baseY + 2 + y;
+        if (bx < this.sizeX && bz < this.sizeZ && by < this.sizeY) {
+          if (z !== 9 && z !== 10) { // door gap
+            this.setBlock(bx, by, bz, BlockType.Concrete);
+          }
+        }
+      }
+    }
+  }
+
+  // ── Rubble piles ──
+
+  private buildRubblePiles(): void {
+    const piles = [
+      [12, 35], [38, 15], [72, 45], [55, 70], [95, 25],
+      [25, 80], [80, 60], [45, 105], [110, 45], [65, 15],
+      [32, 60], [90, 100], [50, 50], [15, 115], [105, 95],
+      [42, 42], [78, 78], [60, 95], [20, 50],
+    ];
+
+    for (const [cx, cz] of piles) {
+      if (cx >= this.sizeX || cz >= this.sizeZ) continue;
+      const radius = 2 + Math.floor(hash2d(cx, cz) * 3);
+      const height = 2 + Math.floor(hash2d(cx * 3, cz * 7) * 3);
+
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dz = -radius; dz <= radius; dz++) {
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist > radius) continue;
+          const x = cx + dx, z = cz + dz;
+          if (x < 0 || x >= this.sizeX || z < 0 || z >= this.sizeZ) continue;
+
+          const py = Math.floor(height * (1 - dist / radius));
+          const baseH = this.heightAt(x, z);
+
+          for (let y = 1; y <= py; y++) {
+            const by = baseH + y;
+            if (by >= this.sizeY) break;
+            const r = hash2d(x * 11 + y, z * 17);
+            const bt = r < 0.4 ? BlockType.Rubble
+              : r < 0.6 ? BlockType.Concrete
+              : r < 0.75 ? BlockType.Rebar
+              : r < 0.9 ? BlockType.Brick
+              : BlockType.DarkConcrete;
+            this.setBlock(x, by, z, bt);
+          }
+        }
+      }
+    }
+  }
+
+  // ── Barricades/cover ──
+
+  private buildBarricades(): void {
+    const barricades: [number, number, number, number, boolean][] = [
+      // [x, z, length, height, isNS]
+      [30, 35, 5, 2, false],
+      [75, 55, 4, 3, true],
+      [50, 25, 6, 2, false],
+      [95, 75, 4, 2, true],
+      [20, 90, 5, 3, false],
+      [65, 65, 3, 2, true],
+      [110, 55, 4, 2, false],
+      [40, 75, 5, 2, true],
+      [85, 105, 6, 3, false],
+      [55, 15, 4, 2, true],
+      [100, 30, 3, 2, false],
+      [25, 55, 5, 2, true],
+    ];
+
+    for (const [ox, oz, len, h, isNS] of barricades) {
+      for (let i = 0; i < len; i++) {
+        const x = isNS ? ox : ox + i;
+        const z = isNS ? oz + i : oz;
+        if (x >= this.sizeX || z >= this.sizeZ) continue;
+        const baseH = this.heightAt(x, z);
+
+        for (let y = 1; y <= h; y++) {
+          const by = baseH + y;
+          if (by >= this.sizeY) break;
+          const isSandbag = hash2d(x * 5 + y, z * 9) > 0.4;
+          this.setBlock(x, by, z, isSandbag ? BlockType.Sand : BlockType.Concrete);
+        }
+      }
+    }
+  }
+
+  // ── Vehicle husks ──
+
+  private buildVehicles(): void {
+    const vehicles: [number, number, number, number, number, boolean][] = [
+      // [x, z, w, h, d, flipped]
+      [42, 40, 4, 2, 2, false],  // car on road
+      [63, 42, 4, 2, 2, false],  // car near intersection
+      [88, 62, 6, 3, 3, false],  // truck
+      [39, 88, 4, 2, 2, true],   // flipped car
+      [86, 90, 4, 2, 2, false],  // car
+      [66, 88, 6, 3, 3, false],  // truck
+      [40, 63, 4, 2, 2, false],  // car at intersection
+      [110, 65, 4, 2, 2, true],  // flipped
+    ];
+
+    for (const [ox, oz, vw, vh, vd, flipped] of vehicles) {
+      const baseH = this.heightAt(ox, oz);
+
+      if (flipped) {
+        // Flipped on side
+        for (let x = 0; x < vw; x++) {
+          for (let y = 0; y < vd; y++) {
+            for (let z = 0; z < vh; z++) {
+              const bx = ox + x, bz = oz + z, by = baseH + 1 + y;
+              if (bx >= this.sizeX || bz >= this.sizeZ || by >= this.sizeY) continue;
+              const isShell = x === 0 || x === vw - 1 || y === 0 || y === vd - 1 || z === 0 || z === vh - 1;
+              if (isShell) this.setBlock(bx, by, bz, BlockType.Metal);
+            }
+          }
+        }
+      } else {
+        for (let x = 0; x < vw; x++) {
+          for (let y = 0; y < vh; y++) {
+            for (let z = 0; z < vd; z++) {
+              const bx = ox + x, bz = oz + z, by = baseH + 1 + y;
+              if (bx >= this.sizeX || bz >= this.sizeZ || by >= this.sizeY) continue;
+              const isShell = x === 0 || x === vw - 1 || y === 0 || y === vh - 1 || z === 0 || z === vd - 1;
+              if (isShell) this.setBlock(bx, by, bz, BlockType.Metal);
+            }
+          }
+        }
+      }
+    }
   }
 
   // ── Cleanup ──

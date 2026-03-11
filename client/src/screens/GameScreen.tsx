@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Engine } from '../game/Engine';
 import type { EngineState } from '../game/Engine';
 import { useGameStore } from '../store';
+import { SettingsPanel } from './SettingsPanel';
 
 const WEAPON_DATA = [
   { name: 'RIFLE', key: '1', color: 'var(--c-blue)' },
@@ -12,7 +13,7 @@ const WEAPON_DATA = [
 export function GameScreen() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
-  const { connection, setScreen } = useGameStore();
+  const { connection, setScreen, settings, showSettings, setShowSettings } = useGameStore();
 
   const [state, setState] = useState<EngineState>({
     weapon: 0,
@@ -34,6 +35,7 @@ export function GameScreen() {
     if (!container || engineRef.current) return;
 
     engineRef.current = new Engine(container, connection, setState);
+    engineRef.current.updateSettings(settings);
 
     return () => {
       if (engineRef.current) {
@@ -43,6 +45,28 @@ export function GameScreen() {
     };
   }, [connection]);
 
+  // Sync settings to engine when they change
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.updateSettings(settings);
+    }
+  }, [settings]);
+
+  // Escape key toggles settings
+  const handleEscape = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.code === 'Escape') {
+        setShowSettings(!showSettings);
+      }
+    },
+    [showSettings, setShowSettings],
+  );
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [handleEscape]);
+
   const handleLeave = () => setScreen('lobby');
   const healthColor = state.health > 50 ? 'var(--c-green)' : state.health > 25 ? 'var(--c-amber)' : 'var(--c-red)';
 
@@ -50,6 +74,9 @@ export function GameScreen() {
     <div className="flex flex-col h-full relative">
       {/* Game Canvas */}
       <div ref={canvasRef} className="absolute inset-0" />
+
+      {/* Settings Panel */}
+      {showSettings && <SettingsPanel />}
 
       {/* ═══ HUD OVERLAY ═══ */}
 
@@ -61,29 +88,56 @@ export function GameScreen() {
             background: 'linear-gradient(180deg, rgba(6,8,16,0.7) 0%, transparent 100%)',
           }}
         >
-          <button
-            onClick={handleLeave}
-            className="pointer-events-auto cursor-pointer px-3 py-1"
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '10px',
-              color: 'var(--c-muted)',
-              background: 'rgba(6,8,16,0.6)',
-              border: '1px solid var(--c-border)',
-              letterSpacing: '0.1em',
-              transition: 'all 0.2s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'var(--c-red)';
-              e.currentTarget.style.color = 'var(--c-red)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'var(--c-border)';
-              e.currentTarget.style.color = 'var(--c-muted)';
-            }}
-          >
-            [ESC] EXIT
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleLeave}
+              className="pointer-events-auto cursor-pointer px-3 py-1"
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: '10px',
+                color: 'var(--c-muted)',
+                background: 'rgba(6,8,16,0.6)',
+                border: '1px solid var(--c-border)',
+                letterSpacing: '0.1em',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'var(--c-red)';
+                e.currentTarget.style.color = 'var(--c-red)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'var(--c-border)';
+                e.currentTarget.style.color = 'var(--c-muted)';
+              }}
+            >
+              [ESC] EXIT
+            </button>
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className="pointer-events-auto cursor-pointer px-3 py-1"
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: '10px',
+                color: showSettings ? 'var(--c-green)' : 'var(--c-muted)',
+                background: 'rgba(6,8,16,0.6)',
+                border: `1px solid ${showSettings ? 'var(--c-green)' : 'var(--c-border)'}`,
+                letterSpacing: '0.1em',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'var(--c-green)';
+                e.currentTarget.style.color = 'var(--c-green)';
+              }}
+              onMouseLeave={(e) => {
+                if (!showSettings) {
+                  e.currentTarget.style.borderColor = 'var(--c-border)';
+                  e.currentTarget.style.color = 'var(--c-muted)';
+                }
+              }}
+            >
+              SETTINGS
+            </button>
+          </div>
 
           <div className="flex items-center gap-4">
             <span
@@ -146,7 +200,7 @@ export function GameScreen() {
       )}
 
       {/* Click to play overlay */}
-      {!state.locked && (
+      {!state.locked && !showSettings && (
         <div
           className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer"
           onClick={() => canvasRef.current?.requestPointerLock()}
@@ -187,6 +241,11 @@ export function GameScreen() {
                 <span><span style={{ color: 'var(--c-text)' }}>SPACE</span> JUMP</span>
                 <span><span style={{ color: 'var(--c-text)' }}>R</span> RELOAD</span>
                 <span><span style={{ color: 'var(--c-text)' }}>1-3</span> WEAPONS</span>
+              </div>
+              <div className="flex justify-center gap-8">
+                <span><span style={{ color: 'var(--c-text)' }}>SHIFT</span> SPRINT</span>
+                <span><span style={{ color: 'var(--c-text)' }}>CTRL</span> CROUCH</span>
+                <span><span style={{ color: 'var(--c-text)' }}>ESC</span> SETTINGS</span>
               </div>
             </div>
           </div>

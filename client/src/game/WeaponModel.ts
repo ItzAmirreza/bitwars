@@ -13,6 +13,8 @@ export class WeaponModel {
   private current = 0;
   private bobTime = 0;
   private isMoving = false;
+  private isSprinting = false;
+  private isCrouching = false;
 
   // Recoil
   private recoilZ = 0;
@@ -199,20 +201,27 @@ export class WeaponModel {
     this.recoilRot = -amount * 3;
   }
 
-  setMoving(moving: boolean): void {
+  setMoving(moving: boolean, sprinting = false, crouching = false): void {
     this.isMoving = moving;
+    this.isSprinting = sprinting;
+    this.isCrouching = crouching;
   }
 
   update(delta: number): void {
-    // ── Bob ──
-    if (this.isMoving) {
-      this.bobTime += delta * 10;
-    } else {
-      this.bobTime += delta * 1.5; // Idle sway
-    }
+    // ── Bob — varies with movement state ──
+    const bobSpeed = this.isSprinting ? 14 : this.isCrouching ? 6 : this.isMoving ? 10 : 1.5;
+    this.bobTime += delta * bobSpeed;
 
-    const bobY = this.isMoving ? Math.sin(this.bobTime) * 0.012 : Math.sin(this.bobTime) * 0.003;
-    const bobX = this.isMoving ? Math.cos(this.bobTime * 0.5) * 0.006 : 0;
+    let bobY: number, bobX: number;
+    if (this.isMoving) {
+      const ampY = this.isSprinting ? 0.018 : this.isCrouching ? 0.006 : 0.012;
+      const ampX = this.isSprinting ? 0.01 : this.isCrouching ? 0.003 : 0.006;
+      bobY = Math.sin(this.bobTime) * ampY;
+      bobX = Math.cos(this.bobTime * 0.5) * ampX;
+    } else {
+      bobY = Math.sin(this.bobTime) * 0.003;
+      bobX = 0;
+    }
 
     // ── Recoil decay ──
     this.recoilZ *= Math.max(0, 1 - delta * 18);

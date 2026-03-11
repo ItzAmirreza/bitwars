@@ -382,6 +382,12 @@ export class AudioSystem {
     sub.stop(t + 0.08);
   }
 
+  setMasterVolume(volume: number): void {
+    if (this.master) {
+      this.master.gain.value = Math.max(0, Math.min(1, volume));
+    }
+  }
+
   dispose(): void {
     if (this.ctx) {
       this.ctx.close();

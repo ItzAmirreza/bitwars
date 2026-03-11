@@ -8,6 +8,7 @@ import { WeaponModel } from './WeaponModel';
 import { PostFX } from './PostFX';
 import { PhysicsSystem } from './PhysicsSystem';
 import type { DbConnection } from '../module_bindings';
+import type { GameSettings } from '../store';
 
 // ── World config ──
 const WORLD_X = 128;
@@ -44,6 +45,9 @@ export class Engine {
   private weaponModel: WeaponModel;
   private postfx: PostFX;
   private physics: PhysicsSystem;
+
+  // Lighting
+  private sun: THREE.DirectionalLight;
 
   // State
   private clock: THREE.Clock;
@@ -82,8 +86,11 @@ export class Engine {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
-    this.renderer.shadowMap.enabled = false;
-    this.renderer.setClearColor(0x87ceeb);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.setClearColor(0x3a3836);
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.85;
     container.appendChild(this.renderer.domElement);
 
     // ── Camera ──
@@ -91,13 +98,31 @@ export class Engine {
 
     // ── Scene ──
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x87ceeb, 50, 150);
+    this.scene.fog = new THREE.Fog(0x3a3836, 40, 120);
 
-    // ── Lighting ──
-    this.scene.add(new THREE.AmbientLight(0x606080, 1.2));
-    const sun = new THREE.DirectionalLight(0xfff0d0, 1.5);
-    sun.position.set(40, 60, 40);
-    this.scene.add(sun);
+    // ── Lighting — dramatic warzone atmosphere ──
+    // Hemisphere light: sky/ground color variation
+    const hemiLight = new THREE.HemisphereLight(0x6a6a72, 0x2a2218, 0.6);
+    this.scene.add(hemiLight);
+
+    // Ambient fill
+    this.scene.add(new THREE.AmbientLight(0x404048, 0.4));
+
+    // Directional sun with shadows
+    this.sun = new THREE.DirectionalLight(0xffe0b0, 2.0);
+    this.sun.position.set(50, 80, 30);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 200;
+    this.sun.shadow.camera.left = -80;
+    this.sun.shadow.camera.right = 80;
+    this.sun.shadow.camera.top = 80;
+    this.sun.shadow.camera.bottom = -80;
+    this.sun.shadow.bias = -0.001;
+    this.sun.shadow.normalBias = 0.02;
+    this.scene.add(this.sun);
+    this.scene.add(this.sun.target);
 
     // ── Voxel world (128×48×128) ──
     this.world = new VoxelWorld(WORLD_X, WORLD_Y, WORLD_Z);
@@ -107,10 +132,11 @@ export class Engine {
 
     // ── Ground plane ──
     const groundGeo = new THREE.PlaneGeometry(256, 256);
-    const groundMat = new THREE.MeshLambertMaterial({ color: 0x3a5a2a });
+    const groundMat = new THREE.MeshLambertMaterial({ color: 0x3a3632 });
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(WORLD_X / 2, -0.01, WORLD_Z / 2);
+    ground.receiveShadow = true;
     this.scene.add(ground);
 
     // ── Spawn at world center ──
@@ -149,6 +175,29 @@ export class Engine {
     window.addEventListener('resize', this.onResize);
 
     this.animate();
+  }
+
+  // ── SETTINGS ──
+
+  updateSettings(settings: GameSettings): void {
+    this.controls.sensitivity = settings.sensitivity;
+    this.camera.fov = settings.fov;
+    this.camera.updateProjectionMatrix();
+    this.audio.setMasterVolume(settings.masterVolume);
+    this.sun.castShadow = settings.shadowsEnabled;
+    this.postfx.enabled = settings.postFXEnabled;
+
+    // Graphics quality presets
+    if (settings.graphicsQuality === 'low') {
+      this.renderer.setPixelRatio(1);
+      this.sun.shadow.mapSize.set(512, 512);
+    } else if (settings.graphicsQuality === 'medium') {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+      this.sun.shadow.mapSize.set(1024, 1024);
+    } else {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      this.sun.shadow.mapSize.set(2048, 2048);
+    }
   }
 
   // ── INPUT ──
@@ -318,11 +367,15 @@ export class Engine {
     let group = this.otherPlayers.get(id);
     if (!group) {
       group = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.5, 0.6), new THREE.MeshLambertMaterial({ color: 0xff4444 }));
+      const bodyMat = new THREE.MeshLambertMaterial({ color: 0x8b4444 });
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.5, 0.6), bodyMat);
       body.position.y = 0.75;
+      body.castShadow = true;
       group.add(body);
-      const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), new THREE.MeshLambertMaterial({ color: 0xffccaa }));
+      const headMat = new THREE.MeshLambertMaterial({ color: 0xccaa88 });
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), headMat);
       head.position.y = 1.7;
+      head.castShadow = true;
       group.add(head);
       const canvas = document.createElement('canvas');
       canvas.width = 256; canvas.height = 64;
@@ -403,10 +456,10 @@ export class Engine {
     // VFX
     this.vfx.update(delta);
 
-    // Weapon model
+    // Weapon model — pass sprint/crouch state
     const moving = this.controls.moveForward || this.controls.moveBackward
       || this.controls.moveLeft || this.controls.moveRight;
-    this.weaponModel.setMoving(moving);
+    this.weaponModel.setMoving(moving, this.controls.isSprinting, this.controls.isCrouching);
     this.weaponModel.update(delta);
 
     // PostFX
@@ -422,8 +475,14 @@ export class Engine {
     this.world.rebuildDirtyChunks(this.scene);
 
     // ── RENDER PASSES ──
-    // Apply screen shake to camera just for rendering, then undo
+    // Apply head bob + screen shake to camera just for rendering, then undo
     const savedQuat = this.camera.quaternion.clone();
+    const savedPos = this.camera.position.clone();
+
+    // Head bob offset
+    this.camera.position.y += this.controls.headBobY;
+    this.camera.position.x += this.controls.headBobX;
+
     if (this.vfx.shakeOffsetX !== 0 || this.vfx.shakeOffsetY !== 0) {
       const shakeQuat = new THREE.Quaternion().setFromEuler(
         new THREE.Euler(this.vfx.shakeOffsetX, this.vfx.shakeOffsetY, 0, 'YXZ'),
@@ -438,8 +497,9 @@ export class Engine {
     this.postfx.render(this.renderer);
     this.renderer.autoClear = true;
 
-    // Restore clean camera quaternion so FPSControls never sees shake
+    // Restore clean camera
     this.camera.quaternion.copy(savedQuat);
+    this.camera.position.copy(savedPos);
 
     // Push state to HUD
     const wp = WEAPONS[this.weapons.currentWeapon];
