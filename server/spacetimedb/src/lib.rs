@@ -1,4 +1,16 @@
-use spacetimedb::{reducer, table, Identity, ReducerContext, SpacetimeType, Table, Timestamp};
+use spacetimedb::{reducer, table, Identity, ReducerContext, ScheduleAt, SpacetimeType, Table, Timestamp};
+use std::collections::HashMap;
+use std::time::Duration;
+
+mod worldgen;
+use worldgen::{
+    WORLD_SIZE_X, WORLD_SIZE_Y, WORLD_SIZE_Z,
+    CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z,
+    AIR,
+};
+
+// ── Weather Types ──
+// 0 = Clear, 1 = Cloudy, 2 = Overcast, 3 = Rainy, 4 = Stormy
 
 // ── Custom Types ──
 
@@ -20,10 +32,10 @@ pub struct Rotation {
 struct WeaponDef {
     damage: i32,
     radius: f32,
-    fire_rate: f32,        // shots per second
+    fire_rate: f32,
     max_ammo: i32,
     max_range: f32,
-    projectile_speed: f32, // 0.0 = hitscan, >0 = projectile (units/sec)
+    projectile_speed: f32,
 }
 
 const WEAPON_DEFS: [WeaponDef; 3] = [
@@ -60,7 +72,7 @@ const NUM_WEAPONS: u8 = 3;
 
 // ── Tables ──
 
-/// Every connected player in the sandbox
+/// Every connected player
 #[table(accessor = player, public)]
 pub struct Player {
     #[primary_key]
@@ -98,21 +110,19 @@ pub struct PlayerMovementState {
     pub violation_count: u32,
 }
 
-/// Tracks every destroyed block so new clients can rebuild the world state.
-#[table(accessor = destroyed_block, public)]
-pub struct DestroyedBlock {
+/// Server-authoritative world chunk. RLE-compressed 16x16x16 block data.
+#[table(accessor = world_chunk, public)]
+pub struct WorldChunk {
     #[primary_key]
-    #[auto_inc]
-    pub id: u64,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-    pub destroyed_by: Identity,
-    pub destroyed_at: Timestamp,
+    pub chunk_id: u32,
+    pub cx: u8,
+    pub cy: u8,
+    pub cz: u8,
+    pub data: Vec<u8>,
+    pub version: u64,
 }
 
-/// Short-lived row: represents a shot fired so other clients can render
-/// tracers / muzzle flashes. Clients delete these after rendering.
+/// Short-lived row: represents a shot fired so other clients can render tracers.
 #[table(accessor = shot_event, public)]
 pub struct ShotEvent {
     #[primary_key]
@@ -123,6 +133,29 @@ pub struct ShotEvent {
     pub direction: Vec3,
     pub weapon: u8,
     pub fired_at: Timestamp,
+}
+
+/// Physics detach event: blocks that lost structural support and should fall.
+/// All clients spawn falling blocks from these events.
+#[table(accessor = detach_event, public)]
+pub struct DetachEvent {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub blocks_x: Vec<i32>,
+    pub blocks_y: Vec<i32>,
+    pub blocks_z: Vec<i32>,
+    pub block_types: Vec<u8>,
+    pub created_at: Timestamp,
+}
+
+/// Scheduled cleanup for old DetachEvents
+#[table(accessor = detach_cleanup, scheduled(cleanup_detach_events))]
+pub struct DetachCleanup {
+    #[primary_key]
+    #[auto_inc]
+    pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
 }
 
 /// Chat messages
@@ -137,6 +170,35 @@ pub struct ChatMessage {
     pub sent_at: Timestamp,
 }
 
+/// Server-authoritative world environment: time of day + weather.
+/// Single row (id=1), all clients sync from this.
+#[table(accessor = world_environment, public)]
+pub struct WorldEnvironment {
+    #[primary_key]
+    pub id: u32,
+    /// Time of day in hours (0.0 - 24.0)
+    pub time_of_day: f32,
+    /// Weather type: 0=Clear, 1=Cloudy, 2=Overcast, 3=Rainy, 4=Stormy
+    pub weather: u8,
+    /// Wind speed (0.0 - 1.0)
+    pub wind_speed: f32,
+    /// Cloud density (0.0 - 1.0)
+    pub cloud_density: f32,
+    /// Fog density multiplier (0.5 - 2.0)
+    pub fog_density: f32,
+    /// When the weather last changed
+    pub last_weather_change: Timestamp,
+}
+
+/// Scheduled environment tick — advances time, occasionally changes weather
+#[table(accessor = environment_tick, scheduled(tick_environment))]
+pub struct EnvironmentTick {
+    #[primary_key]
+    #[auto_inc]
+    pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+}
+
 // ── Constants ──
 
 const SPAWN_POS: Vec3 = Vec3 {
@@ -145,10 +207,6 @@ const SPAWN_POS: Vec3 = Vec3 {
     z: 64.0,
 };
 const MAX_HEALTH: i32 = 100;
-const WORLD_SIZE_X: i32 = 128;
-const WORLD_SIZE_Y: i32 = 48;
-const WORLD_SIZE_Z: i32 = 128;
-// Max movement speed: sprint(18) + slide(22) + generous tolerance for jitter
 const MAX_MOVEMENT_SPEED: f32 = 35.0;
 const SPEED_VIOLATION_THRESHOLD: u32 = 10;
 
@@ -239,14 +297,211 @@ fn clamp_pos(pos: &Vec3) -> Vec3 {
 }
 
 fn block_in_bounds(x: i32, y: i32, z: i32) -> bool {
-    x >= 0 && x < WORLD_SIZE_X && y >= 0 && y < WORLD_SIZE_Y && z >= 0 && z < WORLD_SIZE_Z
+    x >= 0
+        && x < WORLD_SIZE_X as i32
+        && y >= 0
+        && y < WORLD_SIZE_Y as i32
+        && z >= 0
+        && z < WORLD_SIZE_Z as i32
+}
+
+// ── Chunk Modification Helpers ──
+
+/// Destroy blocks in the world by modifying WorldChunk data.
+/// Returns the positions of blocks that were actually solid (and are now air).
+fn destroy_blocks_in_world(
+    ctx: &ReducerContext,
+    blocks: &[(i32, i32, i32)],
+) -> Vec<(i32, i32, i32)> {
+    let mut actually_destroyed = Vec::new();
+
+    // Group by chunk
+    let mut chunks_affected: HashMap<u32, Vec<(i32, i32, i32, usize, usize, usize)>> =
+        HashMap::new();
+
+    for &(x, y, z) in blocks {
+        if !block_in_bounds(x, y, z) {
+            continue;
+        }
+        let cx = (x / CHUNK_SIZE as i32) as u8;
+        let cy = (y / CHUNK_SIZE as i32) as u8;
+        let cz = (z / CHUNK_SIZE as i32) as u8;
+        let chunk_id = worldgen::pack_chunk_id(cx, cy, cz);
+        let lx = (x % CHUNK_SIZE as i32) as usize;
+        let ly = (y % CHUNK_SIZE as i32) as usize;
+        let lz = (z % CHUNK_SIZE as i32) as usize;
+        chunks_affected
+            .entry(chunk_id)
+            .or_default()
+            .push((x, y, z, lx, ly, lz));
+    }
+
+    for (chunk_id, local_blocks) in chunks_affected {
+        if let Some(chunk) = ctx.db.world_chunk().chunk_id().find(chunk_id) {
+            let mut block_data = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+            worldgen::rle_decode(&chunk.data, &mut block_data);
+
+            let mut modified = false;
+            for (x, y, z, lx, ly, lz) in local_blocks {
+                let local_idx = lx + ly * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE;
+                if block_data[local_idx] != AIR {
+                    block_data[local_idx] = AIR;
+                    actually_destroyed.push((x, y, z));
+                    modified = true;
+                }
+            }
+
+            if modified {
+                let new_data = worldgen::rle_encode(&block_data);
+                ctx.db.world_chunk().chunk_id().update(WorldChunk {
+                    data: new_data,
+                    version: chunk.version + 1,
+                    ..chunk
+                });
+            }
+        }
+    }
+
+    actually_destroyed
+}
+
+/// Decompress all WorldChunk rows into a flat world array.
+fn decompress_world(ctx: &ReducerContext) -> Vec<u8> {
+    let total = WORLD_SIZE_X * WORLD_SIZE_Y * WORLD_SIZE_Z;
+    let mut blocks = vec![0u8; total];
+
+    for chunk in ctx.db.world_chunk().iter() {
+        let mut chunk_data = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+        worldgen::rle_decode(&chunk.data, &mut chunk_data);
+        worldgen::inject_chunk(
+            &mut blocks,
+            chunk.cx as usize,
+            chunk.cy as usize,
+            chunk.cz as usize,
+            &chunk_data,
+        );
+    }
+
+    blocks
+}
+
+/// Run structural integrity check after block destruction.
+/// Decompresses the world, finds unsupported blocks via BFS, removes them,
+/// and emits a DetachEvent so all clients can animate the collapse.
+fn run_structural_check(ctx: &ReducerContext, destroyed_positions: &[(i32, i32, i32)]) {
+    if destroyed_positions.is_empty() {
+        return;
+    }
+
+    let blocks = decompress_world(ctx);
+    let fallen = worldgen::check_structural_integrity(&blocks, destroyed_positions);
+
+    if fallen.is_empty() {
+        return;
+    }
+
+    // Remove fallen blocks from the world chunks
+    let fallen_coords: Vec<(i32, i32, i32)> =
+        fallen.iter().map(|&(x, y, z, _)| (x, y, z)).collect();
+    destroy_blocks_in_world(ctx, &fallen_coords);
+
+    // Emit DetachEvent for clients to animate
+    let blocks_x: Vec<i32> = fallen.iter().map(|&(x, _, _, _)| x).collect();
+    let blocks_y: Vec<i32> = fallen.iter().map(|&(_, y, _, _)| y).collect();
+    let blocks_z: Vec<i32> = fallen.iter().map(|&(_, _, z, _)| z).collect();
+    let block_types: Vec<u8> = fallen.iter().map(|&(_, _, _, bt)| bt).collect();
+
+    ctx.db.detach_event().insert(DetachEvent {
+        id: 0,
+        blocks_x,
+        blocks_y,
+        blocks_z,
+        block_types,
+        created_at: ctx.timestamp,
+    });
+
+    log::info!(
+        "Structural check: {} blocks detached",
+        fallen_coords.len()
+    );
 }
 
 // ── Lifecycle Reducers ──
 
 #[reducer(init)]
-pub fn init(_ctx: &ReducerContext) {
-    log::info!("BitWars module initialized");
+pub fn init(ctx: &ReducerContext) {
+    log::info!("BitWars module initialized — generating world...");
+
+    let blocks = worldgen::generate_world();
+
+    // Chunk the world and store each chunk as RLE-compressed blob
+    for cz in 0..NUM_CHUNKS_Z {
+        for cy in 0..NUM_CHUNKS_Y {
+            for cx in 0..NUM_CHUNKS_X {
+                let data = worldgen::extract_chunk(&blocks, cx, cy, cz);
+                let chunk_id = worldgen::pack_chunk_id(cx as u8, cy as u8, cz as u8);
+                ctx.db.world_chunk().insert(WorldChunk {
+                    chunk_id,
+                    cx: cx as u8,
+                    cy: cy as u8,
+                    cz: cz as u8,
+                    data,
+                    version: 1,
+                });
+            }
+        }
+    }
+
+    log::info!(
+        "World generation complete: {} chunks stored",
+        NUM_CHUNKS_X * NUM_CHUNKS_Y * NUM_CHUNKS_Z
+    );
+
+    // Schedule periodic DetachEvent cleanup
+    ctx.db.detach_cleanup().insert(DetachCleanup {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(5)),
+    });
+
+    // Initialize world environment with random time and weather
+    let seed = timestamp_micros(ctx.timestamp);
+    let initial_time = ((seed % 2400) as f32) / 100.0; // 0.0 - 24.0
+    let initial_weather = ((seed / 2400) % 5) as u8;
+    let wind = ((seed % 100) as f32) / 100.0;
+    let cloud = match initial_weather {
+        0 => 0.1 + ((seed % 20) as f32) / 100.0,  // Clear: low clouds
+        1 => 0.4 + ((seed % 30) as f32) / 100.0,  // Cloudy
+        2 => 0.7 + ((seed % 20) as f32) / 100.0,  // Overcast
+        3 => 0.6 + ((seed % 30) as f32) / 100.0,  // Rainy
+        4 => 0.8 + ((seed % 20) as f32) / 100.0,  // Stormy
+        _ => 0.3,
+    };
+    let fog = match initial_weather {
+        0 => 0.6,
+        1 => 0.8,
+        2 => 1.2,
+        3 => 1.5,
+        4 => 1.8,
+        _ => 1.0,
+    };
+
+    ctx.db.world_environment().insert(WorldEnvironment {
+        id: 1,
+        time_of_day: initial_time,
+        weather: initial_weather,
+        wind_speed: wind,
+        cloud_density: cloud,
+        fog_density: fog,
+        last_weather_change: ctx.timestamp,
+    });
+
+    // Schedule first environment tick (every 10 seconds)
+    ctx.db.environment_tick().insert(EnvironmentTick {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(10)),
+    });
+
+    log::info!("Environment initialized: time={:.1}h, weather={}", initial_time, initial_weather);
 }
 
 #[reducer(client_connected)]
@@ -259,7 +514,6 @@ pub fn client_connected(ctx: &ReducerContext) {
             health: MAX_HEALTH,
             ..player
         });
-        // Keep existing ammo on reconnect, but init if missing
         init_weapon_state(ctx, sender);
         init_movement_state(ctx, sender, &SPAWN_POS);
         log::info!("Player reconnected: {:?}", sender);
@@ -316,17 +570,13 @@ pub fn set_username(ctx: &ReducerContext, username: String) -> Result<(), String
             online: true,
             joined_at: ctx.timestamp,
         });
-        // Initialize weapon state for new player
         init_weapon_state(ctx, sender);
     }
 
     init_movement_state(ctx, sender, &SPAWN_POS);
-
     Ok(())
 }
 
-/// Called frequently by clients to sync their position/rotation.
-/// Includes server-side speed validation.
 #[reducer]
 pub fn update_position(
     ctx: &ReducerContext,
@@ -352,7 +602,7 @@ pub fn update_position(
     if let Some(mv_state) = ctx.db.player_movement().identity().find(sender) {
         let now_us = timestamp_micros(ctx.timestamp);
         let last_us = timestamp_micros(mv_state.last_update);
-        let dt = (now_us.saturating_sub(last_us)) as f64 / 1_000_000.0; // seconds
+        let dt = (now_us.saturating_sub(last_us)) as f64 / 1_000_000.0;
 
         if dt > 0.01 {
             let d_sq = dist_sq(&clamped_pos, &mv_state.last_pos);
@@ -363,7 +613,6 @@ pub fn update_position(
                 let new_violations = mv_state.violation_count + 1;
 
                 if new_violations > SPEED_VIOLATION_THRESHOLD {
-                    // Snap back to last valid position
                     ctx.db.player().identity().update(Player {
                         pos: mv_state.last_pos.clone(),
                         rot,
@@ -382,7 +631,6 @@ pub fn update_position(
                     return Ok(());
                 }
 
-                // Accumulate violations but still accept the position
                 ctx.db
                     .player_movement()
                     .identity()
@@ -393,7 +641,6 @@ pub fn update_position(
                         violation_count: new_violations,
                     });
             } else {
-                // Valid speed — reset violations
                 ctx.db
                     .player_movement()
                     .identity()
@@ -421,8 +668,6 @@ pub fn update_position(
 
 // ── Combat Reducers ──
 
-/// Unified fire weapon reducer. Server validates fire rate, ammo, origin,
-/// player hits (distance + direction), and block destruction (distance).
 #[reducer]
 pub fn fire_weapon(
     ctx: &ReducerContext,
@@ -444,7 +689,6 @@ pub fn fire_weapon(
         return Err("Invalid weapon".to_string());
     }
 
-    // Player must be alive to fire
     if player.health <= 0 {
         return Err("Cannot fire while dead".to_string());
     }
@@ -461,7 +705,6 @@ pub fn fire_weapon(
     let now_us = timestamp_micros(ctx.timestamp);
     let last_us = timestamp_micros(wstate.last_fire_time);
     let cooldown_us = (1_000_000.0 / def.fire_rate) as u64;
-    // 50ms tolerance for network jitter
     if now_us.saturating_sub(last_us) < cooldown_us.saturating_sub(50_000) {
         return Err("Firing too fast".to_string());
     }
@@ -472,9 +715,8 @@ pub fn fire_weapon(
         return Err("No ammo".to_string());
     }
 
-    // 3. Origin validation: shot origin must be near player's server-known position
+    // 3. Origin validation
     if dist_sq(&origin, &player.pos) > 9.0 {
-        // 3 units tolerance (squared)
         return Err("Shot origin too far from player".to_string());
     }
 
@@ -512,14 +754,12 @@ pub fn fire_weapon(
                 continue;
             }
 
-            // Distance check
             let target_dist_sq = dist_sq(&origin, &target.pos);
-            let max_range = def.max_range + 3.0; // tolerance
+            let max_range = def.max_range + 3.0;
             if target_dist_sq > max_range * max_range {
                 continue;
             }
 
-            // Direction check: target should be roughly in fire direction
             if dir_len > 0.01 {
                 let to_x = target.pos.x - origin.x;
                 let to_y = target.pos.y - origin.y;
@@ -529,21 +769,18 @@ pub fn fire_weapon(
                 if to_len > 0.1 {
                     let dot = (to_x * direction.x + to_y * direction.y + to_z * direction.z)
                         / (to_len * dir_len);
-                    // Must be within ~60 degree cone
                     if dot < 0.5 {
                         continue;
                     }
                 }
             }
 
-            // Apply server-defined damage
             let new_health = (target.health - def.damage).max(0);
             ctx.db.player().identity().update(Player {
                 health: new_health,
                 ..target
             });
 
-            // Handle kill
             if new_health == 0 {
                 if let Some(attacker) = ctx.db.player().identity().find(sender) {
                     ctx.db.player().identity().update(Player {
@@ -562,37 +799,31 @@ pub fn fire_weapon(
         }
     }
 
-    // 6. Validate + apply block destruction
+    // 6. Validate + apply block destruction via WorldChunks
     if hit_blocks.len() > 500 {
         return Err("Too many blocks".to_string());
     }
-    for block in &hit_blocks {
-        let bx = block.x as i32;
-        let by = block.y as i32;
-        let bz = block.z as i32;
 
-        if !block_in_bounds(bx, by, bz) {
-            continue;
-        }
+    let block_coords: Vec<(i32, i32, i32)> = hit_blocks
+        .iter()
+        .filter(|block| {
+            let bx = block.x as i32;
+            let by = block.y as i32;
+            let bz = block.z as i32;
+            if !block_in_bounds(bx, by, bz) {
+                return false;
+            }
+            let block_dist_sq = dist_sq(&origin, block);
+            let max_block_range = def.max_range + 5.0;
+            block_dist_sq <= max_block_range * max_block_range
+        })
+        .map(|b| (b.x as i32, b.y as i32, b.z as i32))
+        .collect();
 
-        // Distance check: blocks must be within weapon range
-        let block_dist_sq = dist_sq(&origin, block);
-        let max_block_range = def.max_range + 5.0; // tolerance
-        if block_dist_sq > max_block_range * max_block_range {
-            continue;
-        }
+    let actually_destroyed = destroy_blocks_in_world(ctx, &block_coords);
+    run_structural_check(ctx, &actually_destroyed);
 
-        ctx.db.destroyed_block().insert(DestroyedBlock {
-            id: 0,
-            x: bx,
-            y: by,
-            z: bz,
-            destroyed_by: sender,
-            destroyed_at: ctx.timestamp,
-        });
-    }
-
-    // 7. Record shot event for other clients to render tracers
+    // 7. Record shot event
     ctx.db.shot_event().insert(ShotEvent {
         id: 0,
         shooter: sender,
@@ -605,7 +836,6 @@ pub fn fire_weapon(
     Ok(())
 }
 
-/// Reload the current weapon's ammo.
 #[reducer]
 pub fn reload_weapon(ctx: &ReducerContext) -> Result<(), String> {
     let sender = ctx.sender();
@@ -651,27 +881,18 @@ pub fn destroy_blocks_physics(ctx: &ReducerContext, blocks: Vec<Vec3>) -> Result
         return Err("Too many blocks in one call".to_string());
     }
 
-    for block in blocks {
-        let x = block.x as i32;
-        let y = block.y as i32;
-        let z = block.z as i32;
+    let block_coords: Vec<(i32, i32, i32)> = blocks
+        .iter()
+        .filter(|b| block_in_bounds(b.x as i32, b.y as i32, b.z as i32))
+        .map(|b| (b.x as i32, b.y as i32, b.z as i32))
+        .collect();
 
-        if block_in_bounds(x, y, z) {
-            ctx.db.destroyed_block().insert(DestroyedBlock {
-                id: 0,
-                x,
-                y,
-                z,
-                destroyed_by: sender,
-                destroyed_at: ctx.timestamp,
-            });
-        }
-    }
+    let actually_destroyed = destroy_blocks_in_world(ctx, &block_coords);
+    run_structural_check(ctx, &actually_destroyed);
 
     Ok(())
 }
 
-/// Player respawns after death.
 #[reducer]
 pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
     let sender = ctx.sender();
@@ -692,7 +913,6 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
         ..player
     });
 
-    // Reset ammo on respawn
     if let Some(wstate) = ctx.db.player_weapon_state().identity().find(sender) {
         ctx.db
             .player_weapon_state()
@@ -706,7 +926,6 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
     }
 
     init_movement_state(ctx, sender, &SPAWN_POS);
-
     Ok(())
 }
 
@@ -738,7 +957,6 @@ pub fn send_chat(ctx: &ReducerContext, text: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Cleanup old shot events (called periodically or by clients).
 #[reducer]
 pub fn cleanup_shots(ctx: &ReducerContext) -> Result<(), String> {
     let now_micros = timestamp_micros(ctx.timestamp);
@@ -749,7 +967,7 @@ pub fn cleanup_shots(ctx: &ReducerContext) -> Result<(), String> {
         .iter()
         .filter(|s| {
             let shot_micros = timestamp_micros(s.fired_at);
-            now_micros.saturating_sub(shot_micros) > 2_000_000 // older than 2 seconds
+            now_micros.saturating_sub(shot_micros) > 2_000_000
         })
         .map(|s| s.id)
         .collect();
@@ -761,8 +979,136 @@ pub fn cleanup_shots(ctx: &ReducerContext) -> Result<(), String> {
     Ok(())
 }
 
+/// Scheduled cleanup: remove old DetachEvents and reschedule.
+#[reducer]
+pub fn cleanup_detach_events(ctx: &ReducerContext, _job: DetachCleanup) {
+    let now_micros = timestamp_micros(ctx.timestamp);
+
+    let stale: Vec<u64> = ctx
+        .db
+        .detach_event()
+        .iter()
+        .filter(|e| {
+            let ev_micros = timestamp_micros(e.created_at);
+            now_micros.saturating_sub(ev_micros) > 5_000_000 // 5 seconds
+        })
+        .map(|e| e.id)
+        .collect();
+
+    for id in stale {
+        ctx.db.detach_event().id().delete(&id);
+    }
+
+    // Reschedule next cleanup in 5 seconds
+    ctx.db.detach_cleanup().insert(DetachCleanup {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(5)),
+    });
+}
+
+/// Scheduled environment tick: advances time of day and occasionally changes weather.
+/// Runs every 10 seconds. Each tick advances ~2 game-minutes (full day = ~2 hours real-time).
+#[reducer]
+pub fn tick_environment(ctx: &ReducerContext, _job: EnvironmentTick) {
+    if let Some(env) = ctx.db.world_environment().id().find(1) {
+        // Advance time: 10s real = ~2 min game time → 0.0333h per tick
+        // Full 24h cycle takes ~120 minutes (2 hours) real time
+        let time_advance = 0.0333;
+        let mut new_time = env.time_of_day + time_advance;
+        if new_time >= 24.0 {
+            new_time -= 24.0;
+        }
+
+        // Determine if weather should change (use timestamp as pseudo-random)
+        let seed = timestamp_micros(ctx.timestamp);
+        let since_change = timestamp_micros(ctx.timestamp)
+            .saturating_sub(timestamp_micros(env.last_weather_change));
+        // Minimum 5 minutes (300s) between weather changes
+        let min_weather_interval = 300_000_000u64; // 5 min in microseconds
+
+        let mut new_weather = env.weather;
+        let mut new_wind = env.wind_speed;
+        let mut new_cloud = env.cloud_density;
+        let mut new_fog = env.fog_density;
+        let mut weather_changed = false;
+
+        if since_change > min_weather_interval {
+            // ~5% chance per tick to change weather (roughly every ~3 min average)
+            let roll = (seed % 100) as u8;
+            if roll < 5 {
+                // Weather transitions: prefer adjacent weather states
+                let transition_roll = ((seed / 100) % 100) as u8;
+                new_weather = match env.weather {
+                    0 => { // Clear → Cloudy (70%) or stays Clear (30%)
+                        if transition_roll < 70 { 1 } else { 0 }
+                    }
+                    1 => { // Cloudy → Clear (30%), Overcast (40%), Rainy (30%)
+                        if transition_roll < 30 { 0 }
+                        else if transition_roll < 70 { 2 }
+                        else { 3 }
+                    }
+                    2 => { // Overcast → Cloudy (40%), Rainy (40%), Stormy (20%)
+                        if transition_roll < 40 { 1 }
+                        else if transition_roll < 80 { 3 }
+                        else { 4 }
+                    }
+                    3 => { // Rainy → Overcast (30%), Cloudy (30%), Stormy (20%), Clear (20%)
+                        if transition_roll < 30 { 2 }
+                        else if transition_roll < 60 { 1 }
+                        else if transition_roll < 80 { 4 }
+                        else { 0 }
+                    }
+                    4 => { // Stormy → Rainy (50%), Overcast (30%), Cloudy (20%)
+                        if transition_roll < 50 { 3 }
+                        else if transition_roll < 80 { 2 }
+                        else { 1 }
+                    }
+                    _ => 0,
+                };
+
+                if new_weather != env.weather {
+                    weather_changed = true;
+                    new_wind = ((seed % 80) as f32 + 10.0) / 100.0;
+                    new_cloud = match new_weather {
+                        0 => 0.1 + ((seed % 20) as f32) / 100.0,
+                        1 => 0.4 + ((seed % 30) as f32) / 100.0,
+                        2 => 0.7 + ((seed % 20) as f32) / 100.0,
+                        3 => 0.6 + ((seed % 30) as f32) / 100.0,
+                        4 => 0.8 + ((seed % 20) as f32) / 100.0,
+                        _ => 0.3,
+                    };
+                    new_fog = match new_weather {
+                        0 => 0.6,
+                        1 => 0.8,
+                        2 => 1.2,
+                        3 => 1.5,
+                        4 => 1.8,
+                        _ => 1.0,
+                    };
+                    log::info!("Weather changed: {} → {} at time {:.1}h", env.weather, new_weather, new_time);
+                }
+            }
+        }
+
+        ctx.db.world_environment().id().update(WorldEnvironment {
+            id: 1,
+            time_of_day: new_time,
+            weather: new_weather,
+            wind_speed: new_wind,
+            cloud_density: new_cloud,
+            fog_density: new_fog,
+            last_weather_change: if weather_changed { ctx.timestamp } else { env.last_weather_change },
+        });
+    }
+
+    // Reschedule next tick in 10 seconds
+    ctx.db.environment_tick().insert(EnvironmentTick {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(10)),
+    });
+}
+
 /// Handle projectile impact: validates travel time, applies damage and block destruction.
-/// Called by clients when a client-side simulated projectile collides.
 #[reducer]
 pub fn projectile_impact(
     ctx: &ReducerContext,
@@ -792,37 +1138,36 @@ pub fn projectile_impact(
 
     let def = &WEAPON_DEFS[weapon as usize];
 
-    // Must be a projectile weapon
     if def.projectile_speed <= 0.0 {
         return Err("Not a projectile weapon".to_string());
     }
 
-    // Travel time validation: expected = distance / speed
+    // Travel time validation
     let dx = impact_pos.x - shot_origin.x;
     let dy = impact_pos.y - shot_origin.y;
     let dz = impact_pos.z - shot_origin.z;
     let distance = (dx * dx + dy * dy + dz * dz).sqrt();
     let expected_time_ms = (distance / def.projectile_speed * 1000.0) as u32;
 
-    // Allow 50%-300% of expected time (gravity curves path, network jitter)
     let min_time = expected_time_ms / 2;
-    let max_time = expected_time_ms.saturating_mul(3).max(500); // at least 500ms tolerance
+    let max_time = expected_time_ms.saturating_mul(3).max(500);
     if travel_time_ms < min_time || travel_time_ms > max_time {
         log::warn!(
             "Projectile travel time mismatch: got {}ms, expected ~{}ms (dist={:.1})",
-            travel_time_ms, expected_time_ms, distance
+            travel_time_ms,
+            expected_time_ms,
+            distance
         );
-        // Don't hard-reject, just log — gravity and bouncing make timing imprecise
     }
 
-    // Impact must be within max_range of origin (with tolerance for gravity arc)
+    // Impact range check
     let impact_dist_sq = dist_sq(&shot_origin, &impact_pos);
-    let max_range = def.max_range + 10.0; // generous tolerance for arced paths
+    let max_range = def.max_range + 10.0;
     if impact_dist_sq > max_range * max_range {
         return Err("Impact too far from origin".to_string());
     }
 
-    // Validate + apply player hits (targets must be near impact position)
+    // Validate + apply player hits
     for target_id in &hit_players {
         if *target_id == sender {
             continue;
@@ -833,21 +1178,18 @@ pub fn projectile_impact(
                 continue;
             }
 
-            // Target must be near impact position (within radius + tolerance)
             let target_dist_sq = dist_sq(&impact_pos, &target.pos);
             let hit_range = def.radius + 5.0;
             if target_dist_sq > hit_range * hit_range {
                 continue;
             }
 
-            // Apply server-defined damage
             let new_health = (target.health - def.damage).max(0);
             ctx.db.player().identity().update(Player {
                 health: new_health,
                 ..target
             });
 
-            // Handle kill
             if new_health == 0 {
                 if let Some(attacker) = ctx.db.player().identity().find(sender) {
                     ctx.db.player().identity().update(Player {
@@ -866,35 +1208,29 @@ pub fn projectile_impact(
         }
     }
 
-    // Validate + apply block destruction (blocks must be near impact)
+    // Validate + apply block destruction via WorldChunks
     if hit_blocks.len() > 500 {
         return Err("Too many blocks".to_string());
     }
-    for block in &hit_blocks {
-        let bx = block.x as i32;
-        let by = block.y as i32;
-        let bz = block.z as i32;
 
-        if !block_in_bounds(bx, by, bz) {
-            continue;
-        }
+    let block_coords: Vec<(i32, i32, i32)> = hit_blocks
+        .iter()
+        .filter(|block| {
+            let bx = block.x as i32;
+            let by = block.y as i32;
+            let bz = block.z as i32;
+            if !block_in_bounds(bx, by, bz) {
+                return false;
+            }
+            let block_dist_sq = dist_sq(&impact_pos, block);
+            let max_block_range = def.radius + 5.0;
+            block_dist_sq <= max_block_range * max_block_range
+        })
+        .map(|b| (b.x as i32, b.y as i32, b.z as i32))
+        .collect();
 
-        // Blocks must be near impact position
-        let block_dist_sq = dist_sq(&impact_pos, block);
-        let max_block_range = def.radius + 5.0;
-        if block_dist_sq > max_block_range * max_block_range {
-            continue;
-        }
-
-        ctx.db.destroyed_block().insert(DestroyedBlock {
-            id: 0,
-            x: bx,
-            y: by,
-            z: bz,
-            destroyed_by: sender,
-            destroyed_at: ctx.timestamp,
-        });
-    }
+    let actually_destroyed = destroy_blocks_in_world(ctx, &block_coords);
+    run_structural_check(ctx, &actually_destroyed);
 
     Ok(())
 }

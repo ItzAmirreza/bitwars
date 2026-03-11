@@ -86,6 +86,59 @@ export class VoxelWorld {
     this.mat = new THREE.MeshLambertMaterial({ vertexColors: true });
   }
 
+  // ── Server chunk loading ──
+
+  /** RLE-decode a chunk data blob into a flat 16x16x16 array */
+  static rleDecodeChunk(data: Uint8Array): Uint8Array {
+    const output = new Uint8Array(CHUNK * CHUNK * CHUNK);
+    let outIdx = 0;
+    let i = 0;
+    while (i + 1 < data.length && outIdx < output.length) {
+      const val = data[i];
+      const run = data[i + 1];
+      for (let j = 0; j < run && outIdx < output.length; j++) {
+        output[outIdx++] = val;
+      }
+      i += 2;
+    }
+    return output;
+  }
+
+  /** Load a 16x16x16 chunk from server data into the blocks array.
+   *  cx/cy/cz are chunk coordinates (0-7, 0-2, 0-7). */
+  loadChunk(cx: number, cy: number, cz: number, chunkBlocks: Uint8Array): void {
+    for (let lz = 0; lz < CHUNK; lz++) {
+      for (let ly = 0; ly < CHUNK; ly++) {
+        for (let lx = 0; lx < CHUNK; lx++) {
+          const gx = cx * CHUNK + lx;
+          const gy = cy * CHUNK + ly;
+          const gz = cz * CHUNK + lz;
+          if (gx >= this.sizeX || gy >= this.sizeY || gz >= this.sizeZ) continue;
+          const globalIdx = gx + gy * this.sizeX + gz * this.sizeX * this.sizeY;
+          const localIdx = lx + ly * CHUNK + lz * CHUNK * CHUNK;
+          this.blocks[globalIdx] = chunkBlocks[localIdx];
+        }
+      }
+    }
+    // Mark this chunk (and adjacent) dirty for mesh rebuild
+    this.markDirty(cx, cy, cz);
+    // Mark adjacent chunks dirty for boundary faces
+    if (cx > 0) this.markDirty(cx - 1, cy, cz);
+    if (cx < this.cX - 1) this.markDirty(cx + 1, cy, cz);
+    if (cy > 0) this.markDirty(cx, cy - 1, cz);
+    if (cy < this.cY - 1) this.markDirty(cx, cy + 1, cz);
+    if (cz > 0) this.markDirty(cx, cy, cz - 1);
+    if (cz < this.cZ - 1) this.markDirty(cx, cy, cz + 1);
+  }
+
+  /** Load all chunks from server WorldChunk rows */
+  loadFromServer(chunks: Iterable<{ cx: number; cy: number; cz: number; data: Uint8Array }>): void {
+    for (const chunk of chunks) {
+      const decoded = VoxelWorld.rleDecodeChunk(chunk.data);
+      this.loadChunk(chunk.cx, chunk.cy, chunk.cz, decoded);
+    }
+  }
+
   // ── Block access ──
 
   inBounds(x: number, y: number, z: number): boolean {

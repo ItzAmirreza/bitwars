@@ -96,15 +96,6 @@ class FallingBlockPool {
 const SHARED_GEO = new THREE.BoxGeometry(0.85, 0.85, 0.85);
 const MAX_FALLING = 500;
 const GRAVITY = -22;
-const MAX_BFS_NODES = 200;
-const MAX_BFS_RADIUS = 12;
-const MAX_CHECKS_PER_FRAME = 12;
-const MAX_DEFERRED_QUEUE = 120;
-
-// ── Neighbor offsets (6-connected) ──
-const N6: [number, number, number][] = [
-  [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
-];
 
 // ── PhysicsSystem ──
 
@@ -123,9 +114,7 @@ export class PhysicsSystem {
   private dummy = new THREE.Object3D();
   private tmpColor = new THREE.Color();
 
-  // Deferred structural checks
-  private deferredChecks: { x: number; y: number; z: number }[] = [];
-  private pendingSync: { x: number; y: number; z: number }[] = [];
+  // (Deferred checks removed — server handles structural integrity)
 
   constructor(scene: THREE.Scene, world: VoxelWorld, vfx: VFX, audio: AudioSystem) {
     this.scene = scene;
@@ -146,13 +135,18 @@ export class PhysicsSystem {
   // ── Public API ──
 
   /**
-   * Check structural support after block destruction.
-   * Returns positions of blocks that started falling (for server sync).
+   * Spawn falling blocks from a server DetachEvent.
+   * Server has already removed these blocks from the world chunks.
    */
-  checkFalling(positions: { x: number; y: number; z: number }[]): { x: number; y: number; z: number }[] {
-    const fallen = this.checkStructuralSupport(positions);
-    if (fallen.length > 0) this.audio.playCrumble();
-    return fallen;
+  spawnFromDetachEvent(
+    blocksX: ArrayLike<number>, blocksY: ArrayLike<number>,
+    blocksZ: ArrayLike<number>, blockTypes: ArrayLike<number>,
+  ): void {
+    const count = Math.min(blocksX.length, MAX_FALLING - this.falling.length);
+    for (let i = 0; i < count; i++) {
+      this.spawnFalling(blocksX[i], blocksY[i], blocksZ[i], blockTypes[i]);
+    }
+    if (count > 0) this.audio.playCrumble();
   }
 
   /** Apply explosion force to nearby falling blocks */
@@ -172,22 +166,13 @@ export class PhysicsSystem {
     }
   }
 
-  /** Drain pending server sync queue */
-  getPendingSync(): { x: number; y: number; z: number }[] {
-    if (this.pendingSync.length === 0) return this.pendingSync;
-    const result = this.pendingSync;
-    this.pendingSync = [];
-    return result;
-  }
-
   // ── Main Update Loop ──
 
   update(delta: number): void {
     const dt = Math.min(delta, 0.033); // Cap to prevent tunneling
-    if (this.falling.length === 0 && this.deferredChecks.length === 0) return;
+    if (this.falling.length === 0) return;
 
     let landedCount = 0;
-    const cascadePositions: { x: number; y: number; z: number }[] = [];
 
     // Phase 1: Apply forces
     for (let i = 0; i < this.falling.length; i++) {
@@ -237,7 +222,7 @@ export class PhysicsSystem {
       if (hitNegZ) { fb.vz = Math.max(fb.vz, Math.abs(fb.vz) * 0.3); fb.z += 0.05; }
 
       if (hitFloor) {
-        this.handleLanding(fb, cascadePositions);
+        this.handleLanding(fb);
         this.pool.release(fb);
         this.falling[i] = this.falling[this.falling.length - 1];
         this.falling.pop();
@@ -256,124 +241,11 @@ export class PhysicsSystem {
     // Phase 4: Update InstancedMesh
     this.updateInstancedMesh();
 
-    // Phase 5: Queue cascade checks from landings
-    if (cascadePositions.length > 0) {
-      for (const p of cascadePositions) this.deferredChecks.push(p);
-      if (this.deferredChecks.length > MAX_DEFERRED_QUEUE) {
-        this.deferredChecks.splice(0, this.deferredChecks.length - MAX_DEFERRED_QUEUE);
-      }
-    }
-
-    // Phase 6: Process deferred structural checks
-    this.processDeferredChecks();
-
     // Audio/VFX
     if (landedCount > 0) {
       this.audio.playBlockLand(Math.min(landedCount / 8, 1));
       this.vfx.shake(Math.min(landedCount * 0.04, 0.35));
     }
-  }
-
-  // ── Structural Support (Bounded BFS) ──
-
-  private checkStructuralSupport(positions: { x: number; y: number; z: number }[]): { x: number; y: number; z: number }[] {
-    const fallen: { x: number; y: number; z: number }[] = [];
-    const globalVisited = new Set<number>();
-
-    for (const p of positions) {
-      // Check all 6 neighbors of the destroyed block
-      for (const [dx, dy, dz] of N6) {
-        const nx = p.x + dx, ny = p.y + dy, nz = p.z + dz;
-        const bt = this.world.getBlock(nx, ny, nz);
-        if (bt === 0) continue;
-
-        const key = this.packCoord(nx, ny, nz);
-        if (globalVisited.has(key)) continue;
-
-        // BFS to find connected component and check if supported
-        const result = this.boundedBFS(nx, ny, nz, globalVisited);
-
-        // Mark all visited nodes as globally visited
-        for (const k of result.visited) globalVisited.add(k);
-
-        if (!result.isSupported) {
-          // Entire component falls
-          for (const block of result.blocks) {
-            if (this.falling.length >= MAX_FALLING) break;
-            this.spawnFalling(block.x, block.y, block.z, block.bt);
-            this.world.setBlock(block.x, block.y, block.z, 0);
-            fallen.push({ x: block.x, y: block.y, z: block.z });
-          }
-        }
-      }
-    }
-
-    return fallen;
-  }
-
-  private boundedBFS(
-    startX: number, startY: number, startZ: number,
-    globalVisited: Set<number>,
-  ): { blocks: { x: number; y: number; z: number; bt: number }[]; visited: number[]; isSupported: boolean } {
-    const queue: number[] = [startX, startY, startZ]; // flat queue: x,y,z triples
-    const visited: number[] = [];
-    const blocks: { x: number; y: number; z: number; bt: number }[] = [];
-    const localVisited = new Set<number>();
-    let isSupported = false;
-    let qHead = 0;
-
-    const startKey = this.packCoord(startX, startY, startZ);
-    localVisited.add(startKey);
-    visited.push(startKey);
-
-    const r2 = MAX_BFS_RADIUS * MAX_BFS_RADIUS;
-
-    while (qHead < queue.length && blocks.length < MAX_BFS_NODES) {
-      const x = queue[qHead++];
-      const y = queue[qHead++];
-      const z = queue[qHead++];
-
-      // Distance check
-      const dx = x - startX, dy = y - startY, dz = z - startZ;
-      if (dx * dx + dy * dy + dz * dz > r2) continue;
-
-      const bt = this.world.getBlock(x, y, z);
-      if (bt === 0) continue;
-
-      blocks.push({ x, y, z, bt });
-
-      // Ground support check: at y=0 or block below exists and is NOT part of this component
-      if (y === 0) { isSupported = true; break; }
-
-      const belowKey = this.packCoord(x, y - 1, z);
-      const belowBt = this.world.getBlock(x, y - 1, z);
-      if (belowBt !== 0 && !localVisited.has(belowKey) && !globalVisited.has(belowKey)) {
-        // Block below exists and is not part of any floating component we found
-        isSupported = true;
-        break;
-      }
-
-      // Expand to 6 neighbors
-      for (const [ox, oy, oz] of N6) {
-        const nx = x + ox, ny = y + oy, nz = z + oz;
-        if (ny < 0 || ny >= this.world.sizeY) continue;
-        if (nx < 0 || nx >= this.world.sizeX || nz < 0 || nz >= this.world.sizeZ) continue;
-
-        const nkey = this.packCoord(nx, ny, nz);
-        if (localVisited.has(nkey) || globalVisited.has(nkey)) continue;
-        if (this.world.getBlock(nx, ny, nz) === 0) continue;
-
-        localVisited.add(nkey);
-        visited.push(nkey);
-        queue.push(nx, ny, nz);
-      }
-    }
-
-    return { blocks, visited, isSupported };
-  }
-
-  private packCoord(x: number, y: number, z: number): number {
-    return (x & 0xFF) | ((y & 0xFF) << 8) | ((z & 0xFF) << 16);
   }
 
   // ── Falling Block Spawning ──
@@ -443,49 +315,11 @@ export class PhysicsSystem {
 
   // ── Landing ──
 
-  private handleLanding(fb: FallingBlock, cascadePositions: { x: number; y: number; z: number }[]): void {
-    const impactSpeed = Math.abs(fb.vy);
-    const mat = getBlockMat(fb.blockType);
+  private handleLanding(fb: FallingBlock): void {
     const color = BLOCK_COLORS[fb.blockType] || 0x808080;
-
-    const placeX = Math.floor(fb.x);
-    const placeY = Math.max(0, Math.floor(fb.y - 0.4) + 1);
-    const placeZ = Math.floor(fb.z);
-
-    if (impactSpeed > mat.shatterSpeed) {
-      // HIGH IMPACT — shatter into debris
-      this.vfx.emitBlockDebris(fb.x - 0.5, Math.max(0, fb.y - 0.5), fb.z - 0.5, color);
-      this.vfx.emitImpact(fb.x - 0.5, Math.max(0, fb.y - 0.5), fb.z - 0.5);
-    } else {
-      // LOW IMPACT — re-place into world grid
-      if (
-        placeX >= 0 && placeX < this.world.sizeX &&
-        placeY >= 0 && placeY < this.world.sizeY &&
-        placeZ >= 0 && placeZ < this.world.sizeZ &&
-        this.world.getBlock(placeX, placeY, placeZ) === 0
-      ) {
-        this.world.setBlock(placeX, placeY, placeZ, fb.blockType);
-        // This landing might cause cascading effects
-        cascadePositions.push({ x: placeX, y: placeY, z: placeZ });
-        // Small dust on gentle landing
-        this.vfx.emitImpact(fb.x - 0.5, Math.max(0, fb.y - 0.5), fb.z - 0.5);
-      } else {
-        // Can't place — shatter instead
-        this.vfx.emitBlockDebris(fb.x - 0.5, Math.max(0, fb.y - 0.5), fb.z - 0.5, color);
-      }
-    }
-  }
-
-  // ── Deferred Structural Checks ──
-
-  private processDeferredChecks(): void {
-    if (this.deferredChecks.length === 0) return;
-    const batch = this.deferredChecks.splice(0, MAX_CHECKS_PER_FRAME);
-    const fallen = this.checkStructuralSupport(batch);
-    if (fallen.length > 0) {
-      this.audio.playCrumble();
-      for (const f of fallen) this.pendingSync.push(f);
-    }
+    // Always shatter — server owns the world, no client re-placement
+    this.vfx.emitBlockDebris(fb.x - 0.5, Math.max(0, fb.y - 0.5), fb.z - 0.5, color);
+    this.vfx.emitImpact(fb.x - 0.5, Math.max(0, fb.y - 0.5), fb.z - 0.5);
   }
 
   // ── InstancedMesh Rendering ──

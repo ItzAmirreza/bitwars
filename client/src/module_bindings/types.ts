@@ -19,15 +19,21 @@ export const ChatMessage = __t.object("ChatMessage", {
 });
 export type ChatMessage = __Infer<typeof ChatMessage>;
 
-export const DestroyedBlock = __t.object("DestroyedBlock", {
-  id: __t.u64(),
-  x: __t.i32(),
-  y: __t.i32(),
-  z: __t.i32(),
-  destroyedBy: __t.identity(),
-  destroyedAt: __t.timestamp(),
+export const DetachCleanup = __t.object("DetachCleanup", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
 });
-export type DestroyedBlock = __Infer<typeof DestroyedBlock>;
+export type DetachCleanup = __Infer<typeof DetachCleanup>;
+
+export const DetachEvent = __t.object("DetachEvent", {
+  id: __t.u64(),
+  blocksX: __t.array(__t.i32()),
+  blocksY: __t.array(__t.i32()),
+  blocksZ: __t.array(__t.i32()),
+  blockTypes: __t.byteArray(),
+  createdAt: __t.timestamp(),
+});
+export type DetachEvent = __Infer<typeof DetachEvent>;
 
 export const Player = __t.object("Player", {
   identity: __t.identity(),
@@ -93,4 +99,14 @@ export const Vec3 = __t.object("Vec3", {
   z: __t.f32(),
 });
 export type Vec3 = __Infer<typeof Vec3>;
+
+export const WorldChunk = __t.object("WorldChunk", {
+  chunkId: __t.u32(),
+  cx: __t.u8(),
+  cy: __t.u8(),
+  cz: __t.u8(),
+  data: __t.byteArray(),
+  version: __t.u64(),
+});
+export type WorldChunk = __Infer<typeof WorldChunk>;
 

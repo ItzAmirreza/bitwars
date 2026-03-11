@@ -48,11 +48,12 @@ import UpdatePositionReducer from "./update_position_reducer";
 
 // Import all table schema definitions
 import ChatMessageRow from "./chat_message_table";
-import DestroyedBlockRow from "./destroyed_block_table";
+import DetachEventRow from "./detach_event_table";
 import PlayerRow from "./player_table";
 import PlayerMovementRow from "./player_movement_table";
 import PlayerWeaponStateRow from "./player_weapon_state_table";
 import ShotEventRow from "./shot_event_table";
+import WorldChunkRow from "./world_chunk_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -69,17 +70,17 @@ const tablesSchema = __schema({
       { name: 'chat_message_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ChatMessageRow),
-  destroyed_block: __table({
-    name: 'destroyed_block',
+  detach_event: __table({
+    name: 'detach_event',
     indexes: [
       { name: 'id', algorithm: 'btree', columns: [
         'id',
       ] },
     ],
     constraints: [
-      { name: 'destroyed_block_id_key', constraint: 'unique', columns: ['id'] },
+      { name: 'detach_event_id_key', constraint: 'unique', columns: ['id'] },
     ],
-  }, DestroyedBlockRow),
+  }, DetachEventRow),
   player: __table({
     name: 'player',
     indexes: [
@@ -124,6 +125,17 @@ const tablesSchema = __schema({
       { name: 'shot_event_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ShotEventRow),
+  world_chunk: __table({
+    name: 'world_chunk',
+    indexes: [
+      { name: 'chunk_id', algorithm: 'btree', columns: [
+        'chunkId',
+      ] },
+    ],
+    constraints: [
+      { name: 'world_chunk_chunk_id_key', constraint: 'unique', columns: ['chunkId'] },
+    ],
+  }, WorldChunkRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */

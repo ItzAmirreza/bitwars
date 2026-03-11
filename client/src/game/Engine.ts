@@ -8,6 +8,7 @@ import { WeaponModel } from './WeaponModel';
 import { PostFX } from './PostFX';
 import { PhysicsSystem } from './PhysicsSystem';
 import { ProjectileManager } from './ProjectileManager';
+import { SkySystem } from './SkySystem';
 import type { ProjectileImpact } from './ProjectileManager';
 import type { DbConnection } from '../module_bindings';
 import type { GameSettings } from '../store';
@@ -30,6 +31,8 @@ export interface EngineState {
   kills: number;
   deaths: number;
   hitMarker: boolean;
+  timeOfDay: string;
+  weather: string;
 }
 
 export class Engine {
@@ -49,8 +52,11 @@ export class Engine {
   private physics: PhysicsSystem;
   private projectileManager: ProjectileManager;
 
-  // Lighting
+  // Lighting & Sky
   private sun: THREE.DirectionalLight;
+  private hemiLight: THREE.HemisphereLight;
+  private ambientLight: THREE.AmbientLight;
+  private sky: SkySystem;
 
   // State
   private clock: THREE.Clock;
@@ -108,15 +114,13 @@ export class Engine {
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0x5a5856, 40, 150);
 
-    // ── Lighting — dramatic warzone atmosphere ──
-    // Hemisphere light: sky/ground color variation
-    const hemiLight = new THREE.HemisphereLight(0x8a8a95, 0x2a2218, 0.8);
-    this.scene.add(hemiLight);
+    // ── Lighting ──
+    this.hemiLight = new THREE.HemisphereLight(0x8a8a95, 0x2a2218, 0.8);
+    this.scene.add(this.hemiLight);
 
-    // Ambient fill
-    this.scene.add(new THREE.AmbientLight(0x505058, 0.5));
+    this.ambientLight = new THREE.AmbientLight(0x505058, 0.5);
+    this.scene.add(this.ambientLight);
 
-    // Directional sun with shadows
     this.sun = new THREE.DirectionalLight(0xffe0b0, 2.5);
     this.sun.position.set(50, 80, 30);
     this.sun.castShadow = true;
@@ -132,10 +136,13 @@ export class Engine {
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
 
+    // ── Sky system (procedural sky, dynamic lighting, weather) ──
+    this.sky = new SkySystem(this.scene, this.sun, this.hemiLight, this.ambientLight);
+    this.loadEnvironmentFromServer();
+
     // ── Voxel world (128×48×128) ──
     this.world = new VoxelWorld(WORLD_X, WORLD_Y, WORLD_Z);
-    this.world.generateTerrain();
-    this.syncDestroyedBlocks();
+    this.loadWorldFromServer();
     this.world.rebuildDirtyChunks(this.scene);
 
     // ── Ground plane ──
@@ -316,10 +323,6 @@ export class Engine {
     // Server sync: unified fire_weapon reducer with hit players and blocks
     this.syncFireToServer(result);
 
-    // Physics: check for falling blocks above
-    const fallen = this.physics.checkFalling(result.destroyedBlocks);
-    if (fallen.length > 0) this.syncPhysicsBlocksToServer(fallen);
-
     // Apply explosion force to falling blocks
     if (result.hitPos && WEAPONS[result.weaponIndex].radius > 0) {
       const w = WEAPONS[result.weaponIndex];
@@ -363,10 +366,7 @@ export class Engine {
       this.vfx.emitExplosion(impact.hitPos.x, impact.hitPos.y, impact.hitPos.z, w.radius);
     }
 
-    // Physics: falling blocks + explosion force
-    const fallen = this.physics.checkFalling(impact.destroyedBlocks);
-    if (fallen.length > 0) this.syncPhysicsBlocksToServer(fallen);
-
+    // Explosion force on already-falling blocks
     if (w.radius > 0) {
       this.physics.applyExplosionForce(
         impact.hitPos.x, impact.hitPos.y, impact.hitPos.z,
@@ -383,11 +383,49 @@ export class Engine {
 
   // ── SERVER SYNC ──
 
-  private syncDestroyedBlocks(): void {
-    if (!this.conn) return;
-    for (const block of this.conn.db.destroyed_block.iter()) {
-      this.world.setBlock(block.x, block.y, block.z, 0);
+  /** Load the full world from server WorldChunk rows */
+  private loadWorldFromServer(): void {
+    if (!this.conn) {
+      // Fallback: generate terrain locally if no connection
+      this.world.generateTerrain();
+      return;
     }
+    let count = 0;
+    for (const chunk of this.conn.db.world_chunk.iter() as Iterable<any>) {
+      const data = chunk.data instanceof Uint8Array ? chunk.data : new Uint8Array(chunk.data);
+      const decoded = VoxelWorld.rleDecodeChunk(data);
+      this.world.loadChunk(chunk.cx, chunk.cy, chunk.cz, decoded);
+      count++;
+    }
+    console.log(`[BitWars] Loaded ${count} world chunks from server`);
+  }
+
+  /** Load initial environment state from server */
+  private loadEnvironmentFromServer(): void {
+    if (!this.conn) return;
+    const db = this.conn.db as any;
+    if (!db.world_environment) return;
+    for (const env of db.world_environment.iter()) {
+      this.sky.setEnvironment({
+        timeOfDay: env.timeOfDay as number,
+        weather: env.weather as number,
+        windSpeed: env.windSpeed as number,
+        cloudDensity: env.cloudDensity as number,
+        fogDensity: env.fogDensity as number,
+      });
+      break; // Single row
+    }
+  }
+
+  /** Apply environment update from server */
+  private applyEnvironmentUpdate(env: any): void {
+    this.sky.setEnvironment({
+      timeOfDay: env.timeOfDay as number,
+      weather: env.weather as number,
+      windSpeed: env.windSpeed as number,
+      cloudDensity: env.cloudDensity as number,
+      fogDensity: env.fogDensity as number,
+    });
   }
 
   /** Send fire event to server with hit players and destroyed blocks */
@@ -412,14 +450,6 @@ export class Engine {
       weapon: result.weaponIndex,
       hitPlayers: hitPlayerIdentities,
       hitBlocks: result.destroyedBlocks.map((b) => ({ x: b.x, y: b.y, z: b.z })),
-    });
-  }
-
-  /** Sync physics-triggered block destruction (falling, cascades) */
-  private syncPhysicsBlocksToServer(blocks: { x: number; y: number; z: number }[]): void {
-    if (!this.conn || blocks.length === 0) return;
-    this.conn.reducers.destroyBlocksPhysics({
-      blocks: blocks.map((b) => ({ x: b.x, y: b.y, z: b.z })),
     });
   }
 
@@ -452,18 +482,44 @@ export class Engine {
   private setupServerListeners(): void {
     if (!this.conn) return;
 
-    // Remote block destruction
-    this.conn.db.destroyed_block.onInsert((_ctx: unknown, block: { x: number; y: number; z: number }) => {
-      if (this.world.getBlock(block.x, block.y, block.z) !== 0) {
-        this.world.setBlock(block.x, block.y, block.z, 0);
-        this.vfx.emitImpact(block.x, block.y, block.z);
+    // World chunk updates (block destruction synced via chunk data)
+    this.conn.db.world_chunk.onUpdate((_ctx: unknown, old: unknown, chunk: any) => {
+      const cx = chunk.cx as number, cy = chunk.cy as number, cz = chunk.cz as number;
+      const newData = chunk.data instanceof Uint8Array ? chunk.data : new Uint8Array(chunk.data);
+      const newDecoded = VoxelWorld.rleDecodeChunk(newData);
 
-        // Falling blocks from remote destruction
-        const fallen = this.physics.checkFalling([block]);
-        if (fallen.length > 0) this.syncPhysicsBlocksToServer(fallen);
+      // Decode old chunk to find which blocks changed from solid→air
+      const oldChunk = old as any;
+      const oldData = oldChunk.data instanceof Uint8Array ? oldChunk.data : new Uint8Array(oldChunk.data);
+      const oldDecoded = VoxelWorld.rleDecodeChunk(oldData);
 
-        this.world.rebuildDirtyChunks(this.scene);
+      const destroyedBlocks: { x: number; y: number; z: number }[] = [];
+      for (let lz = 0; lz < 16; lz++) {
+        for (let ly = 0; ly < 16; ly++) {
+          for (let lx = 0; lx < 16; lx++) {
+            const localIdx = lx + ly * 16 + lz * 16 * 16;
+            if (oldDecoded[localIdx] !== 0 && newDecoded[localIdx] === 0) {
+              const gx = cx * 16 + lx, gy = cy * 16 + ly, gz = cz * 16 + lz;
+              destroyedBlocks.push({ x: gx, y: gy, z: gz });
+              this.vfx.emitImpact(gx, gy, gz);
+            }
+          }
+        }
       }
+
+      // Apply new chunk data
+      this.world.loadChunk(cx, cy, cz, newDecoded);
+      this.world.rebuildDirtyChunks(this.scene);
+    });
+
+    // DetachEvent: server-authoritative structural collapse → spawn falling blocks
+    this.conn.db.detach_event.onInsert((_ctx: unknown, event: any) => {
+      const bx = event.blocksX as number[];
+      const by = event.blocksY as number[];
+      const bz = event.blocksZ as number[];
+      const bt = event.blockTypes as number[];
+      this.physics.spawnFromDetachEvent(bx, by, bz, bt);
+      this.world.rebuildDirtyChunks(this.scene);
     });
 
     // Player tracking
@@ -533,6 +589,17 @@ export class Engine {
         this.vfx.emitTracer(origin, end, parseInt(w.color.replace('#', ''), 16));
       }
     });
+
+    // Environment sync (time of day + weather)
+    const db = this.conn.db as any;
+    if (db.world_environment) {
+      db.world_environment.onUpdate((_ctx: unknown, _old: unknown, env: any) => {
+        this.applyEnvironmentUpdate(env);
+      });
+      db.world_environment.onInsert((_ctx: unknown, env: any) => {
+        this.applyEnvironmentUpdate(env);
+      });
+    }
 
     // Server-authoritative ammo sync
     this.conn.db.player_weapon_state.onInsert((_ctx: unknown, state: any) => {
@@ -672,15 +739,12 @@ export class Engine {
     // Physics (falling blocks)
     this.physics.update(delta);
 
-    // Sync blocks that fell from deferred structural checks
-    const pendingSync = this.physics.getPendingSync();
-    if (pendingSync.length > 0) {
-      this.syncPhysicsBlocksToServer(pendingSync);
-      this.world.rebuildDirtyChunks(this.scene);
-    }
-
     // Projectiles
     this.projectileManager.update(delta);
+
+    // Sky & environment
+    this.sky.update(delta);
+    this.renderer.setClearColor(this.sky.getFogColor());
 
     // VFX
     this.vfx.update(delta);
@@ -764,6 +828,8 @@ export class Engine {
       playerCount: pc, health: this.health,
       kills: this.kills, deaths: this.deaths,
       hitMarker: this.hitMarkerTimer > 0,
+      timeOfDay: this.sky.getTimeString(),
+      weather: this.sky.getWeatherName(),
     });
   };
 
@@ -786,6 +852,7 @@ export class Engine {
     document.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('resize', this.onResize);
     this.controls.dispose();
+    this.sky.dispose();
     this.vfx.dispose();
     this.projectileManager.dispose();
     this.physics.dispose();

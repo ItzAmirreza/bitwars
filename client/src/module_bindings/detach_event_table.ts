@@ -12,9 +12,9 @@ import {
 
 export default __t.row({
   id: __t.u64().primaryKey(),
-  x: __t.i32(),
-  y: __t.i32(),
-  z: __t.i32(),
-  destroyedBy: __t.identity().name("destroyed_by"),
-  destroyedAt: __t.timestamp().name("destroyed_at"),
+  blocksX: __t.array(__t.i32()).name("blocks_x"),
+  blocksY: __t.array(__t.i32()).name("blocks_y"),
+  blocksZ: __t.array(__t.i32()).name("blocks_z"),
+  blockTypes: __t.byteArray().name("block_types"),
+  createdAt: __t.timestamp().name("created_at"),
 });

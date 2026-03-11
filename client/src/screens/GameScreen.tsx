@@ -28,6 +28,8 @@ export function GameScreen() {
     kills: 0,
     deaths: 0,
     hitMarker: false,
+    timeOfDay: '12:00',
+    weather: 'Clear',
   });
 
   useEffect(() => {
@@ -140,6 +142,17 @@ export function GameScreen() {
           </div>
 
           <div className="flex items-center gap-4">
+            <span
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: '10px',
+                color: 'var(--c-muted)',
+                letterSpacing: '0.1em',
+              }}
+            >
+              <span style={{ color: 'var(--c-blue)' }}>{state.timeOfDay}</span>{' '}
+              <span style={{ color: 'var(--c-muted2)' }}>{state.weather}</span>
+            </span>
             <span
               style={{
                 fontFamily: 'var(--font-mono)',
