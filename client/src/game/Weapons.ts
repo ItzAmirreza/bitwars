@@ -116,8 +116,12 @@ export class WeaponSystem {
       }
     }
 
-    // Recoil (camera)
-    this.camera.rotation.x += (Math.random() - 0.5) * this.weapon.recoil;
+    // Recoil (camera) — use YXZ euler to match FPSControls and avoid yaw drift
+    const recoilEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+    recoilEuler.setFromQuaternion(this.camera.quaternion);
+    recoilEuler.x += (Math.random() - 0.5) * this.weapon.recoil;
+    recoilEuler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, recoilEuler.x));
+    this.camera.quaternion.setFromEuler(recoilEuler);
 
     return {
       weaponIndex: this.currentWeapon,

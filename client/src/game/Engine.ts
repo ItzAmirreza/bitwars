@@ -68,6 +68,8 @@ export class Engine {
   private hitMarkerTimer = 0;
   private lastWeaponIndex = 0;
   private elapsedTime = 0;
+  private baseFov = 75;
+  private wasSliding = false;
 
   constructor(
     container: HTMLElement,
@@ -88,9 +90,9 @@ export class Engine {
     this.renderer.setSize(w, h);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.setClearColor(0x3a3836);
+    this.renderer.setClearColor(0x5a5856);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.85;
+    this.renderer.toneMappingExposure = 1.1;
     container.appendChild(this.renderer.domElement);
 
     // ── Camera ──
@@ -98,18 +100,18 @@ export class Engine {
 
     // ── Scene ──
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x3a3836, 40, 120);
+    this.scene.fog = new THREE.Fog(0x5a5856, 40, 150);
 
     // ── Lighting — dramatic warzone atmosphere ──
     // Hemisphere light: sky/ground color variation
-    const hemiLight = new THREE.HemisphereLight(0x6a6a72, 0x2a2218, 0.6);
+    const hemiLight = new THREE.HemisphereLight(0x8a8a95, 0x2a2218, 0.8);
     this.scene.add(hemiLight);
 
     // Ambient fill
-    this.scene.add(new THREE.AmbientLight(0x404048, 0.4));
+    this.scene.add(new THREE.AmbientLight(0x505058, 0.5));
 
     // Directional sun with shadows
-    this.sun = new THREE.DirectionalLight(0xffe0b0, 2.0);
+    this.sun = new THREE.DirectionalLight(0xffe0b0, 2.5);
     this.sun.position.set(50, 80, 30);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -132,7 +134,7 @@ export class Engine {
 
     // ── Ground plane ──
     const groundGeo = new THREE.PlaneGeometry(256, 256);
-    const groundMat = new THREE.MeshLambertMaterial({ color: 0x3a3632 });
+    const groundMat = new THREE.MeshLambertMaterial({ color: 0x4a4642 });
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(WORLD_X / 2, -0.01, WORLD_Z / 2);
@@ -181,11 +183,13 @@ export class Engine {
 
   updateSettings(settings: GameSettings): void {
     this.controls.sensitivity = settings.sensitivity;
+    this.baseFov = settings.fov;
     this.camera.fov = settings.fov;
     this.camera.updateProjectionMatrix();
     this.audio.setMasterVolume(settings.masterVolume);
     this.sun.castShadow = settings.shadowsEnabled;
     this.postfx.enabled = settings.postFXEnabled;
+    this.controls.setSprintToggle(settings.sprintToggle);
 
     // Graphics quality presets
     if (settings.graphicsQuality === 'low') {
@@ -282,6 +286,15 @@ export class Engine {
     // Physics: check for falling blocks above
     const fallen = this.physics.checkFalling(result.destroyedBlocks);
     if (fallen.length > 0) this.syncDestroyedToServer(fallen);
+
+    // Apply explosion force to falling blocks
+    if (result.hitPos && WEAPONS[result.weaponIndex].radius > 0) {
+      const w = WEAPONS[result.weaponIndex];
+      this.physics.applyExplosionForce(
+        result.hitPos.x, result.hitPos.y, result.hitPos.z,
+        w.radius * 2, w.damage * 1.5,
+      );
+    }
 
     // Rebuild affected chunks
     this.world.rebuildDirtyChunks(this.scene);
@@ -440,6 +453,24 @@ export class Engine {
     // Update systems
     this.controls.update(delta, (x, z) => this.getGroundHeight(x, z));
 
+    // Landing impact effects
+    if (this.controls.justLanded) {
+      const intensity = this.controls.landingIntensity;
+      if (intensity > 0.1) this.vfx.shake(intensity * 0.6);
+      if (intensity > 0.15) this.audio.playLanding(intensity);
+    }
+
+    // Footstep sounds
+    if (this.controls.stepTriggered) {
+      this.audio.playStep(this.controls.isSprinting);
+    }
+
+    // Slide start sound
+    if (this.controls.isSliding && !this.wasSliding) {
+      this.audio.playSlideStart();
+    }
+    this.wasSliding = this.controls.isSliding;
+
     // Auto-fire
     if (this.mouseDown && this.controls.locked) this.tryFire();
 
@@ -453,13 +484,21 @@ export class Engine {
     // Physics (falling blocks)
     this.physics.update(delta);
 
+    // Sync blocks that fell from deferred structural checks
+    const pendingSync = this.physics.getPendingSync();
+    if (pendingSync.length > 0) {
+      this.syncDestroyedToServer(pendingSync);
+      this.world.rebuildDirtyChunks(this.scene);
+    }
+
     // VFX
     this.vfx.update(delta);
 
-    // Weapon model — pass sprint/crouch state
+    // Weapon model — pass movement state
     const moving = this.controls.moveForward || this.controls.moveBackward
       || this.controls.moveLeft || this.controls.moveRight;
-    this.weaponModel.setMoving(moving, this.controls.isSprinting, this.controls.isCrouching);
+    this.weaponModel.setMoving(moving, this.controls.isSprinting, this.controls.isCrouching,
+      this.controls.isSliding, this.controls.strafeInput);
     this.weaponModel.update(delta);
 
     // PostFX
@@ -475,14 +514,31 @@ export class Engine {
     this.world.rebuildDirtyChunks(this.scene);
 
     // ── RENDER PASSES ──
-    // Apply head bob + screen shake to camera just for rendering, then undo
+    // Apply head bob + screen shake + camera effects just for rendering, then undo
     const savedQuat = this.camera.quaternion.clone();
     const savedPos = this.camera.position.clone();
+    const savedFov = this.camera.fov;
+    let fovChanged = false;
+
+    // Sprint/Slide FOV effect
+    if (Math.abs(this.controls.sprintFovOffset) > 0.01) {
+      this.camera.fov = this.baseFov + this.controls.sprintFovOffset;
+      this.camera.updateProjectionMatrix();
+      fovChanged = true;
+    }
 
     // Head bob offset
     this.camera.position.y += this.controls.headBobY;
     this.camera.position.x += this.controls.headBobX;
 
+    // Camera tilt (strafe roll)
+    if (Math.abs(this.controls.cameraTiltZ) > 0.0001) {
+      const tiltEuler = new THREE.Euler(0, 0, this.controls.cameraTiltZ, 'YXZ');
+      const tiltQuat = new THREE.Quaternion().setFromEuler(tiltEuler);
+      this.camera.quaternion.multiply(tiltQuat);
+    }
+
+    // Screen shake
     if (this.vfx.shakeOffsetX !== 0 || this.vfx.shakeOffsetY !== 0) {
       const shakeQuat = new THREE.Quaternion().setFromEuler(
         new THREE.Euler(this.vfx.shakeOffsetX, this.vfx.shakeOffsetY, 0, 'YXZ'),
@@ -500,6 +556,10 @@ export class Engine {
     // Restore clean camera
     this.camera.quaternion.copy(savedQuat);
     this.camera.position.copy(savedPos);
+    if (fovChanged) {
+      this.camera.fov = savedFov;
+      this.camera.updateProjectionMatrix();
+    }
 
     // Push state to HUD
     const wp = WEAPONS[this.weapons.currentWeapon];

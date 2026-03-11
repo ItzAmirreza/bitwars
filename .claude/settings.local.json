@@ -11,7 +11,10 @@
       "Bash(SPACETIME=\"C:/Users/ItzAm/AppData/Local/SpacetimeDB/spacetime.exe\" && cd \"C:/Users/ItzAm/Desktop/theg/bitwars/server\" && \"$SPACETIME\" publish bitwars --module-path ./spacetimedb 2>&1)",
       "Bash(which wrangler:*)",
       "Bash(gh auth:*)",
-      "Bash(SPACETIME=\"C:/Users/ItzAm/AppData/Local/SpacetimeDB/spacetime.exe\" && cd \"C:/Users/ItzAm/Desktop/theg/bitwars/server\" && echo \"y\" | \"$SPACETIME\" publish bitwars --module-path ./spacetimedb 2>&1)"
+      "Bash(SPACETIME=\"C:/Users/ItzAm/AppData/Local/SpacetimeDB/spacetime.exe\" && cd \"C:/Users/ItzAm/Desktop/theg/bitwars/server\" && echo \"y\" | \"$SPACETIME\" publish bitwars --module-path ./spacetimedb 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\ItzAm\\\\Desktop\\\\theg\\\\bitwars\\\\client\" && npm run build 2>&1)",
+      "Bash(cd /c/Users/ItzAm/Desktop/theg/bitwars/client && npx tsc --noEmit 2>&1 | head -50)",
+      "Bash(npm run:*)"
     ]
   }
 }

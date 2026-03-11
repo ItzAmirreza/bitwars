@@ -33,12 +33,12 @@ void main() {
     float dist = length(center) * 2.0;
 
     // ── Warzone vignette — wider, darker, with slight amber tint ──
-    float vignette = smoothstep(0.3, 1.6, dist);
+    float vignette = smoothstep(0.5, 1.6, dist);
     vec3 vignetteColor = vec3(0.03, 0.02, 0.01) * vignette;
-    float vignetteAlpha = vignette * 0.45;
+    float vignetteAlpha = vignette * 0.25;
 
     // ── Subtle dust haze overlay ──
-    float haze = 0.015 + 0.008 * sin(uTime * 0.25 + uv.x * 4.0) * cos(uTime * 0.18 + uv.y * 3.0);
+    float haze = 0.008 + 0.008 * sin(uTime * 0.25 + uv.x * 4.0) * cos(uTime * 0.18 + uv.y * 3.0);
     haze += 0.005 * sin(uTime * 0.4 + uv.y * 6.0);
     vec3 hazeColor = vec3(0.12, 0.10, 0.07);
 
@@ -66,7 +66,7 @@ void main() {
     vec3 color = vignetteColor + damageColor + hazeColor * haze;
     float alpha = vignetteAlpha + damageAlpha + haze + abs(grain) * 0.5 + scanline;
 
-    gl_FragColor = vec4(color, clamp(alpha, 0.0, 0.88));
+    gl_FragColor = vec4(color, clamp(alpha, 0.0, 0.55));
 }
 `;
 

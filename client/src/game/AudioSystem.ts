@@ -382,6 +382,81 @@ export class AudioSystem {
     sub.stop(t + 0.08);
   }
 
+  // ── FOOTSTEP: Short impact noise ──
+  playStep(sprinting = false): void {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise(0.06, 0.3);
+
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = sprinting ? 1200 + Math.random() * 400 : 800 + Math.random() * 300;
+    bp.Q.value = 1.2;
+
+    const g = ctx.createGain();
+    const vol = sprinting ? 0.08 : 0.05;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+
+    src.connect(bp).connect(g).connect(this.master!);
+    src.start(t);
+    src.stop(t + 0.06);
+  }
+
+  // ── LANDING: Impact thud ──
+  playLanding(intensity: number): void {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const vol = 0.1 + intensity * 0.4;
+
+    // Impact thud
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise(0.12, 0.15);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 300 + intensity * 400;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    src.connect(lp).connect(g).connect(this.master!);
+    src.start(t);
+    src.stop(t + 0.12);
+
+    // Sub-bass thump for heavy landings
+    if (intensity > 0.4) {
+      const sub = ctx.createOscillator();
+      sub.type = 'sine';
+      sub.frequency.value = 35;
+      const sg = ctx.createGain();
+      sg.gain.setValueAtTime(vol * 0.6, t);
+      sg.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+      sub.connect(sg).connect(this.master!);
+      sub.start(t);
+      sub.stop(t + 0.1);
+    }
+  }
+
+  // ── SLIDE: Friction noise ──
+  playSlideStart(): void {
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise(0.4, 0.3);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 500;
+    bp.Q.value = 0.6;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.12, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+    src.connect(bp).connect(g).connect(this.master!);
+    src.start(t);
+    src.stop(t + 0.4);
+  }
+
   setMasterVolume(volume: number): void {
     if (this.master) {
       this.master.gain.value = Math.max(0, Math.min(1, volume));

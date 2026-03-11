@@ -15,6 +15,12 @@ export class WeaponModel {
   private isMoving = false;
   private isSprinting = false;
   private isCrouching = false;
+  private isSliding = false;
+  private strafeInput = 0;
+
+  // Smoothed movement reactions
+  private strafeTilt = 0;
+  private sprintLower = 0;
 
   // Recoil
   private recoilZ = 0;
@@ -201,27 +207,45 @@ export class WeaponModel {
     this.recoilRot = -amount * 3;
   }
 
-  setMoving(moving: boolean, sprinting = false, crouching = false): void {
+  setMoving(moving: boolean, sprinting = false, crouching = false,
+            sliding = false, strafeInput = 0): void {
     this.isMoving = moving;
     this.isSprinting = sprinting;
     this.isCrouching = crouching;
+    this.isSliding = sliding;
+    this.strafeInput = strafeInput;
   }
 
   update(delta: number): void {
     // ── Bob — varies with movement state ──
-    const bobSpeed = this.isSprinting ? 14 : this.isCrouching ? 6 : this.isMoving ? 10 : 1.5;
-    this.bobTime += delta * bobSpeed;
-
     let bobY: number, bobX: number;
-    if (this.isMoving) {
+
+    if (this.isSliding) {
+      // Minimal vibration during slide
+      this.bobTime += delta * 12;
+      bobY = Math.sin(this.bobTime * 2.5) * 0.004;
+      bobX = Math.cos(this.bobTime * 1.5) * 0.003;
+    } else if (this.isMoving) {
+      const bobSpeed = this.isSprinting ? 14 : this.isCrouching ? 6 : 10;
+      this.bobTime += delta * bobSpeed;
       const ampY = this.isSprinting ? 0.018 : this.isCrouching ? 0.006 : 0.012;
       const ampX = this.isSprinting ? 0.01 : this.isCrouching ? 0.003 : 0.006;
       bobY = Math.sin(this.bobTime) * ampY;
       bobX = Math.cos(this.bobTime * 0.5) * ampX;
     } else {
+      this.bobTime += delta * 1.5;
       bobY = Math.sin(this.bobTime) * 0.003;
       bobX = 0;
     }
+
+    // ── Strafe tilt (smooth) ──
+    const tiltLerp = 1 - Math.pow(0.001, delta);
+    this.strafeTilt += (this.strafeInput - this.strafeTilt) * tiltLerp;
+
+    // ── Sprint weapon lower (smooth) ──
+    const targetSprintLower = this.isSprinting ? 1 : 0;
+    const lowerLerp = 1 - Math.pow(0.01, delta);
+    this.sprintLower += (targetSprintLower - this.sprintLower) * lowerLerp;
 
     // ── Recoil decay ──
     this.recoilZ *= Math.max(0, 1 - delta * 18);
@@ -254,10 +278,19 @@ export class WeaponModel {
     if (!w) return;
 
     const base = this.getBasePos(this.current);
-    w.position.x = base.x + bobX;
-    w.position.y = base.y + bobY + switchOffsetY;
+
+    // Movement reactions
+    const weaponTiltZ = -this.strafeTilt * 0.04; // ~2.3 degrees
+    const sprintLowerY = -this.sprintLower * 0.06;
+    const sprintLowerRot = this.sprintLower * 0.15;
+    const slideOffsetX = this.isSliding ? -0.05 : 0;
+    const slideLowerY = this.isSliding ? -0.04 : 0;
+
+    w.position.x = base.x + bobX + slideOffsetX;
+    w.position.y = base.y + bobY + switchOffsetY + sprintLowerY + slideLowerY;
     w.position.z = base.z + this.recoilZ * 0.015;
-    w.rotation.x = this.recoilRot * 0.05;
+    w.rotation.x = this.recoilRot * 0.05 + sprintLowerRot;
+    w.rotation.z = weaponTiltZ;
   }
 
   private getBasePos(index: number): THREE.Vector3 {

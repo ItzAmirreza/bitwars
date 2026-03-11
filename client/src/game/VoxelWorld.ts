@@ -88,6 +88,10 @@ export class VoxelWorld {
 
   // ── Block access ──
 
+  inBounds(x: number, y: number, z: number): boolean {
+    return x >= 0 && x < this.sizeX && y >= 0 && y < this.sizeY && z >= 0 && z < this.sizeZ;
+  }
+
   getBlock(x: number, y: number, z: number): number {
     if (x < 0 || x >= this.sizeX || y < 0 || y >= this.sizeY || z < 0 || z >= this.sizeZ) return 0;
     return this.blocks[x + y * this.sizeX + z * this.sizeX * this.sizeY];
