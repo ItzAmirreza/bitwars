@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/ItzAm/Desktop/theg/bitwars -maxdepth 2 -type f -name \"*.md\" | xargs ls -lh 2>/dev/null)",
+      "Bash(spacetime server:*)",
+      "Bash(where.exe spacetime:*)",
+      "Read(//c/Users/ItzAm/Desktop/theg/bitwars/$HOME/**)",
+      "Read(//c/Users/ItzAm/**)",
+      "Bash(export PATH=\"$PATH:C:/Users/ItzAm/AppData/Local/SpacetimeDB\" && spacetime version 2>&1)",
+      "Bash(SPACETIME=\"C:/Users/ItzAm/AppData/Local/SpacetimeDB/spacetime.exe\" && \"$SPACETIME\" version list 2>&1 && \"$SPACETIME\" server list 2>&1)",
+      "Bash(SPACETIME=\"C:/Users/ItzAm/AppData/Local/SpacetimeDB/spacetime.exe\" && cd \"C:/Users/ItzAm/Desktop/theg/bitwars/server\" && \"$SPACETIME\" publish bitwars --module-path ./spacetimedb 2>&1)",
+      "Bash(which wrangler:*)",
+      "Bash(gh auth:*)",
+      "Bash(SPACETIME=\"C:/Users/ItzAm/AppData/Local/SpacetimeDB/spacetime.exe\" && cd \"C:/Users/ItzAm/Desktop/theg/bitwars/server\" && echo \"y\" | \"$SPACETIME\" publish bitwars --module-path ./spacetimedb 2>&1)"
+    ]
+  }
+}
