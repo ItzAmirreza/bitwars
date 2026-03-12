@@ -72,7 +72,7 @@ export class VoxelWorld {
   private cX: number; private cY: number; private cZ: number;
   private meshes: (THREE.Mesh | null)[];
   private dirty: boolean[];
-  private mat: THREE.MeshLambertMaterial;
+  private mat: THREE.MeshPhongMaterial;
 
   constructor(sx: number, sy: number, sz: number) {
     this.sizeX = sx; this.sizeY = sy; this.sizeZ = sz;
@@ -83,7 +83,13 @@ export class VoxelWorld {
     const n = this.cX * this.cY * this.cZ;
     this.meshes = new Array(n).fill(null);
     this.dirty = new Array(n).fill(true);
-    this.mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    this.mat = new THREE.MeshPhongMaterial({
+      vertexColors: true,
+      emissive: new THREE.Color(0x10182a),
+      emissiveIntensity: 0.34,
+      shininess: 6,
+      specular: new THREE.Color(0x111418),
+    });
   }
 
   // ── Server chunk loading ──
@@ -233,10 +239,18 @@ export class VoxelWorld {
     const pos: number[] = [], nrm: number[] = [], col: number[] = [];
     const c = new THREE.Color();
 
+    // Fast getBlock closure for AO neighbor lookups
+    const blocks = this.blocks;
+    const sx = this.sizeX, sy = this.sizeY, sz = this.sizeZ;
+    const gb = (x: number, y: number, z: number): number => {
+      if (x < 0 || x >= sx || y < 0 || y >= sy || z < 0 || z >= sz) return 0;
+      return blocks[x + y * sx + z * sx * sy];
+    };
+
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
         for (let z = z0; z < z1; z++) {
-          const b = this.getBlock(x, y, z);
+          const b = gb(x, y, z);
           if (b === 0) continue;
           c.setHex(BLOCK_COLORS[b] || 0x808080);
 
@@ -246,12 +260,12 @@ export class VoxelWorld {
           c.g = Math.max(0, Math.min(1, c.g + variation));
           c.b = Math.max(0, Math.min(1, c.b + variation));
 
-          if (this.getBlock(x + 1, y, z) === 0) addFace(pos, nrm, col, c, x + 1, y, z, 0);
-          if (this.getBlock(x - 1, y, z) === 0) addFace(pos, nrm, col, c, x, y, z, 1);
-          if (this.getBlock(x, y + 1, z) === 0) addFace(pos, nrm, col, c, x, y + 1, z, 2);
-          if (this.getBlock(x, y - 1, z) === 0) addFace(pos, nrm, col, c, x, y, z, 3);
-          if (this.getBlock(x, y, z + 1) === 0) addFace(pos, nrm, col, c, x, y, z + 1, 4);
-          if (this.getBlock(x, y, z - 1) === 0) addFace(pos, nrm, col, c, x, y, z, 5);
+          if (gb(x + 1, y, z) === 0) addFace(pos, nrm, col, c, x + 1, y, z, 0, computeFaceAO(gb, x, y, z, 0));
+          if (gb(x - 1, y, z) === 0) addFace(pos, nrm, col, c, x, y, z, 1, computeFaceAO(gb, x, y, z, 1));
+          if (gb(x, y + 1, z) === 0) addFace(pos, nrm, col, c, x, y + 1, z, 2, computeFaceAO(gb, x, y, z, 2));
+          if (gb(x, y - 1, z) === 0) addFace(pos, nrm, col, c, x, y, z, 3, computeFaceAO(gb, x, y, z, 3));
+          if (gb(x, y, z + 1) === 0) addFace(pos, nrm, col, c, x, y, z + 1, 4, computeFaceAO(gb, x, y, z, 4));
+          if (gb(x, y, z - 1) === 0) addFace(pos, nrm, col, c, x, y, z, 5, computeFaceAO(gb, x, y, z, 5));
         }
       }
     }
@@ -759,18 +773,74 @@ const FACE_VERTS = [
   [[0,1,0],[1,1,0],[1,0,0],[0,1,0],[1,0,0],[0,0,0]],  // -Z
 ];
 
+// ── Per-vertex Ambient Occlusion ──
+
+// Tangent axes per face: [t1x, t1y, t1z, t2x, t2y, t2z]
+const AO_TANGENTS: number[][] = [
+  [0,1,0, 0,0,1],  // face 0 (+X)
+  [0,1,0, 0,0,1],  // face 1 (-X)
+  [1,0,0, 0,0,1],  // face 2 (+Y)
+  [1,0,0, 0,0,1],  // face 3 (-Y)
+  [1,0,0, 0,1,0],  // face 4 (+Z)
+  [1,0,0, 0,1,0],  // face 5 (-Z)
+];
+
+// Corner signs per face: 4 corners × [s1 for t1, s2 for t2]
+const AO_SIGNS: number[][][] = [
+  [[-1,-1],[1,-1],[1,1],[-1,1]],     // face 0 (+X)
+  [[-1,1],[1,1],[1,-1],[-1,-1]],     // face 1 (-X)
+  [[-1,-1],[-1,1],[1,1],[1,-1]],     // face 2 (+Y)
+  [[1,-1],[1,1],[-1,1],[-1,-1]],     // face 3 (-Y)
+  [[-1,-1],[1,-1],[1,1],[-1,1]],     // face 4 (+Z)
+  [[-1,1],[1,1],[1,-1],[-1,-1]],     // face 5 (-Z)
+];
+
+// Brightness per AO level: 0=fully occluded, 3=no occlusion
+const AO_CURVE = [0.45, 0.68, 0.85, 1.0];
+
+function vertexAO(s1: boolean, s2: boolean, c: boolean): number {
+  if (s1 && s2) return 0;
+  return 3 - (+s1) - (+s2) - (+c);
+}
+
+function computeFaceAO(
+  gb: (x: number, y: number, z: number) => number,
+  bx: number, by: number, bz: number, face: number,
+): [number, number, number, number] {
+  const n = FACE_NORMALS[face];
+  const t = AO_TANGENTS[face];
+  const signs = AO_SIGNS[face];
+  const nx = bx + n[0], ny = by + n[1], nz = bz + n[2];
+  const ao: [number, number, number, number] = [3, 3, 3, 3];
+  for (let c = 0; c < 4; c++) {
+    const s1 = signs[c][0], s2 = signs[c][1];
+    const side1 = gb(nx + s1*t[0], ny + s1*t[1], nz + s1*t[2]) !== 0;
+    const side2 = gb(nx + s2*t[3], ny + s2*t[4], nz + s2*t[5]) !== 0;
+    const corner = gb(nx + s1*t[0] + s2*t[3], ny + s1*t[1] + s2*t[4], nz + s1*t[2] + s2*t[5]) !== 0;
+    ao[c] = vertexAO(side1, side2, corner);
+  }
+  return ao;
+}
+
 function addFace(
   pos: number[], nrm: number[], col: number[],
   color: THREE.Color, x: number, y: number, z: number, face: number,
+  ao: [number, number, number, number],
 ): void {
   const verts = FACE_VERTS[face];
   const n = FACE_NORMALS[face];
   const s = FACE_SHADING[face];
-  const r = color.r * s, g = color.g * s, b = color.b * s;
+  const corners = [verts[0], verts[1], verts[2], verts[5]];
+  const aoMul = [AO_CURVE[ao[0]] * s, AO_CURVE[ao[1]] * s, AO_CURVE[ao[2]] * s, AO_CURVE[ao[3]] * s];
+  // Flip quad diagonal when ao[0]+ao[2] < ao[1]+ao[3] for correct AO interpolation
+  const flip = ao[0] + ao[2] < ao[1] + ao[3];
+  const idx = flip ? [0,1,3, 1,2,3] : [0,1,2, 0,2,3];
   for (let i = 0; i < 6; i++) {
-    const v = verts[i];
+    const ci = idx[i];
+    const v = corners[ci];
+    const m = aoMul[ci];
     pos.push(x + v[0], y + v[1], z + v[2]);
     nrm.push(n[0], n[1], n[2]);
-    col.push(r, g, b);
+    col.push(color.r * m, color.g * m, color.b * m);
   }
 }

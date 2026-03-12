@@ -31,6 +31,10 @@ interface SkyColors {
   hemiGround: THREE.Color;
 }
 
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
 function lerpColor(a: THREE.Color, b: THREE.Color, t: number): THREE.Color {
   return new THREE.Color().lerpColors(a, b, t);
 }
@@ -51,27 +55,27 @@ function getSkyColors(hour: number, weather: number): SkyColors {
 
   if (t < 5) {
     // Night (0-5)
-    zenith = new THREE.Color(0x0a0a1a);
-    horizon = new THREE.Color(0x111122);
-    sun = new THREE.Color(0x334466);
+    zenith = new THREE.Color(0x1b2344);
+    horizon = new THREE.Color(0x29355a);
+    sun = new THREE.Color(0x9bb4ff);
     sunIntensity = 0.1;
-    ambient = new THREE.Color(0x0a0a15);
-    ambientIntensity = 0.15;
-    fog = new THREE.Color(0x0d0d1a);
-    hemiSky = new THREE.Color(0x111125);
-    hemiGround = new THREE.Color(0x0a0a10);
+    ambient = new THREE.Color(0x556796);
+    ambientIntensity = 0.72;
+    fog = new THREE.Color(0x212b47);
+    hemiSky = new THREE.Color(0x3d4f7c);
+    hemiGround = new THREE.Color(0x1d2437);
   } else if (t < 6.5) {
     // Pre-dawn (5-6.5)
     const f = (t - 5) / 1.5;
-    zenith = lerpColor(new THREE.Color(0x0a0a1a), new THREE.Color(0x1a1a3a), f);
-    horizon = lerpColor(new THREE.Color(0x111122), new THREE.Color(0x553322), f);
-    sun = lerpColor(new THREE.Color(0x334466), new THREE.Color(0xdd6633), f);
+    zenith = lerpColor(new THREE.Color(0x1b2344), new THREE.Color(0x1a1a3a), f);
+    horizon = lerpColor(new THREE.Color(0x29355a), new THREE.Color(0x553322), f);
+    sun = lerpColor(new THREE.Color(0x9bb4ff), new THREE.Color(0xdd6633), f);
     sunIntensity = 0.1 + f * 0.5;
-    ambient = lerpColor(new THREE.Color(0x0a0a15), new THREE.Color(0x2a1a15), f);
-    ambientIntensity = 0.15 + f * 0.2;
-    fog = lerpColor(new THREE.Color(0x0d0d1a), new THREE.Color(0x3a2a22), f);
-    hemiSky = lerpColor(new THREE.Color(0x111125), new THREE.Color(0x4a3040), f);
-    hemiGround = lerpColor(new THREE.Color(0x0a0a10), new THREE.Color(0x1a1510), f);
+    ambient = lerpColor(new THREE.Color(0x556796), new THREE.Color(0x2a1a15), f);
+    ambientIntensity = 0.72 - f * 0.18;
+    fog = lerpColor(new THREE.Color(0x212b47), new THREE.Color(0x3a2a22), f);
+    hemiSky = lerpColor(new THREE.Color(0x3d4f7c), new THREE.Color(0x4a3040), f);
+    hemiGround = lerpColor(new THREE.Color(0x1d2437), new THREE.Color(0x1a1510), f);
   } else if (t < 8) {
     // Dawn/sunrise (6.5-8)
     const f = (t - 6.5) / 1.5;
@@ -122,26 +126,26 @@ function getSkyColors(hour: number, weather: number): SkyColors {
   } else if (t < 19.5) {
     // Dusk (18-19.5)
     const f = (t - 18) / 1.5;
-    zenith = lerpColor(new THREE.Color(0x2244aa), new THREE.Color(0x111133), f);
-    horizon = lerpColor(new THREE.Color(0xff7733), new THREE.Color(0x332222), f);
-    sun = lerpColor(new THREE.Color(0xff8844), new THREE.Color(0x553322), f);
+    zenith = lerpColor(new THREE.Color(0x2244aa), new THREE.Color(0x1b2344), f);
+    horizon = lerpColor(new THREE.Color(0xff7733), new THREE.Color(0x29355a), f);
+    sun = lerpColor(new THREE.Color(0xff8844), new THREE.Color(0x9bb4ff), f);
     sunIntensity = 1.3 - f * 1.0;
-    ambient = lerpColor(new THREE.Color(0x3a2520), new THREE.Color(0x151520), f);
-    ambientIntensity = 0.4 - f * 0.2;
-    fog = lerpColor(new THREE.Color(0x664433), new THREE.Color(0x151518), f);
-    hemiSky = lerpColor(new THREE.Color(0x553344), new THREE.Color(0x1a1a2a), f);
-    hemiGround = lerpColor(new THREE.Color(0x1a1510), new THREE.Color(0x0a0a10), f);
+    ambient = lerpColor(new THREE.Color(0x3a2520), new THREE.Color(0x556796), f);
+    ambientIntensity = 0.4 + f * 0.32;
+    fog = lerpColor(new THREE.Color(0x664433), new THREE.Color(0x212b47), f);
+    hemiSky = lerpColor(new THREE.Color(0x553344), new THREE.Color(0x3d4f7c), f);
+    hemiGround = lerpColor(new THREE.Color(0x1a1510), new THREE.Color(0x1d2437), f);
   } else {
     // Night (19.5-24)
-    zenith = new THREE.Color(0x0a0a1a);
-    horizon = new THREE.Color(0x111122);
-    sun = new THREE.Color(0x334466);
+    zenith = new THREE.Color(0x1b2344);
+    horizon = new THREE.Color(0x29355a);
+    sun = new THREE.Color(0x9bb4ff);
     sunIntensity = 0.1;
-    ambient = new THREE.Color(0x0a0a15);
-    ambientIntensity = 0.15;
-    fog = new THREE.Color(0x0d0d1a);
-    hemiSky = new THREE.Color(0x111125);
-    hemiGround = new THREE.Color(0x0a0a10);
+    ambient = new THREE.Color(0x556796);
+    ambientIntensity = 0.72;
+    fog = new THREE.Color(0x212b47);
+    hemiSky = new THREE.Color(0x3d4f7c);
+    hemiGround = new THREE.Color(0x1d2437);
   }
 
   // Weather modifiers
@@ -153,7 +157,7 @@ function getSkyColors(hour: number, weather: number): SkyColors {
     zenith = lerpColor(zenith, darkGray, weatherDim);
     horizon = lerpColor(horizon, gray, weatherDim);
     sunIntensity *= (1 - weatherDim * 0.8);
-    ambientIntensity *= (1 + weatherDim * 0.3);
+    ambientIntensity *= (1 + weatherDim * 0.22);
     fog = lerpColor(fog, gray, weatherDim * 0.6);
     hemiSky = lerpColor(hemiSky, gray, weatherDim * 0.5);
   }
@@ -176,10 +180,13 @@ uniform vec3 uZenith;
 uniform vec3 uHorizon;
 uniform vec3 uSunColor;
 uniform vec3 uSunDirection;
+uniform vec3 uMoonDirection;
+uniform vec3 uMoonColor;
 uniform float uSunSize;
 uniform float uCloudDensity;
 uniform float uTime;
 uniform float uStarVisibility;
+uniform float uMoonVisibility;
 
 varying vec3 vWorldPosition;
 
@@ -210,12 +217,21 @@ float fbm(vec2 p) {
 
 // Stars
 float starField(vec3 dir) {
-  vec2 uv = vec2(atan(dir.x, dir.z), asin(clamp(dir.y, -1.0, 1.0)));
-  uv *= vec2(80.0, 80.0);
-  float h = hash(floor(uv));
-  float star = step(0.995, h);
-  // Twinkle
-  star *= 0.5 + 0.5 * sin(uTime * 2.0 + h * 100.0);
+  vec2 uv = vec2(
+    atan(dir.x, dir.z) / 6.28318530718 + 0.5,
+    asin(clamp(dir.y, -1.0, 1.0)) / 3.14159265359 + 0.5
+  );
+  uv *= vec2(220.0, 110.0);
+
+  vec2 cell = floor(uv);
+  vec2 local = fract(uv) - 0.5;
+  float h = hash(cell);
+  float starMask = step(0.9975, h);
+  vec2 offset = vec2(hash(cell + 11.7), hash(cell + 27.1)) - 0.5;
+  vec2 p = local - offset * 0.35;
+  float dist = length(vec2(p.x, p.y * 1.4));
+  float star = smoothstep(0.12, 0.0, dist) * starMask;
+  star *= 0.55 + 0.45 * sin(uTime * 1.6 + h * 120.0);
   return star;
 }
 
@@ -234,14 +250,13 @@ void main() {
   float sunHalo = pow(sunDot, 4.0) * 0.15;
   skyColor += uSunColor * (sunDisc * 3.0 + sunGlow + sunHalo);
 
-  // Moon (opposite side of sun, subtle)
-  vec3 moonDir = -uSunDirection;
-  moonDir.y = abs(moonDir.y); // Keep moon above horizon
-  float moonDot = max(dot(dir, normalize(moonDir)), 0.0);
-  float moonDisc = smoothstep(0.999, 0.9995, moonDot);
-  float moonGlow = pow(moonDot, 32.0) * 0.08;
-  vec3 moonColor = vec3(0.7, 0.75, 0.85);
-  skyColor += moonColor * (moonDisc * 1.5 + moonGlow) * (1.0 - sunDisc);
+  // Moon (opposite side of sun, visible at night only)
+  if (uMoonVisibility > 0.01) {
+    float moonDot = max(dot(dir, normalize(uMoonDirection)), 0.0);
+    float moonDisc = smoothstep(0.999, 0.9995, moonDot);
+    float moonGlow = pow(moonDot, 32.0) * 0.08;
+    skyColor += uMoonColor * (moonDisc * 1.5 + moonGlow) * (1.0 - sunDisc) * uMoonVisibility;
+  }
 
   // Stars (visible at night)
   if (uStarVisibility > 0.01) {
@@ -327,6 +342,7 @@ export class SkySystem {
 
   // Lighting references (Engine passes these in)
   private sunLight: THREE.DirectionalLight;
+  private moonLight: THREE.DirectionalLight;
   private hemiLight: THREE.HemisphereLight;
   private ambientLight: THREE.AmbientLight;
 
@@ -339,15 +355,25 @@ export class SkySystem {
   // Scene references
   private scene: THREE.Scene;
   private elapsedTime = 0;
+  private exposure = 1.1;
+  private sunVisibility = 1;
+  private moonVisibility = 0;
+  private moonColor = new THREE.Color(0.62, 0.72, 0.95);
+
+  // Reusable vectors
+  private sunDir = new THREE.Vector3();
+  private moonDir = new THREE.Vector3();
 
   constructor(
     scene: THREE.Scene,
     sunLight: THREE.DirectionalLight,
+    moonLight: THREE.DirectionalLight,
     hemiLight: THREE.HemisphereLight,
     ambientLight: THREE.AmbientLight,
   ) {
     this.scene = scene;
     this.sunLight = sunLight;
+    this.moonLight = moonLight;
     this.hemiLight = hemiLight;
     this.ambientLight = ambientLight;
 
@@ -361,16 +387,20 @@ export class SkySystem {
         uHorizon: { value: new THREE.Color(0x99bbdd) },
         uSunColor: { value: new THREE.Color(0xfff0d0) },
         uSunDirection: { value: new THREE.Vector3(0.3, 0.8, 0.2).normalize() },
+        uMoonDirection: { value: new THREE.Vector3(-0.25, 0.6, -0.2).normalize() },
+        uMoonColor: { value: new THREE.Color(0.62, 0.72, 0.95) },
         uSunSize: { value: 1.0 },
         uCloudDensity: { value: 0.3 },
         uTime: { value: 0 },
         uStarVisibility: { value: 0 },
+        uMoonVisibility: { value: 0 },
       },
       side: THREE.BackSide,
       depthWrite: false,
     });
     this.skyMesh = new THREE.Mesh(skyGeo, this.skyMaterial);
     this.skyMesh.renderOrder = -1;
+    this.skyMesh.frustumCulled = false;
     scene.add(this.skyMesh);
   }
 
@@ -431,7 +461,11 @@ export class SkySystem {
   }
 
   /** Main update — call each frame */
-  update(delta: number): void {
+  update(delta: number, cameraPosition?: THREE.Vector3): void {
+    // Keep sky dome centered on camera so edges are never clipped
+    if (cameraPosition) {
+      this.skyMesh.position.copy(cameraPosition);
+    }
     this.elapsedTime += delta;
 
     // Smooth interpolation toward target
@@ -448,42 +482,86 @@ export class SkySystem {
     this.skyMaterial.uniforms.uZenith.value.copy(colors.zenith);
     this.skyMaterial.uniforms.uHorizon.value.copy(colors.horizon);
     this.skyMaterial.uniforms.uSunColor.value.copy(colors.sun);
+    this.skyMaterial.uniforms.uMoonColor.value.copy(this.moonColor);
     this.skyMaterial.uniforms.uCloudDensity.value = this.currentEnv.cloudDensity;
     this.skyMaterial.uniforms.uTime.value = this.elapsedTime;
 
-    // Sun position based on time of day
-    const sunAngle = ((this.currentEnv.timeOfDay - 6) / 24) * Math.PI * 2;
-    const sunDir = new THREE.Vector3(
-      Math.cos(sunAngle) * 0.5,
-      Math.sin(sunAngle),
-      Math.sin(sunAngle) * 0.3 + 0.2,
+    // Sun/Moon positions: stable orbital model (prevents inverted sunrise/sunset)
+    const solarPhase = ((this.currentEnv.timeOfDay - 6) / 24) * Math.PI * 2;
+    const elevation = Math.sin(solarPhase);
+    const azimuth = solarPhase * 0.35 + Math.PI * 0.15;
+    const horizontalRadius = Math.sqrt(Math.max(0, 1 - elevation * elevation));
+    const sunDir = this.sunDir.set(
+      Math.cos(azimuth) * horizontalRadius,
+      elevation,
+      Math.sin(azimuth) * horizontalRadius,
     ).normalize();
+    const moonDir = this.moonDir.copy(sunDir).multiplyScalar(-1);
     this.skyMaterial.uniforms.uSunDirection.value.copy(sunDir);
+    this.skyMaterial.uniforms.uMoonDirection.value.copy(moonDir);
 
-    // Star visibility: visible when sun is below horizon
-    const starVis = Math.max(0, Math.min(1, -sunDir.y * 3 + 0.2));
-    this.skyMaterial.uniforms.uStarVisibility.value = starVis;
+    // Day/night factors
+    const sunAboveHorizon = clamp01((sunDir.y + 0.05) / 0.25);
+    const nightFactor = 1 - sunAboveHorizon;
+    const moonAboveHorizon = clamp01((moonDir.y + 0.03) / 0.2);
+    const moonVisibility = nightFactor * moonAboveHorizon;
+    this.sunVisibility = sunAboveHorizon;
+    this.moonVisibility = moonVisibility;
+    this.skyMaterial.uniforms.uStarVisibility.value = nightFactor;
+    this.skyMaterial.uniforms.uMoonVisibility.value = moonVisibility;
 
-    // Update directional light (sun)
+    // Update directional light (sun) — must follow camera so shadows stay around player,
+    // and direction must match the visual sun in the sky shader
     this.sunLight.color.copy(colors.sun);
-    this.sunLight.intensity = colors.sunIntensity;
-    this.sunLight.position.set(sunDir.x * 80, Math.max(sunDir.y * 80, 5), sunDir.z * 80);
-    this.sunLight.target.position.set(64, 0, 64);
+    this.sunLight.intensity = colors.sunIntensity * sunAboveHorizon;
 
-    // At night, minimal shadow
-    if (sunDir.y < 0.05) {
-      this.sunLight.intensity = Math.max(colors.sunIntensity, 0.05);
-      this.sunLight.position.y = Math.max(this.sunLight.position.y, 10);
+    if (cameraPosition) {
+      // Light shines FROM sun direction toward camera — shadows match visual sun
+      this.sunLight.position.set(
+        cameraPosition.x + sunDir.x * 80,
+        cameraPosition.y + Math.max(sunDir.y * 80, 5),
+        cameraPosition.z + sunDir.z * 80,
+      );
+      this.sunLight.target.position.copy(cameraPosition);
+      this.sunLight.target.updateMatrixWorld();
+
+      // Snap shadow camera to texel grid to prevent swimming/flickering
+      this.stabilizeShadows(sunDir);
+    } else {
+      this.sunLight.position.set(sunDir.x * 80, Math.max(sunDir.y * 80, 5), sunDir.z * 80);
+      this.sunLight.target.position.set(0, 0, 0);
+      this.sunLight.target.updateMatrixWorld();
+    }
+
+    // Moon light gives readable contrast for competitive nighttime gameplay
+    this.moonLight.color.copy(this.moonColor);
+    this.moonLight.intensity = 0.4 + moonVisibility * 1.1;
+    if (cameraPosition) {
+      this.moonLight.position.set(
+        cameraPosition.x + moonDir.x * 90,
+        cameraPosition.y + Math.max(moonDir.y * 90, 8),
+        cameraPosition.z + moonDir.z * 90,
+      );
+      this.moonLight.target.position.copy(cameraPosition);
+      this.moonLight.target.updateMatrixWorld();
+    } else {
+      this.moonLight.position.set(moonDir.x * 90, Math.max(moonDir.y * 90, 8), moonDir.z * 90);
+      this.moonLight.target.position.set(0, 0, 0);
+      this.moonLight.target.updateMatrixWorld();
     }
 
     // Hemisphere light
     this.hemiLight.color.copy(colors.hemiSky);
     this.hemiLight.groundColor.copy(colors.hemiGround);
-    this.hemiLight.intensity = 0.6 + colors.ambientIntensity * 0.4;
+    this.hemiLight.intensity = Math.max(0.95, 0.78 + colors.ambientIntensity * 0.56);
 
     // Ambient light
     this.ambientLight.color.copy(colors.ambient);
-    this.ambientLight.intensity = colors.ambientIntensity;
+    this.ambientLight.intensity = Math.max(colors.ambientIntensity, 0.7 + nightFactor * 0.28);
+
+    // Renderer exposure target (higher floor at night to prevent black crush)
+    const weatherPenalty = clamp01(this.currentEnv.cloudDensity * 0.22);
+    this.exposure = 1.15 + nightFactor * 0.72 - weatherPenalty * 0.75;
 
     // Fog
     const fogColor = colors.fog;
@@ -531,6 +609,71 @@ export class SkySystem {
 
   getWeatherName(): string {
     return WEATHER_NAMES[this.currentEnv.weather] || 'Unknown';
+  }
+
+  getSunDirection(): THREE.Vector3 {
+    return this.skyMaterial.uniforms.uSunDirection.value;
+  }
+
+  getSunColor(): THREE.Color {
+    return this.skyMaterial.uniforms.uSunColor.value;
+  }
+
+  getMoonDirection(): THREE.Vector3 {
+    return this.skyMaterial.uniforms.uMoonDirection.value;
+  }
+
+  getMoonColor(): THREE.Color {
+    return this.moonColor;
+  }
+
+  getSunVisibility(): number {
+    return this.sunVisibility;
+  }
+
+  getMoonVisibility(): number {
+    return this.moonVisibility;
+  }
+
+  getExposure(): number {
+    return this.exposure;
+  }
+
+  // Reusable vectors for shadow stabilization (avoid per-frame allocations)
+  private _shadowRight = new THREE.Vector3();
+  private _shadowUp = new THREE.Vector3();
+
+  /**
+   * Snap shadow camera position to texel boundaries so the shadow map
+   * stays grid-aligned as the camera moves. Prevents shadow swimming/flickering.
+   */
+  private stabilizeShadows(lightDir: THREE.Vector3): void {
+    const shadowCam = this.sunLight.shadow.camera;
+    const mapSize = this.sunLight.shadow.mapSize.x;
+    const frustumWidth = shadowCam.right - shadowCam.left;
+    const texelSize = frustumWidth / mapSize;
+
+    // Build shadow camera's right/up axes from the light direction
+    const worldUp = Math.abs(lightDir.y) > 0.99
+      ? this._shadowRight.set(1, 0, 0)
+      : this._shadowRight.set(0, 1, 0);
+    const right = this._shadowRight.crossVectors(worldUp, lightDir).normalize();
+    const up = this._shadowUp.crossVectors(lightDir, right).normalize();
+
+    // Project target onto shadow plane axes
+    const target = this.sunLight.target.position;
+    const projR = target.dot(right);
+    const projU = target.dot(up);
+
+    // Snap to nearest texel
+    const snapR = Math.round(projR / texelSize) * texelSize - projR;
+    const snapU = Math.round(projU / texelSize) * texelSize - projU;
+
+    // Shift both light and target by the snap offset
+    this.sunLight.position.addScaledVector(right, snapR);
+    this.sunLight.position.addScaledVector(up, snapU);
+    target.addScaledVector(right, snapR);
+    target.addScaledVector(up, snapU);
   }
 
   /** Lerp in 24h circular space */

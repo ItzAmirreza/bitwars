@@ -18,6 +18,20 @@ const WORLD_X = 128;
 const WORLD_Y = 48;
 const WORLD_Z = 128;
 
+export interface DynamicLightOptions {
+  type?: 'point' | 'spot';
+  position: THREE.Vector3 | { x: number; y: number; z: number };
+  color?: THREE.ColorRepresentation;
+  intensity: number;
+  distance: number;
+  decay?: number;
+  castShadow?: boolean;
+  ttl?: number;
+  direction?: THREE.Vector3 | { x: number; y: number; z: number };
+  angle?: number;
+  penumbra?: number;
+}
+
 export interface EngineState {
   weapon: number;
   ammo: number;
@@ -54,9 +68,18 @@ export class Engine {
 
   // Lighting & Sky
   private sun: THREE.DirectionalLight;
+  private moon: THREE.DirectionalLight;
   private hemiLight: THREE.HemisphereLight;
   private ambientLight: THREE.AmbientLight;
   private sky: SkySystem;
+
+  // Dynamic runtime lights (gameplay/cinematics)
+  private dynamicLights = new Map<string, {
+    light: THREE.PointLight | THREE.SpotLight;
+    target?: THREE.Object3D;
+    ttl: number | null;
+  }>();
+  private dynamicLightSeq = 0;
 
   // State
   private clock: THREE.Clock;
@@ -80,6 +103,7 @@ export class Engine {
   private elapsedTime = 0;
   private baseFov = 75;
   private wasSliding = false;
+  chatOpen = false;
 
   constructor(
     container: HTMLElement,
@@ -100,6 +124,8 @@ export class Engine {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    (this.renderer as THREE.WebGLRenderer & { useLegacyLights?: boolean }).useLegacyLights = false;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setClearColor(0x5a5856);
@@ -127,17 +153,23 @@ export class Engine {
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.camera.near = 1;
     this.sun.shadow.camera.far = 200;
-    this.sun.shadow.camera.left = -80;
-    this.sun.shadow.camera.right = 80;
-    this.sun.shadow.camera.top = 80;
-    this.sun.shadow.camera.bottom = -80;
-    this.sun.shadow.bias = -0.001;
+    this.sun.shadow.camera.left = -50;
+    this.sun.shadow.camera.right = 50;
+    this.sun.shadow.camera.top = 50;
+    this.sun.shadow.camera.bottom = -50;
+    this.sun.shadow.bias = 0;
     this.sun.shadow.normalBias = 0.02;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
 
+    this.moon = new THREE.DirectionalLight(0x9bb4ff, 0.35);
+    this.moon.position.set(-40, 60, -25);
+    this.moon.castShadow = false;
+    this.scene.add(this.moon);
+    this.scene.add(this.moon.target);
+
     // ── Sky system (procedural sky, dynamic lighting, weather) ──
-    this.sky = new SkySystem(this.scene, this.sun, this.hemiLight, this.ambientLight);
+    this.sky = new SkySystem(this.scene, this.sun, this.moon, this.hemiLight, this.ambientLight);
     this.loadEnvironmentFromServer();
 
     // ── Voxel world (128×48×128) ──
@@ -147,7 +179,13 @@ export class Engine {
 
     // ── Ground plane ──
     const groundGeo = new THREE.PlaneGeometry(256, 256);
-    const groundMat = new THREE.MeshLambertMaterial({ color: 0x4a4642 });
+    const groundMat = new THREE.MeshPhongMaterial({
+      color: 0x4a4642,
+      emissive: new THREE.Color(0x0d1422),
+      emissiveIntensity: 0.26,
+      shininess: 4,
+      specular: new THREE.Color(0x111111),
+    });
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(WORLD_X / 2, -0.01, WORLD_Z / 2);
@@ -185,7 +223,7 @@ export class Engine {
     this.weaponModel = new WeaponModel(w / h);
 
     // ── PostFX ──
-    this.postfx = new PostFX();
+    this.postfx = new PostFX(w, h);
 
     // ── Server sync ──
     this.setupServerListeners();
@@ -208,6 +246,7 @@ export class Engine {
     this.camera.updateProjectionMatrix();
     this.audio.setMasterVolume(settings.masterVolume);
     this.sun.castShadow = settings.shadowsEnabled;
+    this.moon.castShadow = false;
     this.postfx.enabled = settings.postFXEnabled;
     this.controls.setSprintToggle(settings.sprintToggle);
 
@@ -224,6 +263,24 @@ export class Engine {
     }
   }
 
+  /** Toggle fly mode (admin) */
+  toggleFly(): void {
+    this.controls.flyMode = !this.controls.flyMode;
+  }
+
+  /** Toggle chat mode — disables game keyboard input */
+  setChatOpen(open: boolean): void {
+    this.chatOpen = open;
+    this.controls.inputEnabled = !open;
+    if (open) {
+      // Release all held movement keys
+      this.controls.moveForward = false;
+      this.controls.moveBackward = false;
+      this.controls.moveLeft = false;
+      this.controls.moveRight = false;
+    }
+  }
+
   // ── INPUT ──
 
   private onMouseDown = (e: MouseEvent): void => {
@@ -236,6 +293,7 @@ export class Engine {
     if (e.button === 0) this.mouseDown = false;
   };
   private onKeyDown = (e: KeyboardEvent): void => {
+    if (this.chatOpen) return;
     if (e.code === 'KeyR') {
       this.weapons.reload(); // Client prediction
       this.audio.playReload();
@@ -251,6 +309,87 @@ export class Engine {
       }
     }
   };
+
+  private toVec3(v: THREE.Vector3 | { x: number; y: number; z: number }): THREE.Vector3 {
+    return v instanceof THREE.Vector3 ? v : new THREE.Vector3(v.x, v.y, v.z);
+  }
+
+  /** Runtime light source API for gameplay objects and cinematics. Returns light id. */
+  addDynamicLight(options: DynamicLightOptions): string {
+    const id = `dyn-${++this.dynamicLightSeq}`;
+    const type = options.type ?? 'point';
+    const color = options.color ?? 0xffffff;
+    const decay = options.decay ?? 2;
+
+    if (type === 'spot') {
+      const light = new THREE.SpotLight(
+        color,
+        options.intensity,
+        options.distance,
+        options.angle ?? Math.PI / 6,
+        options.penumbra ?? 0.35,
+        decay,
+      );
+      light.castShadow = options.castShadow ?? false;
+      light.position.copy(this.toVec3(options.position));
+      const target = new THREE.Object3D();
+      const direction = this.toVec3(options.direction ?? { x: 0, y: -1, z: 0 }).normalize();
+      target.position.copy(light.position).add(direction);
+      light.target = target;
+      this.scene.add(target);
+      this.scene.add(light);
+      this.dynamicLights.set(id, { light, target, ttl: options.ttl ?? null });
+      return id;
+    }
+
+    const light = new THREE.PointLight(color, options.intensity, options.distance, decay);
+    light.castShadow = options.castShadow ?? false;
+    light.position.copy(this.toVec3(options.position));
+    this.scene.add(light);
+    this.dynamicLights.set(id, { light, ttl: options.ttl ?? null });
+    return id;
+  }
+
+  updateDynamicLight(id: string, patch: Partial<DynamicLightOptions>): void {
+    const entry = this.dynamicLights.get(id);
+    if (!entry) return;
+    const light = entry.light;
+
+    if (patch.position) light.position.copy(this.toVec3(patch.position));
+    if (patch.color !== undefined) light.color.set(patch.color);
+    if (patch.intensity !== undefined) light.intensity = patch.intensity;
+    if (patch.distance !== undefined) light.distance = patch.distance;
+    if (patch.decay !== undefined) light.decay = patch.decay;
+    if (patch.castShadow !== undefined) light.castShadow = patch.castShadow;
+    if (patch.ttl !== undefined) entry.ttl = patch.ttl;
+
+    if (light instanceof THREE.SpotLight) {
+      if (patch.angle !== undefined) light.angle = patch.angle;
+      if (patch.penumbra !== undefined) light.penumbra = patch.penumbra;
+      if (patch.direction && entry.target) {
+        const dir = this.toVec3(patch.direction).normalize();
+        entry.target.position.copy(light.position).add(dir);
+        entry.target.updateMatrixWorld();
+      }
+    }
+  }
+
+  removeDynamicLight(id: string): void {
+    const entry = this.dynamicLights.get(id);
+    if (!entry) return;
+    this.scene.remove(entry.light);
+    if (entry.target) this.scene.remove(entry.target);
+    entry.light.dispose();
+    this.dynamicLights.delete(id);
+  }
+
+  private updateDynamicLights(delta: number): void {
+    for (const [id, entry] of this.dynamicLights) {
+      if (entry.ttl === null) continue;
+      entry.ttl -= delta;
+      if (entry.ttl <= 0) this.removeDynamicLight(id);
+    }
+  }
 
   // ── FIRE ──
 
@@ -323,13 +462,21 @@ export class Engine {
     // Server sync: unified fire_weapon reducer with hit players and blocks
     this.syncFireToServer(result);
 
-    // Apply explosion force to falling blocks
+    // Explosion physics: knockback + flying debris + force on existing falling blocks
     if (result.hitPos && WEAPONS[result.weaponIndex].radius > 0) {
       const w = WEAPONS[result.weaponIndex];
-      this.physics.applyExplosionForce(
-        result.hitPos.x, result.hitPos.y, result.hitPos.z,
-        w.radius * 2, w.damage * 1.5,
-      );
+      const hx = result.hitPos.x, hy = result.hitPos.y, hz = result.hitPos.z;
+
+      // Player knockback (rocket jumping etc.)
+      this.applyExplosionKnockback(hx, hy, hz, w.radius, w.damage);
+
+      // Spawn destroyed blocks as flying physics debris
+      if (result.destroyedBlocks.length > 0) {
+        this.physics.spawnExplosionDebris(result.destroyedBlocks, hx, hy, hz, w.damage * 0.2);
+      }
+
+      // Push already-falling blocks
+      this.physics.applyExplosionForce(hx, hy, hz, w.radius * 2, w.damage * 1.5);
     }
 
     // Rebuild affected chunks
@@ -366,12 +513,20 @@ export class Engine {
       this.vfx.emitExplosion(impact.hitPos.x, impact.hitPos.y, impact.hitPos.z, w.radius);
     }
 
-    // Explosion force on already-falling blocks
+    // Explosion physics: knockback + flying debris + force on existing falling blocks
     if (w.radius > 0) {
-      this.physics.applyExplosionForce(
-        impact.hitPos.x, impact.hitPos.y, impact.hitPos.z,
-        w.radius * 2, w.damage * 1.5,
-      );
+      const hx = impact.hitPos.x, hy = impact.hitPos.y, hz = impact.hitPos.z;
+
+      // Player knockback (rocket jumping etc.)
+      this.applyExplosionKnockback(hx, hy, hz, w.radius, w.damage);
+
+      // Spawn destroyed blocks as flying physics debris
+      if (impact.destroyedBlocks.length > 0) {
+        this.physics.spawnExplosionDebris(impact.destroyedBlocks, hx, hy, hz, w.damage * 0.2);
+      }
+
+      // Push already-falling blocks
+      this.physics.applyExplosionForce(hx, hy, hz, w.radius * 2, w.damage * 1.5);
     }
 
     // Rebuild affected chunks
@@ -379,6 +534,44 @@ export class Engine {
 
     // Server sync: projectile impact
     this.syncImpactToServer(impact);
+  }
+
+  // ── EXPLOSION KNOCKBACK ──
+
+  /** Apply explosion knockback to the local player based on distance from blast center */
+  private applyExplosionKnockback(
+    cx: number, cy: number, cz: number,
+    radius: number, damage: number,
+  ): void {
+    const px = this.camera.position.x;
+    const py = this.camera.position.y;
+    const pz = this.camera.position.z;
+
+    const dx = px - cx;
+    const dy = py - cy;
+    const dz = pz - cz;
+    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    // Knockback range is larger than the destruction radius
+    const maxDist = radius * 3;
+    if (dist >= maxDist || dist < 0.01) return;
+
+    const falloff = 1 - dist / maxDist;
+    const knockback = damage * 0.18 * falloff;
+
+    // Normalize direction from explosion to player
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const nz = dz / dist;
+
+    // Always push upward at least partially (enables rocket jumping)
+    const upBias = knockback * 0.6;
+
+    this.controls.applyImpulse(
+      nx * knockback,
+      Math.max(ny * knockback, upBias),
+      nz * knockback,
+    );
   }
 
   // ── SERVER SYNC ──
@@ -527,6 +720,15 @@ export class Engine {
       const id = player.identity.toHexString();
 
       if (this.localIdentity && id === this.localIdentity) {
+        // Detect server-side teleportation (large position jump)
+        const sp = player.pos;
+        const cp = this.camera.position;
+        const tdx = sp.x - cp.x, tdy = sp.y - cp.y, tdz = sp.z - cp.z;
+        if (tdx * tdx + tdy * tdy + tdz * tdz > 100) {
+          this.camera.position.set(sp.x, sp.y, sp.z);
+          this.controls.resetVelocity();
+        }
+
         const oldHealth = this.health;
         this.health = player.health;
         this.kills = player.kills;
@@ -739,11 +941,15 @@ export class Engine {
     // Physics (falling blocks)
     this.physics.update(delta);
 
+    // Dynamic lights
+    this.updateDynamicLights(delta);
+
     // Projectiles
     this.projectileManager.update(delta);
 
     // Sky & environment
-    this.sky.update(delta);
+    this.sky.update(delta, this.camera.position);
+    this.renderer.toneMappingExposure += (this.sky.getExposure() - this.renderer.toneMappingExposure) * Math.min(1, delta * 2.5);
     this.renderer.setClearColor(this.sky.getFogColor());
 
     // VFX
@@ -755,9 +961,6 @@ export class Engine {
     this.weaponModel.setMoving(moving, this.controls.isSprinting, this.controls.isCrouching,
       this.controls.isSliding, this.controls.strafeInput);
     this.weaponModel.update(delta);
-
-    // PostFX
-    this.postfx.update(delta, this.elapsedTime);
 
     // Hit marker
     if (this.hitMarkerTimer > 0) this.hitMarkerTimer -= delta;
@@ -801,12 +1004,38 @@ export class Engine {
       this.camera.quaternion.multiply(shakeQuat);
     }
 
+    // Update the active celestial light with the effected camera for accurate god ray alignment
+    this.postfx.updateCelestial(this.camera, [
+      {
+        direction: this.sky.getSunDirection(),
+        color: this.sky.getSunColor(),
+        visibility: this.sky.getSunVisibility(),
+        godRayIntensity: 1.2,
+        glareIntensity: 0.8,
+      },
+      {
+        direction: this.sky.getMoonDirection(),
+        color: this.sky.getMoonColor(),
+        visibility: this.sky.getMoonVisibility(),
+        godRayIntensity: 0.45,
+        glareIntensity: 0.2,
+      },
+    ]);
+    this.postfx.update(delta, this.elapsedTime);
+
+    // Render world + weapon to PostFX offscreen target
+    const rt = this.postfx.getRenderTarget();
+    this.renderer.setRenderTarget(rt);
+    this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
     this.renderer.autoClear = false;
     this.renderer.clearDepth();
     this.renderer.render(this.weaponModel.scene, this.weaponModel.camera);
-    this.postfx.render(this.renderer);
     this.renderer.autoClear = true;
+    this.renderer.setRenderTarget(null);
+
+    // PostFX pipeline: god rays + composite → screen
+    this.postfx.render(this.renderer);
 
     // Restore clean camera
     this.camera.quaternion.copy(savedQuat);
@@ -841,6 +1070,7 @@ export class Engine {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.weaponModel.resize(w / h);
+    this.postfx.resize(w, h);
   };
 
   // ── DESTROY ──
@@ -866,5 +1096,6 @@ export class Engine {
     }
     for (const [, g] of this.otherPlayers) this.scene.remove(g);
     this.otherPlayers.clear();
+    for (const id of Array.from(this.dynamicLights.keys())) this.removeDynamicLight(id);
   }
 }

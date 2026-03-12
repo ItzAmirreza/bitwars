@@ -54,6 +54,7 @@ import PlayerMovementRow from "./player_movement_table";
 import PlayerWeaponStateRow from "./player_weapon_state_table";
 import ShotEventRow from "./shot_event_table";
 import WorldChunkRow from "./world_chunk_table";
+import WorldEnvironmentRow from "./world_environment_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -136,6 +137,17 @@ const tablesSchema = __schema({
       { name: 'world_chunk_chunk_id_key', constraint: 'unique', columns: ['chunkId'] },
     ],
   }, WorldChunkRow),
+  world_environment: __table({
+    name: 'world_environment',
+    indexes: [
+      { name: 'id', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'world_environment_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, WorldEnvironmentRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */

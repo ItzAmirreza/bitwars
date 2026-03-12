@@ -123,7 +123,12 @@ export class PhysicsSystem {
     this.audio = audio;
 
     // Single instanced mesh for all falling blocks
-    const mat = new THREE.MeshLambertMaterial();
+    const mat = new THREE.MeshPhongMaterial({
+      emissive: new THREE.Color(0x10182a),
+      emissiveIntensity: 0.26,
+      shininess: 5,
+      specular: new THREE.Color(0x111418),
+    });
     this.instancedMesh = new THREE.InstancedMesh(SHARED_GEO, mat, MAX_FALLING);
     this.instancedMesh.count = 0;
     this.instancedMesh.castShadow = true;
@@ -147,6 +152,52 @@ export class PhysicsSystem {
       this.spawnFalling(blocksX[i], blocksY[i], blocksZ[i], blockTypes[i]);
     }
     if (count > 0) this.audio.playCrumble();
+  }
+
+  /**
+   * Spawn destroyed blocks as flying debris from an explosion center.
+   * Each block gets an outward velocity based on distance from center.
+   */
+  spawnExplosionDebris(
+    blocks: { x: number; y: number; z: number; blockType: number }[],
+    cx: number, cy: number, cz: number,
+    force: number,
+  ): void {
+    // Limit how many physics blocks we spawn to avoid performance issues
+    const maxSpawn = Math.min(blocks.length, MAX_FALLING - this.falling.length, 40);
+    // If there are more blocks than we can spawn, sample randomly
+    const toSpawn = blocks.length > maxSpawn
+      ? blocks.sort(() => Math.random() - 0.5).slice(0, maxSpawn) : blocks;
+
+    for (const b of toSpawn) {
+      if (this.falling.length >= MAX_FALLING) break;
+      const fb = this.pool.acquire(b.blockType, b.x, b.y, b.z);
+
+      // Direction from explosion center outward
+      const dx = b.x + 0.5 - cx;
+      const dy = b.y + 0.5 - cy;
+      const dz = b.z + 0.5 - cz;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+      if (dist > 0.01) {
+        const falloff = 1 - dist / (dist + 2); // softer falloff so all blocks get pushed
+        const impulse = force * falloff / fb.weight;
+        fb.vx = (dx / dist) * impulse;
+        fb.vy = (dy / dist) * impulse + impulse * 0.4; // upward bias
+        fb.vz = (dz / dist) * impulse;
+      } else {
+        // Dead center — launch straight up
+        fb.vy = force / fb.weight;
+      }
+
+      // Dramatic spin for explosion debris
+      fb.rotSpeedX = (Math.random() - 0.5) * 14;
+      fb.rotSpeedZ = (Math.random() - 0.5) * 14;
+
+      this.falling.push(fb);
+    }
+
+    if (toSpawn.length > 0) this.audio.playCrumble();
   }
 
   /** Apply explosion force to nearby falling blocks */

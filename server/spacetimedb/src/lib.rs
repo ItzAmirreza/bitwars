@@ -597,8 +597,10 @@ pub fn update_position(
     }
 
     let clamped_pos = clamp_pos(&pos);
+    let admin_bypass = is_admin(&player.username);
 
-    // Speed validation
+    // Speed validation (bypassed for admins — fly mode)
+    if !admin_bypass {
     if let Some(mv_state) = ctx.db.player_movement().identity().find(sender) {
         let now_us = timestamp_micros(ctx.timestamp);
         let last_us = timestamp_micros(mv_state.last_update);
@@ -655,6 +657,7 @@ pub fn update_position(
     } else {
         init_movement_state(ctx, sender, &clamped_pos);
     }
+    } // end admin_bypass
 
     ctx.db.player().identity().update(Player {
         pos: clamped_pos,
@@ -751,6 +754,11 @@ pub fn fire_weapon(
 
         if let Some(target) = ctx.db.player().identity().find(*target_id) {
             if target.health <= 0 || !target.online {
+                continue;
+            }
+
+            // God mode protection
+            if target.max_health >= 9999 {
                 continue;
             }
 
@@ -929,6 +937,367 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
     Ok(())
 }
 
+// ── Admin Commands ──
+
+const ADMIN_USERNAME: &str = "amir";
+
+fn is_admin(username: &str) -> bool {
+    username.to_lowercase() == ADMIN_USERNAME
+}
+
+fn find_player_by_name(ctx: &ReducerContext, name: &str) -> Option<Player> {
+    let name_lower = name.to_lowercase();
+    ctx.db
+        .player()
+        .iter()
+        .find(|p| p.username.to_lowercase() == name_lower)
+}
+
+fn insert_system_message(ctx: &ReducerContext, text: &str) {
+    ctx.db.chat_message().insert(ChatMessage {
+        id: 0,
+        sender: ctx.sender(),
+        sender_name: "[SERVER]".to_string(),
+        text: text.to_string(),
+        sent_at: ctx.timestamp,
+    });
+}
+
+fn process_admin_command(
+    ctx: &ReducerContext,
+    sender: Identity,
+    text: &str,
+) -> Result<(), String> {
+    let parts: Vec<&str> = text.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err("Empty command".to_string());
+    }
+
+    let cmd = parts[0].to_lowercase();
+
+    match cmd.as_str() {
+        "/tp" => {
+            if parts.len() == 4 {
+                // /tp x y z
+                let x: f32 = parts[1]
+                    .parse()
+                    .map_err(|_| "Invalid x coordinate".to_string())?;
+                let y: f32 = parts[2]
+                    .parse()
+                    .map_err(|_| "Invalid y coordinate".to_string())?;
+                let z: f32 = parts[3]
+                    .parse()
+                    .map_err(|_| "Invalid z coordinate".to_string())?;
+                let new_pos = Vec3 { x, y, z };
+
+                let player = ctx
+                    .db
+                    .player()
+                    .identity()
+                    .find(sender)
+                    .ok_or("Not registered")?;
+                ctx.db.player().identity().update(Player {
+                    pos: new_pos.clone(),
+                    ..player
+                });
+                init_movement_state(ctx, sender, &new_pos);
+                insert_system_message(
+                    ctx,
+                    &format!("Teleported to ({:.1}, {:.1}, {:.1})", x, y, z),
+                );
+            } else if parts.len() == 2 {
+                // /tp <player>
+                let target =
+                    find_player_by_name(ctx, parts[1]).ok_or("Player not found".to_string())?;
+                let target_pos = target.pos.clone();
+                let target_name = target.username.clone();
+
+                let player = ctx
+                    .db
+                    .player()
+                    .identity()
+                    .find(sender)
+                    .ok_or("Not registered")?;
+                ctx.db.player().identity().update(Player {
+                    pos: target_pos.clone(),
+                    ..player
+                });
+                init_movement_state(ctx, sender, &target_pos);
+                insert_system_message(ctx, &format!("Teleported to {}", target_name));
+            } else {
+                return Err("Usage: /tp <player> or /tp <x> <y> <z>".to_string());
+            }
+            Ok(())
+        }
+
+        "/tphere" | "/summon" => {
+            if parts.len() != 2 {
+                return Err("Usage: /tphere <player>".to_string());
+            }
+            let admin = ctx
+                .db
+                .player()
+                .identity()
+                .find(sender)
+                .ok_or("Not registered")?;
+            let admin_pos = admin.pos.clone();
+
+            let target =
+                find_player_by_name(ctx, parts[1]).ok_or("Player not found".to_string())?;
+            let target_identity = target.identity;
+            let target_name = target.username.clone();
+            ctx.db.player().identity().update(Player {
+                pos: admin_pos.clone(),
+                ..target
+            });
+            init_movement_state(ctx, target_identity, &admin_pos);
+            insert_system_message(ctx, &format!("Summoned {} to your location", target_name));
+            Ok(())
+        }
+
+        "/kill" => {
+            if parts.len() != 2 {
+                return Err("Usage: /kill <player>".to_string());
+            }
+            let target =
+                find_player_by_name(ctx, parts[1]).ok_or("Player not found".to_string())?;
+            let target_name = target.username.clone();
+            ctx.db.player().identity().update(Player {
+                health: 0,
+                deaths: target.deaths + 1,
+                ..target
+            });
+            insert_system_message(ctx, &format!("Killed {}", target_name));
+            Ok(())
+        }
+
+        "/heal" => {
+            if parts.len() == 1 {
+                // Heal self
+                let player = ctx
+                    .db
+                    .player()
+                    .identity()
+                    .find(sender)
+                    .ok_or("Not registered")?;
+                ctx.db.player().identity().update(Player {
+                    health: MAX_HEALTH,
+                    ..player
+                });
+                insert_system_message(ctx, "Healed yourself");
+            } else if parts.len() == 2 {
+                let target =
+                    find_player_by_name(ctx, parts[1]).ok_or("Player not found".to_string())?;
+                let target_name = target.username.clone();
+                ctx.db.player().identity().update(Player {
+                    health: target.max_health,
+                    ..target
+                });
+                insert_system_message(ctx, &format!("Healed {}", target_name));
+            } else {
+                return Err("Usage: /heal [player]".to_string());
+            }
+            Ok(())
+        }
+
+        "/god" => {
+            let player = ctx
+                .db
+                .player()
+                .identity()
+                .find(sender)
+                .ok_or("Not registered")?;
+            let is_god = player.max_health >= 9999;
+            if is_god {
+                ctx.db.player().identity().update(Player {
+                    health: MAX_HEALTH,
+                    max_health: MAX_HEALTH,
+                    ..player
+                });
+                insert_system_message(ctx, "God mode OFF");
+            } else {
+                ctx.db.player().identity().update(Player {
+                    health: 9999,
+                    max_health: 9999,
+                    ..player
+                });
+                insert_system_message(ctx, "God mode ON");
+            }
+            Ok(())
+        }
+
+        "/ammo" => {
+            if let Some(wstate) = ctx.db.player_weapon_state().identity().find(sender) {
+                ctx.db
+                    .player_weapon_state()
+                    .identity()
+                    .update(PlayerWeaponState {
+                        ammo_rifle: 999,
+                        ammo_shotgun: 999,
+                        ammo_rpg: 999,
+                        ..wstate
+                    });
+            }
+            insert_system_message(ctx, "Infinite ammo granted");
+            Ok(())
+        }
+
+        "/weather" => {
+            if parts.len() != 2 {
+                return Err(
+                    "Usage: /weather <0-4> (0=Clear 1=Cloudy 2=Overcast 3=Rainy 4=Stormy)"
+                        .to_string(),
+                );
+            }
+            let w: u8 = parts[1]
+                .parse()
+                .map_err(|_| "Invalid weather type".to_string())?;
+            if w > 4 {
+                return Err("Weather must be 0-4".to_string());
+            }
+
+            if let Some(env) = ctx.db.world_environment().id().find(1) {
+                let cloud = match w {
+                    0 => 0.1,
+                    1 => 0.5,
+                    2 => 0.8,
+                    3 => 0.7,
+                    4 => 0.9,
+                    _ => 0.3,
+                };
+                let fog = match w {
+                    0 => 0.6,
+                    1 => 0.8,
+                    2 => 1.2,
+                    3 => 1.5,
+                    4 => 1.8,
+                    _ => 1.0,
+                };
+                let wind = match w {
+                    0 => 0.1,
+                    1 => 0.3,
+                    2 => 0.4,
+                    3 => 0.5,
+                    4 => 0.8,
+                    _ => 0.3,
+                };
+                let name = match w {
+                    0 => "Clear",
+                    1 => "Cloudy",
+                    2 => "Overcast",
+                    3 => "Rainy",
+                    4 => "Stormy",
+                    _ => "Unknown",
+                };
+                ctx.db.world_environment().id().update(WorldEnvironment {
+                    weather: w,
+                    cloud_density: cloud,
+                    fog_density: fog,
+                    wind_speed: wind,
+                    last_weather_change: ctx.timestamp,
+                    ..env
+                });
+                insert_system_message(ctx, &format!("Weather set to {}", name));
+            }
+            Ok(())
+        }
+
+        "/time" => {
+            if parts.len() != 2 {
+                return Err("Usage: /time <0-24>".to_string());
+            }
+            let t: f32 = parts[1]
+                .parse()
+                .map_err(|_| "Invalid time".to_string())?;
+            if !(0.0..=24.0).contains(&t) {
+                return Err("Time must be 0.0 - 24.0".to_string());
+            }
+
+            if let Some(env) = ctx.db.world_environment().id().find(1) {
+                ctx.db.world_environment().id().update(WorldEnvironment {
+                    time_of_day: t,
+                    ..env
+                });
+                let hours = t as u32;
+                let mins = ((t - hours as f32) * 60.0) as u32;
+                insert_system_message(ctx, &format!("Time set to {:02}:{:02}", hours, mins));
+            }
+            Ok(())
+        }
+
+        "/announce" => {
+            if parts.len() < 2 {
+                return Err("Usage: /announce <message>".to_string());
+            }
+            let msg = parts[1..].join(" ");
+            insert_system_message(ctx, &format!("[ANNOUNCEMENT] {}", msg));
+            Ok(())
+        }
+
+        "/killall" => {
+            let target_ids: Vec<Identity> = ctx
+                .db
+                .player()
+                .iter()
+                .filter(|p| p.online && p.identity != sender)
+                .map(|p| p.identity)
+                .collect();
+
+            let count = target_ids.len();
+            for id in target_ids {
+                if let Some(target) = ctx.db.player().identity().find(id) {
+                    ctx.db.player().identity().update(Player {
+                        health: 0,
+                        deaths: target.deaths + 1,
+                        ..target
+                    });
+                }
+            }
+            insert_system_message(ctx, &format!("Killed {} players", count));
+            Ok(())
+        }
+
+        "/respawnall" => {
+            let target_ids: Vec<Identity> = ctx
+                .db
+                .player()
+                .iter()
+                .filter(|p| p.online && p.identity != sender)
+                .map(|p| p.identity)
+                .collect();
+
+            let count = target_ids.len();
+            for id in target_ids {
+                if let Some(target) = ctx.db.player().identity().find(id) {
+                    ctx.db.player().identity().update(Player {
+                        health: MAX_HEALTH,
+                        pos: SPAWN_POS,
+                        ..target
+                    });
+                    init_movement_state(ctx, id, &SPAWN_POS);
+                }
+            }
+            insert_system_message(ctx, &format!("Respawned {} players", count));
+            Ok(())
+        }
+
+        "/fly" => {
+            insert_system_message(ctx, "Fly mode toggled");
+            Ok(())
+        }
+
+        "/help" => {
+            insert_system_message(
+                ctx,
+                "Admin: /tp /tphere /kill /heal /god /fly /ammo /weather /time /announce /killall /respawnall",
+            );
+            Ok(())
+        }
+
+        _ => Err(format!("Unknown command: {}", parts[0])),
+    }
+}
+
 // ── Chat ──
 
 #[reducer]
@@ -945,6 +1314,14 @@ pub fn send_chat(ctx: &ReducerContext, text: String) -> Result<(), String> {
         .identity()
         .find(sender)
         .ok_or("Not registered")?;
+
+    // Admin command processing
+    if text.starts_with('/') {
+        if !is_admin(&player.username) {
+            return Err("Unknown command".to_string());
+        }
+        return process_admin_command(ctx, sender, &text);
+    }
 
     ctx.db.chat_message().insert(ChatMessage {
         id: 0,
@@ -1175,6 +1552,11 @@ pub fn projectile_impact(
 
         if let Some(target) = ctx.db.player().identity().find(*target_id) {
             if target.health <= 0 || !target.online {
+                continue;
+            }
+
+            // God mode protection
+            if target.max_health >= 9999 {
                 continue;
             }
 

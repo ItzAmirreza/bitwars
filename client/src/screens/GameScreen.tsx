@@ -4,6 +4,13 @@ import type { EngineState } from '../game/Engine';
 import { useGameStore } from '../store';
 import { SettingsPanel } from './SettingsPanel';
 
+interface DisplayMessage {
+  id: number;
+  senderName: string;
+  text: string;
+  receivedAt: number;
+}
+
 const WEAPON_DATA = [
   { name: 'RIFLE', key: '1', color: 'var(--c-blue)' },
   { name: 'SHOTGUN', key: '2', color: 'var(--c-amber)' },
@@ -32,6 +39,95 @@ export function GameScreen() {
     weather: 'Clear',
   });
 
+  // ── Chat state ──
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<DisplayMessage[]>([]);
+  const [, chatTick] = useState(0); // forces re-render for message fading
+  const chatInputRef = useRef<HTMLInputElement>(null);
+
+  // Load chat messages from DB + subscribe to new ones
+  useEffect(() => {
+    if (!connection) return;
+    const db = connection.db as any;
+    if (!db.chat_message) return;
+
+    // Load existing messages
+    const initial: DisplayMessage[] = [];
+    for (const msg of db.chat_message.iter()) {
+      initial.push({
+        id: Number(msg.id),
+        senderName: msg.senderName as string,
+        text: msg.text as string,
+        receivedAt: Date.now(),
+      });
+    }
+    initial.sort((a, b) => a.id - b.id);
+    setChatMessages(initial.slice(-50));
+
+    // Listen for new messages
+    db.chat_message.onInsert((_ctx: unknown, msg: any) => {
+      setChatMessages((prev) =>
+        [
+          ...prev,
+          {
+            id: Number(msg.id),
+            senderName: msg.senderName as string,
+            text: msg.text as string,
+            receivedAt: Date.now(),
+          },
+        ].slice(-50),
+      );
+    });
+  }, [connection]);
+
+  // Periodic tick for message fading (when chat is closed)
+  useEffect(() => {
+    if (chatOpen) return;
+    const interval = setInterval(() => chatTick((n) => n + 1), 1000);
+    return () => clearInterval(interval);
+  }, [chatOpen]);
+
+  // Focus chat input when opened
+  useEffect(() => {
+    if (chatOpen) {
+      setTimeout(() => chatInputRef.current?.focus(), 0);
+    }
+  }, [chatOpen]);
+
+  const openChat = useCallback(() => {
+    setChatOpen(true);
+    engineRef.current?.setChatOpen(true);
+  }, []);
+
+  const closeChat = useCallback(() => {
+    setChatOpen(false);
+    engineRef.current?.setChatOpen(false);
+  }, []);
+
+  const sendChatMessage = useCallback(
+    (text: string) => {
+      if (!connection || !text.trim()) return;
+      const trimmed = text.trim();
+      // Toggle fly mode client-side when /fly is sent
+      if (trimmed.toLowerCase() === '/fly') {
+        engineRef.current?.toggleFly();
+      }
+      connection.reducers.sendChat({ text: trimmed });
+    },
+    [connection],
+  );
+
+  const getMessageOpacity = useCallback(
+    (receivedAt: number): number => {
+      if (chatOpen) return 1;
+      const age = (Date.now() - receivedAt) / 1000;
+      if (age < 6) return 0.9;
+      if (age < 10) return 0.9 * (1 - (age - 6) / 4);
+      return 0;
+    },
+    [chatOpen],
+  );
+
   useEffect(() => {
     const container = canvasRef.current;
     if (!container || engineRef.current) return;
@@ -54,20 +150,27 @@ export function GameScreen() {
     }
   }, [settings]);
 
-  // Escape key toggles settings
-  const handleEscape = useCallback(
+  // Global key handler: Escape (settings), T (chat)
+  const handleGlobalKey = useCallback(
     (e: KeyboardEvent) => {
+      // When chat is open, only Escape closes it (handled by input)
+      if (chatOpen) return;
+
       if (e.code === 'Escape') {
         setShowSettings(!showSettings);
       }
+      if (e.code === 'KeyT' && state.locked && !showSettings) {
+        e.preventDefault(); // Prevent 't' from typing into input
+        openChat();
+      }
     },
-    [showSettings, setShowSettings],
+    [chatOpen, showSettings, setShowSettings, state.locked, openChat],
   );
 
   useEffect(() => {
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [handleEscape]);
+    document.addEventListener('keydown', handleGlobalKey);
+    return () => document.removeEventListener('keydown', handleGlobalKey);
+  }, [handleGlobalKey]);
 
   const handleLeave = () => setScreen('lobby');
   const healthColor = state.health > 50 ? 'var(--c-green)' : state.health > 25 ? 'var(--c-amber)' : 'var(--c-red)';
@@ -258,12 +361,130 @@ export function GameScreen() {
               <div className="flex justify-center gap-8">
                 <span><span style={{ color: 'var(--c-text)' }}>SHIFT</span> SPRINT</span>
                 <span><span style={{ color: 'var(--c-text)' }}>CTRL</span> CROUCH</span>
+                <span><span style={{ color: 'var(--c-text)' }}>T</span> CHAT</span>
                 <span><span style={{ color: 'var(--c-text)' }}>ESC</span> SETTINGS</span>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* ═══ CHAT OVERLAY ═══ */}
+      <div
+        className="absolute z-10"
+        style={{
+          bottom: '140px',
+          left: '16px',
+          maxWidth: '380px',
+          pointerEvents: chatOpen ? 'auto' : 'none',
+        }}
+      >
+        {/* Message list */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1px',
+            maxHeight: chatOpen ? '220px' : '140px',
+            overflow: chatOpen ? 'auto' : 'hidden',
+          }}
+        >
+          {chatMessages
+            .filter((m) => chatOpen || getMessageOpacity(m.receivedAt) > 0.01)
+            .slice(chatOpen ? -30 : -8)
+            .map((msg) => {
+              const isSystem = msg.senderName === '[SERVER]';
+              const opacity = getMessageOpacity(msg.receivedAt);
+              return (
+                <div
+                  key={msg.id}
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '11px',
+                    lineHeight: '1.4',
+                    opacity,
+                    padding: '1px 6px',
+                    background: 'rgba(6,8,16,0.5)',
+                    borderRadius: '2px',
+                    transition: 'opacity 0.5s',
+                  }}
+                >
+                  <span
+                    style={{
+                      color: isSystem
+                        ? 'var(--c-amber)'
+                        : 'var(--c-green)',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {msg.senderName}
+                  </span>
+                  <span style={{ color: 'var(--c-muted)' }}>: </span>
+                  <span
+                    style={{
+                      color: isSystem
+                        ? 'var(--c-amber)'
+                        : 'var(--c-text)',
+                    }}
+                  >
+                    {msg.text}
+                  </span>
+                </div>
+              );
+            })}
+        </div>
+
+        {/* Chat input */}
+        {chatOpen && (
+          <div style={{ marginTop: '4px' }}>
+            <input
+              ref={chatInputRef}
+              autoFocus
+              maxLength={200}
+              placeholder="Type a message... (/ for commands)"
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                e.nativeEvent.stopImmediatePropagation();
+                if (e.key === 'Enter') {
+                  const val = e.currentTarget.value;
+                  if (val.trim()) sendChatMessage(val);
+                  e.currentTarget.value = '';
+                  closeChat();
+                }
+                if (e.key === 'Escape') {
+                  closeChat();
+                }
+              }}
+              style={{
+                width: '100%',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '11px',
+                background: 'rgba(6,8,16,0.85)',
+                border: '1px solid var(--c-border)',
+                color: 'var(--c-text)',
+                padding: '5px 8px',
+                outline: 'none',
+                borderRadius: '2px',
+              }}
+            />
+          </div>
+        )}
+
+        {/* Chat hint when not open */}
+        {!chatOpen && state.locked && (
+          <div
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '9px',
+              color: 'var(--c-muted2)',
+              marginTop: '4px',
+              letterSpacing: '0.1em',
+            }}
+          >
+            [T] CHAT
+          </div>
+        )}
+      </div>
 
       {/* ═══ BOTTOM HUD ═══ */}
       <div className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">

@@ -54,12 +54,28 @@ export class WeaponModel {
     this.showWeapon(0);
   }
 
+  private createMaterial(
+    color: number,
+    roughness: number,
+    metalness: number,
+    emissive = 0x000000,
+    emissiveIntensity = 0,
+  ): THREE.MeshStandardMaterial {
+    return new THREE.MeshStandardMaterial({
+      color,
+      roughness,
+      metalness,
+      emissive,
+      emissiveIntensity,
+    });
+  }
+
   // ── Rifle: Sleek angular design ──
   private buildRifle(): THREE.Group {
     const g = new THREE.Group();
-    const dark = new THREE.MeshLambertMaterial({ color: 0x1a1a22 });
-    const accent = new THREE.MeshLambertMaterial({ color: 0x2244aa });
-    const metal = new THREE.MeshLambertMaterial({ color: 0x3a3a44 });
+    const dark = this.createMaterial(0x1a1a22, 0.42, 0.78);
+    const accent = this.createMaterial(0x2244aa, 0.32, 0.55, 0x112244, 0.45);
+    const metal = this.createMaterial(0x3a3a44, 0.28, 0.84);
 
     // Barrel
     const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.55), dark);
@@ -100,9 +116,9 @@ export class WeaponModel {
   // ── Shotgun: Chunky double barrel ──
   private buildShotgun(): THREE.Group {
     const g = new THREE.Group();
-    const wood = new THREE.MeshLambertMaterial({ color: 0x5a3a1a });
-    const dark = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
-    const accent = new THREE.MeshLambertMaterial({ color: 0xcc6600 });
+    const wood = this.createMaterial(0x5a3a1a, 0.86, 0.12);
+    const dark = this.createMaterial(0x1a1a1a, 0.36, 0.72);
+    const accent = this.createMaterial(0xcc6600, 0.38, 0.35, 0x552200, 0.35);
 
     // Double barrel
     const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.5), dark);
@@ -139,9 +155,9 @@ export class WeaponModel {
   // ── RPG: Tube launcher ──
   private buildRPG(): THREE.Group {
     const g = new THREE.Group();
-    const olive = new THREE.MeshLambertMaterial({ color: 0x3a4a2a });
-    const dark = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
-    const red = new THREE.MeshLambertMaterial({ color: 0xcc2200 });
+    const olive = this.createMaterial(0x3a4a2a, 0.74, 0.22);
+    const dark = this.createMaterial(0x1a1a1a, 0.35, 0.76);
+    const red = this.createMaterial(0xcc2200, 0.34, 0.28, 0x551100, 0.4);
 
     // Main tube
     const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.6, 8), olive);

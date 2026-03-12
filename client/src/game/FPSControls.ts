@@ -20,6 +20,11 @@ export class FPSControls {
   isJumping = false;
   onGround = false;
 
+  // Input gating (disabled during chat)
+  inputEnabled = true;
+  // Fly mode (admin)
+  flyMode = false;
+
   // Public state for other systems
   isSprinting = false;
   isCrouching = false;
@@ -133,6 +138,27 @@ export class FPSControls {
   lock(): void { this.domElement.requestPointerLock(); }
   unlock(): void { document.exitPointerLock(); }
 
+  /** Apply an external impulse (e.g. explosion knockback) */
+  applyImpulse(x: number, y: number, z: number): void {
+    this.hVelX += x;
+    this.velocity.y += y;
+    this.hVelZ += z;
+    // Lift off ground so gravity takes over
+    if (y > 0) {
+      this.onGround = false;
+      this.isJumping = true;
+      this.coyoteTimer = 0;
+    }
+  }
+
+  /** Reset all velocity (used after teleport) */
+  resetVelocity(): void {
+    this.hVelX = 0;
+    this.hVelZ = 0;
+    this.velocity.y = 0;
+    this.onGround = false;
+  }
+
   setSprintToggle(enabled: boolean): void {
     this.sprintToggleSetting = enabled;
     if (!enabled) this.sprintToggleActive = false;
@@ -161,6 +187,7 @@ export class FPSControls {
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
+    if (!this.inputEnabled) return;
     switch (event.code) {
       case 'KeyW': case 'ArrowUp': this.moveForward = true; break;
       case 'KeyS': case 'ArrowDown': this.moveBackward = true; break;
@@ -202,6 +229,7 @@ export class FPSControls {
   };
 
   private onKeyUp = (event: KeyboardEvent): void => {
+    if (!this.inputEnabled) return;
     switch (event.code) {
       case 'KeyW': case 'ArrowUp': this.moveForward = false; break;
       case 'KeyS': case 'ArrowDown': this.moveBackward = false; break;
@@ -367,7 +395,58 @@ export class FPSControls {
     return true;
   }
 
+  private updateFly(delta: number): void {
+    const flySpeed = 20;
+
+    // Horizontal input
+    this.direction.set(0, 0, 0);
+    if (this.moveForward) this.direction.z -= 1;
+    if (this.moveBackward) this.direction.z += 1;
+    if (this.moveLeft) this.direction.x -= 1;
+    if (this.moveRight) this.direction.x += 1;
+    this.direction.normalize();
+
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    forward.y = 0; forward.normalize();
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    right.y = 0; right.normalize();
+
+    const move = new THREE.Vector3();
+    move.addScaledVector(forward, -this.direction.z);
+    move.addScaledVector(right, this.direction.x);
+
+    // Vertical: Space = up, Shift = down
+    if (this.spaceHeld) move.y += 1;
+    if (this.shiftDown) move.y -= 1;
+
+    if (move.lengthSq() > 0) {
+      move.normalize().multiplyScalar(flySpeed * delta);
+      this.camera.position.add(move);
+    }
+
+    // Reset physics state
+    this.velocity.y = 0;
+    this.hVelX = 0;
+    this.hVelZ = 0;
+    this.onGround = false;
+    this.isSprinting = false;
+    this.isCrouching = false;
+    this.isSliding = false;
+    this.isClimbing = false;
+    this.justLanded = false;
+    this.headBobX = 0;
+    this.headBobY = 0;
+    this.horizontalSpeed = 0;
+    this.cameraTiltZ = 0;
+    this.sprintFovOffset = 0;
+  }
+
   update(delta: number, world: VoxelWorld): void {
+    if (this.flyMode) {
+      this.updateFly(delta);
+      return;
+    }
+
     // Capture pre-gravity vertical velocity for landing detection
     const prevVelY = this.velocity.y;
 

@@ -35,6 +35,12 @@ export const DetachEvent = __t.object("DetachEvent", {
 });
 export type DetachEvent = __Infer<typeof DetachEvent>;
 
+export const EnvironmentTick = __t.object("EnvironmentTick", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type EnvironmentTick = __Infer<typeof EnvironmentTick>;
+
 export const Player = __t.object("Player", {
   identity: __t.identity(),
   username: __t.string(),
@@ -109,4 +115,15 @@ export const WorldChunk = __t.object("WorldChunk", {
   version: __t.u64(),
 });
 export type WorldChunk = __Infer<typeof WorldChunk>;
+
+export const WorldEnvironment = __t.object("WorldEnvironment", {
+  id: __t.u32(),
+  timeOfDay: __t.f32(),
+  weather: __t.u8(),
+  windSpeed: __t.f32(),
+  cloudDensity: __t.f32(),
+  fogDensity: __t.f32(),
+  lastWeatherChange: __t.timestamp(),
+});
+export type WorldEnvironment = __Infer<typeof WorldEnvironment>;
 
