@@ -1,12 +1,13 @@
-use spacetimedb::{reducer, table, Identity, ReducerContext, ScheduleAt, SpacetimeType, Table, Timestamp};
+use spacetimedb::{
+    reducer, table, Identity, ReducerContext, ScheduleAt, SpacetimeType, Table, Timestamp,
+};
 use std::collections::HashMap;
 use std::time::Duration;
 
 mod worldgen;
 use worldgen::{
-    WORLD_SIZE_X, WORLD_SIZE_Y, WORLD_SIZE_Z,
-    CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z,
-    AIR,
+    AIR, CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z, WORLD_SIZE_X, WORLD_SIZE_Y,
+    WORLD_SIZE_Z,
 };
 
 // ── Weather Types ──
@@ -244,13 +245,7 @@ fn init_weapon_state(ctx: &ReducerContext, identity: Identity) {
 }
 
 fn init_movement_state(ctx: &ReducerContext, identity: Identity, pos: &Vec3) {
-    if ctx
-        .db
-        .player_movement()
-        .identity()
-        .find(identity)
-        .is_none()
-    {
+    if ctx.db.player_movement().identity().find(identity).is_none() {
         ctx.db.player_movement().insert(PlayerMovementState {
             identity,
             last_pos: pos.clone(),
@@ -420,10 +415,7 @@ fn run_structural_check(ctx: &ReducerContext, destroyed_positions: &[(i32, i32, 
         created_at: ctx.timestamp,
     });
 
-    log::info!(
-        "Structural check: {} blocks detached",
-        fallen_coords.len()
-    );
+    log::info!("Structural check: {} blocks detached", fallen_coords.len());
 }
 
 // ── Lifecycle Reducers ──
@@ -469,11 +461,11 @@ pub fn init(ctx: &ReducerContext) {
     let initial_weather = ((seed / 2400) % 5) as u8;
     let wind = ((seed % 100) as f32) / 100.0;
     let cloud = match initial_weather {
-        0 => 0.1 + ((seed % 20) as f32) / 100.0,  // Clear: low clouds
-        1 => 0.4 + ((seed % 30) as f32) / 100.0,  // Cloudy
-        2 => 0.7 + ((seed % 20) as f32) / 100.0,  // Overcast
-        3 => 0.6 + ((seed % 30) as f32) / 100.0,  // Rainy
-        4 => 0.8 + ((seed % 20) as f32) / 100.0,  // Stormy
+        0 => 0.1 + ((seed % 20) as f32) / 100.0, // Clear: low clouds
+        1 => 0.4 + ((seed % 30) as f32) / 100.0, // Cloudy
+        2 => 0.7 + ((seed % 20) as f32) / 100.0, // Overcast
+        3 => 0.6 + ((seed % 30) as f32) / 100.0, // Rainy
+        4 => 0.8 + ((seed % 20) as f32) / 100.0, // Stormy
         _ => 0.3,
     };
     let fog = match initial_weather {
@@ -501,7 +493,11 @@ pub fn init(ctx: &ReducerContext) {
         scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(10)),
     });
 
-    log::info!("Environment initialized: time={:.1}h, weather={}", initial_time, initial_weather);
+    log::info!(
+        "Environment initialized: time={:.1}h, weather={}",
+        initial_time,
+        initial_weather
+    );
 }
 
 #[reducer(client_connected)]
@@ -549,10 +545,10 @@ pub fn set_username(ctx: &ReducerContext, username: String) -> Result<(), String
     }
 
     if let Some(player) = ctx.db.player().identity().find(sender) {
-        ctx.db.player().identity().update(Player {
-            username,
-            ..player
-        });
+        ctx.db
+            .player()
+            .identity()
+            .update(Player { username, ..player });
     } else {
         ctx.db.player().insert(Player {
             identity: sender,
@@ -601,62 +597,62 @@ pub fn update_position(
 
     // Speed validation (bypassed for admins — fly mode)
     if !admin_bypass {
-    if let Some(mv_state) = ctx.db.player_movement().identity().find(sender) {
-        let now_us = timestamp_micros(ctx.timestamp);
-        let last_us = timestamp_micros(mv_state.last_update);
-        let dt = (now_us.saturating_sub(last_us)) as f64 / 1_000_000.0;
+        if let Some(mv_state) = ctx.db.player_movement().identity().find(sender) {
+            let now_us = timestamp_micros(ctx.timestamp);
+            let last_us = timestamp_micros(mv_state.last_update);
+            let dt = (now_us.saturating_sub(last_us)) as f64 / 1_000_000.0;
 
-        if dt > 0.01 {
-            let d_sq = dist_sq(&clamped_pos, &mv_state.last_pos);
-            let dist = d_sq.sqrt();
-            let speed = dist / dt as f32;
+            if dt > 0.01 {
+                let d_sq = dist_sq(&clamped_pos, &mv_state.last_pos);
+                let dist = d_sq.sqrt();
+                let speed = dist / dt as f32;
 
-            if speed > MAX_MOVEMENT_SPEED {
-                let new_violations = mv_state.violation_count + 1;
+                if speed > MAX_MOVEMENT_SPEED {
+                    let new_violations = mv_state.violation_count + 1;
 
-                if new_violations > SPEED_VIOLATION_THRESHOLD {
-                    ctx.db.player().identity().update(Player {
-                        pos: mv_state.last_pos.clone(),
-                        rot,
-                        current_weapon: weapon,
-                        ..player
-                    });
+                    if new_violations > SPEED_VIOLATION_THRESHOLD {
+                        ctx.db.player().identity().update(Player {
+                            pos: mv_state.last_pos.clone(),
+                            rot,
+                            current_weapon: weapon,
+                            ..player
+                        });
+                        ctx.db
+                            .player_movement()
+                            .identity()
+                            .update(PlayerMovementState {
+                                identity: sender,
+                                last_pos: mv_state.last_pos,
+                                last_update: ctx.timestamp,
+                                violation_count: 0,
+                            });
+                        return Ok(());
+                    }
+
                     ctx.db
                         .player_movement()
                         .identity()
                         .update(PlayerMovementState {
                             identity: sender,
-                            last_pos: mv_state.last_pos,
+                            last_pos: clamped_pos.clone(),
+                            last_update: ctx.timestamp,
+                            violation_count: new_violations,
+                        });
+                } else {
+                    ctx.db
+                        .player_movement()
+                        .identity()
+                        .update(PlayerMovementState {
+                            identity: sender,
+                            last_pos: clamped_pos.clone(),
                             last_update: ctx.timestamp,
                             violation_count: 0,
                         });
-                    return Ok(());
                 }
-
-                ctx.db
-                    .player_movement()
-                    .identity()
-                    .update(PlayerMovementState {
-                        identity: sender,
-                        last_pos: clamped_pos.clone(),
-                        last_update: ctx.timestamp,
-                        violation_count: new_violations,
-                    });
-            } else {
-                ctx.db
-                    .player_movement()
-                    .identity()
-                    .update(PlayerMovementState {
-                        identity: sender,
-                        last_pos: clamped_pos.clone(),
-                        last_update: ctx.timestamp,
-                        violation_count: 0,
-                    });
             }
+        } else {
+            init_movement_state(ctx, sender, &clamped_pos);
         }
-    } else {
-        init_movement_state(ctx, sender, &clamped_pos);
-    }
     } // end admin_bypass
 
     ctx.db.player().identity().update(Player {
@@ -742,10 +738,8 @@ pub fn fire_weapon(
     }
 
     // 5. Validate + apply player hits
-    let dir_len = (direction.x * direction.x
-        + direction.y * direction.y
-        + direction.z * direction.z)
-        .sqrt();
+    let dir_len =
+        (direction.x * direction.x + direction.y * direction.y + direction.z * direction.z).sqrt();
 
     for target_id in &hit_players {
         if *target_id == sender {
@@ -940,6 +934,7 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
 // ── Admin Commands ──
 
 const ADMIN_USERNAME: &str = "amir";
+const ADMIN_HELP_TEXT: &str = "Admin commands:\n/tp <player> or /tp <x> <y> <z>\n/tphere <player>\n/kill <player>\n/heal [player]\n/god\n/fly\n/ammo\n/weather <0-4>\n/time <0-24>\n/announce <message>\n/killall\n/respawnall";
 
 fn is_admin(username: &str) -> bool {
     username.to_lowercase() == ADMIN_USERNAME
@@ -963,14 +958,19 @@ fn insert_system_message(ctx: &ReducerContext, text: &str) {
     });
 }
 
-fn process_admin_command(
-    ctx: &ReducerContext,
-    sender: Identity,
-    text: &str,
-) -> Result<(), String> {
+fn insert_admin_help(ctx: &ReducerContext) {
+    insert_system_message(ctx, ADMIN_HELP_TEXT);
+}
+
+fn insert_command_help(ctx: &ReducerContext, reason: &str) {
+    insert_system_message(ctx, &format!("{}\n\n{}", reason, ADMIN_HELP_TEXT));
+}
+
+fn process_admin_command(ctx: &ReducerContext, sender: Identity, text: &str) -> Result<(), String> {
     let parts: Vec<&str> = text.split_whitespace().collect();
     if parts.is_empty() {
-        return Err("Empty command".to_string());
+        insert_admin_help(ctx);
+        return Ok(());
     }
 
     let cmd = parts[0].to_lowercase();
@@ -1025,14 +1025,16 @@ fn process_admin_command(
                 init_movement_state(ctx, sender, &target_pos);
                 insert_system_message(ctx, &format!("Teleported to {}", target_name));
             } else {
-                return Err("Usage: /tp <player> or /tp <x> <y> <z>".to_string());
+                insert_command_help(ctx, "Usage: /tp <player> or /tp <x> <y> <z>");
+                return Ok(());
             }
             Ok(())
         }
 
         "/tphere" | "/summon" => {
             if parts.len() != 2 {
-                return Err("Usage: /tphere <player>".to_string());
+                insert_command_help(ctx, "Usage: /tphere <player>");
+                return Ok(());
             }
             let admin = ctx
                 .db
@@ -1057,7 +1059,8 @@ fn process_admin_command(
 
         "/kill" => {
             if parts.len() != 2 {
-                return Err("Usage: /kill <player>".to_string());
+                insert_command_help(ctx, "Usage: /kill <player>");
+                return Ok(());
             }
             let target =
                 find_player_by_name(ctx, parts[1]).ok_or("Player not found".to_string())?;
@@ -1095,7 +1098,8 @@ fn process_admin_command(
                 });
                 insert_system_message(ctx, &format!("Healed {}", target_name));
             } else {
-                return Err("Usage: /heal [player]".to_string());
+                insert_command_help(ctx, "Usage: /heal [player]");
+                return Ok(());
             }
             Ok(())
         }
@@ -1144,10 +1148,11 @@ fn process_admin_command(
 
         "/weather" => {
             if parts.len() != 2 {
-                return Err(
-                    "Usage: /weather <0-4> (0=Clear 1=Cloudy 2=Overcast 3=Rainy 4=Stormy)"
-                        .to_string(),
+                insert_command_help(
+                    ctx,
+                    "Usage: /weather <0-4> (0=Clear 1=Cloudy 2=Overcast 3=Rainy 4=Stormy)",
                 );
+                return Ok(());
             }
             let w: u8 = parts[1]
                 .parse()
@@ -1204,11 +1209,10 @@ fn process_admin_command(
 
         "/time" => {
             if parts.len() != 2 {
-                return Err("Usage: /time <0-24>".to_string());
+                insert_command_help(ctx, "Usage: /time <0-24>");
+                return Ok(());
             }
-            let t: f32 = parts[1]
-                .parse()
-                .map_err(|_| "Invalid time".to_string())?;
+            let t: f32 = parts[1].parse().map_err(|_| "Invalid time".to_string())?;
             if !(0.0..=24.0).contains(&t) {
                 return Err("Time must be 0.0 - 24.0".to_string());
             }
@@ -1227,7 +1231,8 @@ fn process_admin_command(
 
         "/announce" => {
             if parts.len() < 2 {
-                return Err("Usage: /announce <message>".to_string());
+                insert_command_help(ctx, "Usage: /announce <message>");
+                return Ok(());
             }
             let msg = parts[1..].join(" ");
             insert_system_message(ctx, &format!("[ANNOUNCEMENT] {}", msg));
@@ -1286,15 +1291,15 @@ fn process_admin_command(
             Ok(())
         }
 
-        "/help" => {
-            insert_system_message(
-                ctx,
-                "Admin: /tp /tphere /kill /heal /god /fly /ammo /weather /time /announce /killall /respawnall",
-            );
+        "/" | "/help" => {
+            insert_admin_help(ctx);
             Ok(())
         }
 
-        _ => Err(format!("Unknown command: {}", parts[0])),
+        _ => {
+            insert_command_help(ctx, &format!("Unknown command: {}", parts[0]));
+            Ok(())
+        }
     }
 }
 
@@ -1316,6 +1321,11 @@ pub fn send_chat(ctx: &ReducerContext, text: String) -> Result<(), String> {
         .ok_or("Not registered")?;
 
     // Admin command processing
+    if text == "/" || text.eq_ignore_ascii_case("/help") {
+        insert_admin_help(ctx);
+        return Ok(());
+    }
+
     if text.starts_with('/') {
         if !is_admin(&player.username) {
             return Err("Unknown command".to_string());
@@ -1416,29 +1426,55 @@ pub fn tick_environment(ctx: &ReducerContext, _job: EnvironmentTick) {
                 // Weather transitions: prefer adjacent weather states
                 let transition_roll = ((seed / 100) % 100) as u8;
                 new_weather = match env.weather {
-                    0 => { // Clear → Cloudy (70%) or stays Clear (30%)
-                        if transition_roll < 70 { 1 } else { 0 }
+                    0 => {
+                        // Clear → Cloudy (70%) or stays Clear (30%)
+                        if transition_roll < 70 {
+                            1
+                        } else {
+                            0
+                        }
                     }
-                    1 => { // Cloudy → Clear (30%), Overcast (40%), Rainy (30%)
-                        if transition_roll < 30 { 0 }
-                        else if transition_roll < 70 { 2 }
-                        else { 3 }
+                    1 => {
+                        // Cloudy → Clear (30%), Overcast (40%), Rainy (30%)
+                        if transition_roll < 30 {
+                            0
+                        } else if transition_roll < 70 {
+                            2
+                        } else {
+                            3
+                        }
                     }
-                    2 => { // Overcast → Cloudy (40%), Rainy (40%), Stormy (20%)
-                        if transition_roll < 40 { 1 }
-                        else if transition_roll < 80 { 3 }
-                        else { 4 }
+                    2 => {
+                        // Overcast → Cloudy (40%), Rainy (40%), Stormy (20%)
+                        if transition_roll < 40 {
+                            1
+                        } else if transition_roll < 80 {
+                            3
+                        } else {
+                            4
+                        }
                     }
-                    3 => { // Rainy → Overcast (30%), Cloudy (30%), Stormy (20%), Clear (20%)
-                        if transition_roll < 30 { 2 }
-                        else if transition_roll < 60 { 1 }
-                        else if transition_roll < 80 { 4 }
-                        else { 0 }
+                    3 => {
+                        // Rainy → Overcast (30%), Cloudy (30%), Stormy (20%), Clear (20%)
+                        if transition_roll < 30 {
+                            2
+                        } else if transition_roll < 60 {
+                            1
+                        } else if transition_roll < 80 {
+                            4
+                        } else {
+                            0
+                        }
                     }
-                    4 => { // Stormy → Rainy (50%), Overcast (30%), Cloudy (20%)
-                        if transition_roll < 50 { 3 }
-                        else if transition_roll < 80 { 2 }
-                        else { 1 }
+                    4 => {
+                        // Stormy → Rainy (50%), Overcast (30%), Cloudy (20%)
+                        if transition_roll < 50 {
+                            3
+                        } else if transition_roll < 80 {
+                            2
+                        } else {
+                            1
+                        }
                     }
                     _ => 0,
                 };
@@ -1462,7 +1498,12 @@ pub fn tick_environment(ctx: &ReducerContext, _job: EnvironmentTick) {
                         4 => 1.8,
                         _ => 1.0,
                     };
-                    log::info!("Weather changed: {} → {} at time {:.1}h", env.weather, new_weather, new_time);
+                    log::info!(
+                        "Weather changed: {} → {} at time {:.1}h",
+                        env.weather,
+                        new_weather,
+                        new_time
+                    );
                 }
             }
         }
@@ -1474,7 +1515,11 @@ pub fn tick_environment(ctx: &ReducerContext, _job: EnvironmentTick) {
             wind_speed: new_wind,
             cloud_density: new_cloud,
             fog_density: new_fog,
-            last_weather_change: if weather_changed { ctx.timestamp } else { env.last_weather_change },
+            last_weather_change: if weather_changed {
+                ctx.timestamp
+            } else {
+                env.last_weather_change
+            },
         });
     }
 

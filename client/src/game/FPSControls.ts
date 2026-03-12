@@ -164,6 +164,21 @@ export class FPSControls {
     if (!enabled) this.sprintToggleActive = false;
   }
 
+  releaseAllInput(): void {
+    this.moveForward = false;
+    this.moveBackward = false;
+    this.moveLeft = false;
+    this.moveRight = false;
+    this.shiftDown = false;
+    this.ctrlDown = false;
+    this.spaceHeld = false;
+    this.jumpBuffered = false;
+    this.jumpBufferTimer = 0;
+    this.direction.set(0, 0, 0);
+    this.rawStrafeInput = 0;
+    this.strafeInput = 0;
+  }
+
   private onMouseMove = (event: MouseEvent): void => {
     if (!this.locked) return;
     this.euler.setFromQuaternion(this.camera.quaternion);

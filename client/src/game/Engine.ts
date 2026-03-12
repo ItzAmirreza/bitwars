@@ -103,6 +103,7 @@ export class Engine {
   private elapsedTime = 0;
   private baseFov = 75;
   private wasSliding = false;
+  private relockAfterChat = false;
   chatOpen = false;
 
   constructor(
@@ -124,8 +125,6 @@ export class Engine {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    (this.renderer as THREE.WebGLRenderer & { useLegacyLights?: boolean }).useLegacyLights = false;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setClearColor(0x5a5856);
@@ -223,7 +222,7 @@ export class Engine {
     this.weaponModel = new WeaponModel(w / h);
 
     // ── PostFX ──
-    this.postfx = new PostFX(w, h);
+    this.postfx = new PostFX();
 
     // ── Server sync ──
     this.setupServerListeners();
@@ -270,15 +269,23 @@ export class Engine {
 
   /** Toggle chat mode — disables game keyboard input */
   setChatOpen(open: boolean): void {
+    if (this.chatOpen === open) return;
+
     this.chatOpen = open;
     this.controls.inputEnabled = !open;
+    this.mouseDown = false;
+
     if (open) {
-      // Release all held movement keys
-      this.controls.moveForward = false;
-      this.controls.moveBackward = false;
-      this.controls.moveLeft = false;
-      this.controls.moveRight = false;
+      this.relockAfterChat = this.controls.locked;
+      if (this.controls.locked) this.controls.unlock();
+      this.controls.releaseAllInput();
+      return;
     }
+
+    if (this.relockAfterChat && !this.controls.locked) {
+      this.controls.lock();
+    }
+    this.relockAfterChat = false;
   }
 
   // ── INPUT ──
@@ -949,7 +956,6 @@ export class Engine {
 
     // Sky & environment
     this.sky.update(delta, this.camera.position);
-    this.renderer.toneMappingExposure += (this.sky.getExposure() - this.renderer.toneMappingExposure) * Math.min(1, delta * 2.5);
     this.renderer.setClearColor(this.sky.getFogColor());
 
     // VFX
@@ -1004,38 +1010,15 @@ export class Engine {
       this.camera.quaternion.multiply(shakeQuat);
     }
 
-    // Update the active celestial light with the effected camera for accurate god ray alignment
-    this.postfx.updateCelestial(this.camera, [
-      {
-        direction: this.sky.getSunDirection(),
-        color: this.sky.getSunColor(),
-        visibility: this.sky.getSunVisibility(),
-        godRayIntensity: 1.2,
-        glareIntensity: 0.8,
-      },
-      {
-        direction: this.sky.getMoonDirection(),
-        color: this.sky.getMoonColor(),
-        visibility: this.sky.getMoonVisibility(),
-        godRayIntensity: 0.45,
-        glareIntensity: 0.2,
-      },
-    ]);
+    // PostFX
     this.postfx.update(delta, this.elapsedTime);
 
-    // Render world + weapon to PostFX offscreen target
-    const rt = this.postfx.getRenderTarget();
-    this.renderer.setRenderTarget(rt);
-    this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
     this.renderer.autoClear = false;
     this.renderer.clearDepth();
     this.renderer.render(this.weaponModel.scene, this.weaponModel.camera);
-    this.renderer.autoClear = true;
-    this.renderer.setRenderTarget(null);
-
-    // PostFX pipeline: god rays + composite → screen
     this.postfx.render(this.renderer);
+    this.renderer.autoClear = true;
 
     // Restore clean camera
     this.camera.quaternion.copy(savedQuat);
@@ -1070,7 +1053,6 @@ export class Engine {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.weaponModel.resize(w / h);
-    this.postfx.resize(w, h);
   };
 
   // ── DESTROY ──

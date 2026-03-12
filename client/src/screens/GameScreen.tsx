@@ -8,7 +8,43 @@ interface DisplayMessage {
   id: number;
   senderName: string;
   text: string;
-  receivedAt: number;
+  sentAt: number;
+}
+
+const MAX_CHAT_MESSAGES = 80;
+
+function getMessageTimestamp(sentAt: { toMillis?: () => bigint } | null | undefined): number {
+  if (sentAt && typeof sentAt.toMillis === 'function') {
+    return Number(sentAt.toMillis());
+  }
+  return Date.now();
+}
+
+function toDisplayMessage(msg: any): DisplayMessage {
+  return {
+    id: Number(msg.id),
+    senderName: String(msg.senderName),
+    text: String(msg.text),
+    sentAt: getMessageTimestamp(msg.sentAt),
+  };
+}
+
+function mergeMessages(prev: DisplayMessage[], next: DisplayMessage[]): DisplayMessage[] {
+  const merged = new Map<number, DisplayMessage>();
+
+  for (const message of prev) merged.set(message.id, message);
+  for (const message of next) merged.set(message.id, message);
+
+  return Array.from(merged.values())
+    .sort((a, b) => (a.sentAt === b.sentAt ? a.id - b.id : a.sentAt - b.sentAt))
+    .slice(-MAX_CHAT_MESSAGES);
+}
+
+function formatChatTime(sentAt: number): string {
+  const date = new Date(sentAt);
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${hours}:${minutes}`;
 }
 
 const WEAPON_DATA = [
@@ -42,8 +78,27 @@ export function GameScreen() {
   // ── Chat state ──
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<DisplayMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState('');
   const [, chatTick] = useState(0); // forces re-render for message fading
   const chatInputRef = useRef<HTMLInputElement>(null);
+  const chatListRef = useRef<HTMLDivElement>(null);
+  const localChatIdRef = useRef(-1);
+
+  const pushLocalSystemMessage = useCallback((text: string) => {
+    const nextId = localChatIdRef.current;
+    localChatIdRef.current -= 1;
+
+    setChatMessages((prev) =>
+      mergeMessages(prev, [
+        {
+          id: nextId,
+          senderName: '[SERVER]',
+          text,
+          sentAt: Date.now(),
+        },
+      ]),
+    );
+  }, []);
 
   // Load chat messages from DB + subscribe to new ones
   useEffect(() => {
@@ -51,33 +106,20 @@ export function GameScreen() {
     const db = connection.db as any;
     if (!db.chat_message) return;
 
-    // Load existing messages
-    const initial: DisplayMessage[] = [];
-    for (const msg of db.chat_message.iter()) {
-      initial.push({
-        id: Number(msg.id),
-        senderName: msg.senderName as string,
-        text: msg.text as string,
-        receivedAt: Date.now(),
-      });
-    }
-    initial.sort((a, b) => a.id - b.id);
-    setChatMessages(initial.slice(-50));
+    const initial = Array.from(db.chat_message.iter(), (msg: any) => toDisplayMessage(msg));
+    setChatMessages(mergeMessages([], initial));
 
-    // Listen for new messages
-    db.chat_message.onInsert((_ctx: unknown, msg: any) => {
-      setChatMessages((prev) =>
-        [
-          ...prev,
-          {
-            id: Number(msg.id),
-            senderName: msg.senderName as string,
-            text: msg.text as string,
-            receivedAt: Date.now(),
-          },
-        ].slice(-50),
-      );
-    });
+    const handleInsert = (_ctx: unknown, msg: any) => {
+      setChatMessages((prev) => mergeMessages(prev, [toDisplayMessage(msg)]));
+    };
+
+    db.chat_message.onInsert(handleInsert);
+
+    return () => {
+      if (typeof db.chat_message.removeOnInsert === 'function') {
+        db.chat_message.removeOnInsert(handleInsert);
+      }
+    };
   }, [connection]);
 
   // Periodic tick for message fading (when chat is closed)
@@ -90,37 +132,64 @@ export function GameScreen() {
   // Focus chat input when opened
   useEffect(() => {
     if (chatOpen) {
-      setTimeout(() => chatInputRef.current?.focus(), 0);
+      const timer = window.setTimeout(() => {
+        const input = chatInputRef.current;
+        if (!input) return;
+
+        input.focus();
+        const end = input.value.length;
+        input.setSelectionRange(end, end);
+      }, 0);
+
+      return () => window.clearTimeout(timer);
     }
   }, [chatOpen]);
 
-  const openChat = useCallback(() => {
+  useEffect(() => {
+    if (!chatOpen) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const list = chatListRef.current;
+      if (!list) return;
+      list.scrollTop = list.scrollHeight;
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [chatMessages, chatOpen]);
+
+  const openChat = useCallback((initialText = '') => {
+    setChatDraft(initialText);
     setChatOpen(true);
     engineRef.current?.setChatOpen(true);
   }, []);
 
   const closeChat = useCallback(() => {
     setChatOpen(false);
+    setChatDraft('');
     engineRef.current?.setChatOpen(false);
   }, []);
 
   const sendChatMessage = useCallback(
-    (text: string) => {
+    async (text: string) => {
       if (!connection || !text.trim()) return;
       const trimmed = text.trim();
-      // Toggle fly mode client-side when /fly is sent
-      if (trimmed.toLowerCase() === '/fly') {
-        engineRef.current?.toggleFly();
+
+      try {
+        await connection.reducers.sendChat({ text: trimmed });
+        if (trimmed.toLowerCase() === '/fly') {
+          engineRef.current?.toggleFly();
+        }
+      } catch (error) {
+        pushLocalSystemMessage(error instanceof Error ? error.message : 'Failed to send chat message');
       }
-      connection.reducers.sendChat({ text: trimmed });
     },
-    [connection],
+    [connection, pushLocalSystemMessage],
   );
 
   const getMessageOpacity = useCallback(
-    (receivedAt: number): number => {
+    (sentAt: number): number => {
       if (chatOpen) return 1;
-      const age = (Date.now() - receivedAt) / 1000;
+      const age = (Date.now() - sentAt) / 1000;
       if (age < 6) return 0.9;
       if (age < 10) return 0.9 * (1 - (age - 6) / 4);
       return 0;
@@ -153,15 +222,20 @@ export function GameScreen() {
   // Global key handler: Escape (settings), T (chat)
   const handleGlobalKey = useCallback(
     (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) {
+        return;
+      }
+
       // When chat is open, only Escape closes it (handled by input)
       if (chatOpen) return;
 
       if (e.code === 'Escape') {
         setShowSettings(!showSettings);
       }
-      if (e.code === 'KeyT' && state.locked && !showSettings) {
-        e.preventDefault(); // Prevent 't' from typing into input
-        openChat();
+      if ((e.code === 'KeyT' || e.code === 'Slash') && state.locked && !showSettings) {
+        e.preventDefault();
+        openChat(e.code === 'Slash' ? '/' : '');
       }
     },
     [chatOpen, showSettings, setShowSettings, state.locked, openChat],
@@ -280,7 +354,7 @@ export function GameScreen() {
       </div>
 
       {/* Crosshair + Hit Marker */}
-      {state.locked && (
+      {state.locked && !chatOpen && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           <div className="relative" style={{ width: '24px', height: '24px' }}>
             {/* Top */}
@@ -316,7 +390,7 @@ export function GameScreen() {
       )}
 
       {/* Click to play overlay */}
-      {!state.locked && !showSettings && (
+      {!state.locked && !showSettings && !chatOpen && (
         <div
           className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer"
           onClick={() => canvasRef.current?.requestPointerLock()}
@@ -375,56 +449,101 @@ export function GameScreen() {
         style={{
           bottom: '140px',
           left: '16px',
-          maxWidth: '380px',
+          width: 'min(420px, calc(100vw - 32px))',
           pointerEvents: chatOpen ? 'auto' : 'none',
         }}
       >
+        {chatOpen && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '6px',
+              padding: '0 2px',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '10px',
+              letterSpacing: '0.12em',
+              color: 'var(--c-muted2)',
+            }}
+          >
+            <span style={{ color: 'var(--c-green)' }}>COMMS</span>
+            <span>/help for commands</span>
+          </div>
+        )}
+
         {/* Message list */}
         <div
+          ref={chatListRef}
           style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: '1px',
-            maxHeight: chatOpen ? '220px' : '140px',
-            overflow: chatOpen ? 'auto' : 'hidden',
+            gap: '6px',
+            maxHeight: chatOpen ? '260px' : '140px',
+            overflowY: chatOpen ? 'auto' : 'hidden',
+            padding: chatOpen ? '10px' : '0',
+            background: chatOpen ? 'linear-gradient(180deg, rgba(6,8,16,0.9) 0%, rgba(6,8,16,0.72) 100%)' : 'transparent',
+            border: chatOpen ? '1px solid var(--c-border)' : 'none',
+            borderRadius: '6px',
+            boxShadow: chatOpen ? '0 20px 48px rgba(0,0,0,0.34)' : 'none',
+            backdropFilter: chatOpen ? 'blur(10px)' : 'none',
+            overscrollBehavior: 'contain',
+            scrollbarGutter: 'stable',
           }}
         >
           {chatMessages
-            .filter((m) => chatOpen || getMessageOpacity(m.receivedAt) > 0.01)
-            .slice(chatOpen ? -30 : -8)
+            .filter((m) => chatOpen || getMessageOpacity(m.sentAt) > 0.01)
+            .slice(chatOpen ? -40 : -8)
             .map((msg) => {
               const isSystem = msg.senderName === '[SERVER]';
-              const opacity = getMessageOpacity(msg.receivedAt);
+              const opacity = getMessageOpacity(msg.sentAt);
               return (
                 <div
                   key={msg.id}
                   style={{
                     fontFamily: 'var(--font-mono)',
                     fontSize: '11px',
-                    lineHeight: '1.4',
+                    lineHeight: '1.45',
                     opacity,
-                    padding: '1px 6px',
-                    background: 'rgba(6,8,16,0.5)',
-                    borderRadius: '2px',
+                    padding: chatOpen ? '7px 8px' : '2px 6px',
+                    background: isSystem ? 'rgba(255,184,0,0.08)' : 'rgba(6,8,16,0.52)',
+                    border: chatOpen ? `1px solid ${isSystem ? 'rgba(255,184,0,0.22)' : 'rgba(128,255,179,0.12)'}` : 'none',
+                    borderRadius: '4px',
                     transition: 'opacity 0.5s',
                   }}
                 >
-                  <span
+                  <div
                     style={{
-                      color: isSystem
-                        ? 'var(--c-amber)'
-                        : 'var(--c-green)',
-                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: '8px',
+                      marginBottom: '2px',
                     }}
                   >
-                    {msg.senderName}
-                  </span>
-                  <span style={{ color: 'var(--c-muted)' }}>: </span>
+                    <span
+                      style={{
+                        color: 'var(--c-muted2)',
+                        fontSize: '9px',
+                        letterSpacing: '0.08em',
+                        minWidth: '38px',
+                      }}
+                    >
+                      {formatChatTime(msg.sentAt)}
+                    </span>
+                    <span
+                      style={{
+                        color: isSystem ? 'var(--c-amber)' : 'var(--c-green)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {msg.senderName}
+                    </span>
+                  </div>
                   <span
                     style={{
-                      color: isSystem
-                        ? 'var(--c-amber)'
-                        : 'var(--c-text)',
+                      color: isSystem ? 'var(--c-amber)' : 'var(--c-text)',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
                     }}
                   >
                     {msg.text}
@@ -441,17 +560,19 @@ export function GameScreen() {
               ref={chatInputRef}
               autoFocus
               maxLength={200}
-              placeholder="Type a message... (/ for commands)"
+              value={chatDraft}
+              placeholder="Message or command"
+              onChange={(e) => setChatDraft(e.currentTarget.value)}
               onKeyDown={(e) => {
                 e.stopPropagation();
                 e.nativeEvent.stopImmediatePropagation();
                 if (e.key === 'Enter') {
-                  const val = e.currentTarget.value;
-                  if (val.trim()) sendChatMessage(val);
-                  e.currentTarget.value = '';
+                  e.preventDefault();
+                  if (chatDraft.trim()) void sendChatMessage(chatDraft);
                   closeChat();
                 }
                 if (e.key === 'Escape') {
+                  e.preventDefault();
                   closeChat();
                 }
               }}
@@ -462,9 +583,10 @@ export function GameScreen() {
                 background: 'rgba(6,8,16,0.85)',
                 border: '1px solid var(--c-border)',
                 color: 'var(--c-text)',
-                padding: '5px 8px',
+                padding: '8px 10px',
                 outline: 'none',
-                borderRadius: '2px',
+                borderRadius: '4px',
+                boxShadow: '0 10px 28px rgba(0,0,0,0.28)',
               }}
             />
           </div>
@@ -481,7 +603,7 @@ export function GameScreen() {
               letterSpacing: '0.1em',
             }}
           >
-            [T] CHAT
+            [T] CHAT  [/ ] COMMANDS
           </div>
         )}
       </div>

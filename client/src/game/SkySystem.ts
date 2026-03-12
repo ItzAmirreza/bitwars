@@ -287,48 +287,94 @@ void main() {
 `;
 
 // ── Rain system ──
-const RAIN_COUNT = 3000;
+const RAIN_COUNT = 4200;
+const RAIN_RADIUS = 34;
+const RAIN_HEIGHT = 72;
 
 const rainVertexShader = `
 attribute float size;
 attribute float speed;
+attribute float seed;
 uniform float uTime;
 uniform float uWindX;
 uniform float uWindZ;
+uniform float uRainDensity;
 varying float vAlpha;
+varying vec2 vStreakDir;
+varying float vHighlight;
 
 void main() {
-  vec3 pos = position;
+  const float fieldRadius = ${RAIN_RADIUS.toFixed(1)};
+  const float fieldHeight = ${RAIN_HEIGHT.toFixed(1)};
 
-  // Animate: rain falls and wraps
-  float t = mod(uTime * speed + pos.y, 60.0) - 30.0;
-  pos.y = t;
-  pos.x += uWindX * (30.0 - t) * 0.05;
-  pos.z += uWindZ * (30.0 - t) * 0.05;
+  float phase = fract((position.y + fieldHeight * 0.5) / fieldHeight + (uTime * speed) / fieldHeight + seed);
+  float fall = mix(fieldHeight * 0.5, -fieldHeight * 0.5, phase);
 
-  // Position relative to camera
-  pos += cameraPosition;
-  pos.x = mod(pos.x + 30.0, 60.0) - 30.0 + cameraPosition.x;
-  pos.z = mod(pos.z + 30.0, 60.0) - 30.0 + cameraPosition.z;
+  float gustA = sin(uTime * 0.7 + seed * 17.0);
+  float gustB = sin(uTime * 1.8 + seed * 43.0);
+  vec2 wind = vec2(uWindX, uWindZ) * (0.55 + speed * 0.028);
+  wind += vec2(gustA * 0.28 + gustB * 0.08, gustB * 0.22);
 
-  vAlpha = smoothstep(-30.0, -20.0, t) * smoothstep(30.0, 20.0, t);
-  vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-  gl_PointSize = size * (100.0 / -mvPosition.z);
+  vec3 localPos;
+  localPos.x = mod(position.x + wind.x * phase * fieldHeight + fieldRadius, fieldRadius * 2.0) - fieldRadius;
+  localPos.y = fall + 10.0;
+  localPos.z = mod(position.z + wind.y * phase * fieldHeight + fieldRadius, fieldRadius * 2.0) - fieldRadius;
+
+  vec3 worldPos = localPos + cameraPosition;
+  vec4 mvPosition = modelViewMatrix * vec4(worldPos, 1.0);
+
+  float radialFade = 1.0 - smoothstep(fieldRadius * 0.55, fieldRadius, length(localPos.xz));
+  float depthFade = smoothstep(5.0, 18.0, length(mvPosition.xyz));
+  float lifecycleFade = smoothstep(0.02, 0.16, phase) * (1.0 - smoothstep(0.78, 0.98, phase));
+  vAlpha = radialFade * depthFade * lifecycleFade * uRainDensity;
+
+  vec3 velocity = vec3(wind.x * speed * 0.45, -speed, wind.y * speed * 0.45);
+  vec3 viewVelocity = (viewMatrix * vec4(velocity, 0.0)).xyz;
+  float dirLen = max(length(viewVelocity.xy), 0.0001);
+  vStreakDir = viewVelocity.xy / dirLen;
+  vHighlight = clamp(speed / 34.0, 0.55, 1.0);
+
+  gl_PointSize = clamp(size * (90.0 / max(-mvPosition.z, 1.0)), 2.0, 15.0);
   gl_Position = projectionMatrix * mvPosition;
 }
 `;
 
 const rainFragmentShader = `
 varying float vAlpha;
+varying vec2 vStreakDir;
+varying float vHighlight;
 uniform vec3 uRainColor;
 
 void main() {
-  // Elongated raindrop shape
-  vec2 center = gl_PointCoord - 0.5;
-  float d = length(center * vec2(3.0, 1.0));
-  if (d > 0.5) discard;
-  float alpha = (1.0 - d * 2.0) * vAlpha * 0.4;
-  gl_FragColor = vec4(uRainColor, alpha);
+  vec2 uv = gl_PointCoord * 2.0 - 1.0;
+  vec2 dir = vStreakDir;
+  float dirLen = length(dir);
+  if (dirLen < 0.001) {
+    dir = vec2(0.0, -1.0);
+  } else {
+    dir /= dirLen;
+  }
+
+  vec2 normal = vec2(-dir.y, dir.x);
+  float along = dot(uv, dir);
+  float across = dot(uv, normal);
+
+  float body = 1.0 - smoothstep(0.68, 1.0, abs(along));
+  float width = 1.0 - smoothstep(0.04, 0.16, abs(across) + abs(along) * 0.09);
+  float core = 1.0 - smoothstep(0.015, 0.075, abs(across));
+  float tip = 1.0 - smoothstep(-0.95, -0.2, along);
+  float tail = 1.0 - smoothstep(0.35, 1.0, along);
+
+  float alpha = body * width;
+  alpha *= 0.45 + core * 0.35 + tail * 0.15;
+  alpha *= vAlpha;
+
+  if (alpha <= 0.01) discard;
+
+  vec3 color = mix(uRainColor * 0.82, vec3(0.92, 0.96, 1.0), core * 0.45 + tip * 0.2);
+  color *= 0.9 + vHighlight * 0.25;
+
+  gl_FragColor = vec4(color, alpha);
 }
 `;
 
@@ -416,28 +462,32 @@ export class SkySystem {
     const positions = new Float32Array(RAIN_COUNT * 3);
     const sizes = new Float32Array(RAIN_COUNT);
     const speeds = new Float32Array(RAIN_COUNT);
+    const seeds = new Float32Array(RAIN_COUNT);
 
     for (let i = 0; i < RAIN_COUNT; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 60;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * 60;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 60;
-      sizes[i] = 2 + Math.random() * 3;
-      speeds[i] = 8 + Math.random() * 12;
+      positions[i * 3] = (Math.random() - 0.5) * RAIN_RADIUS * 2;
+      positions[i * 3 + 1] = (Math.random() - 0.5) * RAIN_HEIGHT;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * RAIN_RADIUS * 2;
+      sizes[i] = 1.9 + Math.random() * 2.2;
+      speeds[i] = 18 + Math.random() * 14;
+      seeds[i] = Math.random();
     }
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
     geo.setAttribute('speed', new THREE.BufferAttribute(speeds, 1));
+    geo.setAttribute('seed', new THREE.BufferAttribute(seeds, 1));
 
     this.rainMaterial = new THREE.ShaderMaterial({
       vertexShader: rainVertexShader,
       fragmentShader: rainFragmentShader,
       uniforms: {
         uTime: { value: 0 },
-        uWindX: { value: 0.5 },
-        uWindZ: { value: 0.3 },
-        uRainColor: { value: new THREE.Color(0.6, 0.65, 0.75) },
+        uWindX: { value: 0.14 },
+        uWindZ: { value: -0.06 },
+        uRainDensity: { value: 0.8 },
+        uRainColor: { value: new THREE.Color(0.72, 0.78, 0.86) },
       },
       transparent: true,
       depthWrite: false,
@@ -587,9 +637,9 @@ export class SkySystem {
 
     if (this.rainMesh && this.rainMaterial) {
       this.rainMaterial.uniforms.uTime.value = this.elapsedTime;
-      this.rainMaterial.uniforms.uWindX.value = this.currentEnv.windSpeed * 2 - 0.5;
-      this.rainMaterial.uniforms.uWindZ.value = this.currentEnv.windSpeed - 0.3;
-      // More rain in stormy weather
+      this.rainMaterial.uniforms.uWindX.value = this.currentEnv.windSpeed * 0.35 - 0.08;
+      this.rainMaterial.uniforms.uWindZ.value = this.currentEnv.windSpeed * 0.2 - 0.05;
+      this.rainMaterial.uniforms.uRainDensity.value = this.currentEnv.weather >= WEATHER_STORMY ? 1.0 : 0.78;
       this.rainMesh.visible = true;
     }
   }

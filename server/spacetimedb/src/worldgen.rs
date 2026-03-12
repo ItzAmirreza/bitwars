@@ -24,7 +24,9 @@ pub const SAND: u8 = 9;
 // ── Noise helpers ──
 
 fn hash2d(x: i32, z: i32) -> f64 {
-    let mut h: i32 = x.wrapping_mul(374761393).wrapping_add(z.wrapping_mul(668265263));
+    let mut h: i32 = x
+        .wrapping_mul(374761393)
+        .wrapping_add(z.wrapping_mul(668265263));
     h = (h ^ (h >> 13)).wrapping_mul(1274126177);
     ((h ^ (h >> 16)) & 0x7fffffff) as f64 / 0x7fffffff as f64
 }
@@ -70,7 +72,12 @@ fn idx(x: usize, y: usize, z: usize) -> usize {
 }
 
 fn in_bounds(x: i32, y: i32, z: i32) -> bool {
-    x >= 0 && (x as usize) < WORLD_SIZE_X && y >= 0 && (y as usize) < WORLD_SIZE_Y && z >= 0 && (z as usize) < WORLD_SIZE_Z
+    x >= 0
+        && (x as usize) < WORLD_SIZE_X
+        && y >= 0
+        && (y as usize) < WORLD_SIZE_Y
+        && z >= 0
+        && (z as usize) < WORLD_SIZE_Z
 }
 
 fn set_block(blocks: &mut [u8], x: i32, y: i32, z: i32, bt: u8) {
@@ -97,7 +104,11 @@ fn height_at(x: i32, z: i32) -> i32 {
     h += fbm(nx * 6.0 + 50.0, nz * 6.0 + 50.0, 4) * 1.5;
 
     // Slight elevation near edges
-    let edge = (x.min(z).min(WORLD_SIZE_X as i32 - 1 - x).min(WORLD_SIZE_Z as i32 - 1 - z)) as f64 / 20.0;
+    let edge = (x
+        .min(z)
+        .min(WORLD_SIZE_X as i32 - 1 - x)
+        .min(WORLD_SIZE_Z as i32 - 1 - z)) as f64
+        / 20.0;
     let ef = 1.0 - edge.min(1.0);
     h += ef * ef * 4.0;
 
@@ -167,7 +178,9 @@ fn build_roads(blocks: &mut [u8]) {
         for z in 0..WORLD_SIZE_Z as i32 {
             for w in -road_half..=road_half {
                 let x = rx + w;
-                if x < 0 || x >= WORLD_SIZE_X as i32 { continue; }
+                if x < 0 || x >= WORLD_SIZE_X as i32 {
+                    continue;
+                }
                 let h = height_at(x, z);
                 if w == 0 && (z % 8) < 4 {
                     set_block(blocks, x, h, z, SAND); // faded marking
@@ -183,7 +196,9 @@ fn build_roads(blocks: &mut [u8]) {
         for x in 0..WORLD_SIZE_X as i32 {
             for w in -road_half..=road_half {
                 let z = rz + w;
-                if z < 0 || z >= WORLD_SIZE_Z as i32 { continue; }
+                if z < 0 || z >= WORLD_SIZE_Z as i32 {
+                    continue;
+                }
                 let h = height_at(x, z);
                 if w == 0 && (x % 8) < 4 {
                     set_block(blocks, x, h, z, SAND);
@@ -199,19 +214,32 @@ fn build_roads(blocks: &mut [u8]) {
 
 fn build_craters(blocks: &mut [u8]) {
     let craters: [(i32, i32, i32); 12] = [
-        (25, 55, 5), (70, 30, 4), (45, 85, 6), (95, 60, 5),
-        (55, 45, 3), (80, 95, 4), (30, 105, 5), (105, 40, 4),
-        (60, 75, 6), (15, 80, 3), (90, 15, 4), (50, 110, 5),
+        (25, 55, 5),
+        (70, 30, 4),
+        (45, 85, 6),
+        (95, 60, 5),
+        (55, 45, 3),
+        (80, 95, 4),
+        (30, 105, 5),
+        (105, 40, 4),
+        (60, 75, 6),
+        (15, 80, 3),
+        (90, 15, 4),
+        (50, 110, 5),
     ];
 
     for (cx, cz, r) in craters {
         for dx in -r..=r {
             for dz in -r..=r {
                 let dist = ((dx * dx + dz * dz) as f64).sqrt();
-                if dist > r as f64 { continue; }
+                if dist > r as f64 {
+                    continue;
+                }
                 let x = cx + dx;
                 let z = cz + dz;
-                if x < 0 || x >= WORLD_SIZE_X as i32 || z < 0 || z >= WORLD_SIZE_Z as i32 { continue; }
+                if x < 0 || x >= WORLD_SIZE_X as i32 || z < 0 || z >= WORLD_SIZE_Z as i32 {
+                    continue;
+                }
 
                 let depth = ((1.0 - dist / r as f64) * (r as f64 * 0.6)).floor() as i32;
                 let surface_h = height_at(x, z);
@@ -272,7 +300,12 @@ fn build_ruined_building(blocks: &mut [u8], ox: i32, oz: i32, w: i32, d: i32, fl
                 let bx = ox + x;
                 let bz = oz + z;
                 let by = base_y + 1 + y;
-                if bx >= WORLD_SIZE_X as i32 || bz >= WORLD_SIZE_Z as i32 || by >= WORLD_SIZE_Y as i32 { continue; }
+                if bx >= WORLD_SIZE_X as i32
+                    || bz >= WORLD_SIZE_Z as i32
+                    || by >= WORLD_SIZE_Y as i32
+                {
+                    continue;
+                }
 
                 let is_wall = x == 0 || x == w - 1 || z == 0 || z == d - 1;
                 let is_floor = y > 0 && y % story_h == 0;
@@ -280,7 +313,9 @@ fn build_ruined_building(blocks: &mut [u8], ox: i32, oz: i32, w: i32, d: i32, fl
 
                 let destruction_chance = hash2d(bx * 17 + by, bz * 31 + by);
 
-                if is_door { continue; }
+                if is_door {
+                    continue;
+                }
 
                 if is_floor && !is_wall {
                     if destruction_chance > 0.25 {
@@ -295,7 +330,11 @@ fn build_ruined_building(blocks: &mut [u8], ox: i32, oz: i32, w: i32, d: i32, fl
                         0.08
                     };
                     if destruction_chance > dmg_threshold {
-                        let bt = if destruction_chance > 0.85 { BRICK } else { CONCRETE };
+                        let bt = if destruction_chance > 0.85 {
+                            BRICK
+                        } else {
+                            CONCRETE
+                        };
                         set_block(blocks, bx, by, bz, bt);
                     } else if y > total_h - 3 {
                         if hash2d(bx * 3, bz * 5 + by) > 0.5 {
@@ -312,8 +351,12 @@ fn build_ruined_building(blocks: &mut [u8], ox: i32, oz: i32, w: i32, d: i32, fl
         for dz in -2..=(d + 1) {
             let bx = ox + dx;
             let bz = oz + dz;
-            if bx < 0 || bx >= WORLD_SIZE_X as i32 || bz < 0 || bz >= WORLD_SIZE_Z as i32 { continue; }
-            if dx >= 0 && dx < w && dz >= 0 && dz < d { continue; }
+            if bx < 0 || bx >= WORLD_SIZE_X as i32 || bz < 0 || bz >= WORLD_SIZE_Z as i32 {
+                continue;
+            }
+            if dx >= 0 && dx < w && dz >= 0 && dz < d {
+                continue;
+            }
             if hash2d(bx * 19, bz * 23) < 0.35 {
                 let by = height_at(bx, bz) + 1;
                 if by < WORLD_SIZE_Y as i32 {
@@ -337,14 +380,23 @@ fn build_bombed_tower(blocks: &mut [u8], ox: i32, oz: i32, height: i32) {
                 let bx = ox + x;
                 let bz = oz + z;
                 let by = base_y + 1 + y;
-                if bx >= WORLD_SIZE_X as i32 || bz >= WORLD_SIZE_Z as i32 || by >= WORLD_SIZE_Y as i32 { continue; }
+                if bx >= WORLD_SIZE_X as i32
+                    || bz >= WORLD_SIZE_Z as i32
+                    || by >= WORLD_SIZE_Y as i32
+                {
+                    continue;
+                }
 
                 let is_wall = x == 0 || x == tw - 1 || z == 0 || z == tw - 1;
-                if !is_wall { continue; }
+                if !is_wall {
+                    continue;
+                }
 
                 if y > height - 4 {
                     let keep = hash2d(bx * 13 + y, bz * 7 + y);
-                    if keep < 0.4 { continue; }
+                    if keep < 0.4 {
+                        continue;
+                    }
                     let bt = if keep > 0.8 { REBAR } else { CONCRETE };
                     set_block(blocks, bx, by, bz, bt);
                 } else {
@@ -362,7 +414,9 @@ fn build_bombed_tower(blocks: &mut [u8], ox: i32, oz: i32, height: i32) {
         for z in 0..tw {
             let bx = ox + x;
             let bz = oz + z;
-            if bx >= WORLD_SIZE_X as i32 || bz >= WORLD_SIZE_Z as i32 { continue; }
+            if bx >= WORLD_SIZE_X as i32 || bz >= WORLD_SIZE_Z as i32 {
+                continue;
+            }
             set_block(blocks, bx, base_y + 1, bz, DARK_CONCRETE);
             let mid_y = base_y + 1 + height / 2;
             if mid_y < WORLD_SIZE_Y as i32 {
@@ -385,7 +439,12 @@ fn build_command_post(blocks: &mut [u8], ox: i32, oz: i32) {
                 let bx = ox + x;
                 let bz = oz + z;
                 let by = base_y + 1 + y;
-                if bx >= WORLD_SIZE_X as i32 || bz >= WORLD_SIZE_Z as i32 || by >= WORLD_SIZE_Y as i32 { continue; }
+                if bx >= WORLD_SIZE_X as i32
+                    || bz >= WORLD_SIZE_Z as i32
+                    || by >= WORLD_SIZE_Y as i32
+                {
+                    continue;
+                }
 
                 let outer_wall = x == 0 || x == w - 1 || z == 0 || z == d - 1;
                 let inner_wall = x == 1 || x == w - 2 || z == 1 || z == d - 2;
@@ -394,7 +453,9 @@ fn build_command_post(blocks: &mut [u8], ox: i32, oz: i32) {
 
                 let is_gate = x >= 8 && x <= 11 && z == 0 && y < 4;
                 let is_back_gate = x >= 8 && x <= 11 && z == d - 1 && y < 4;
-                if is_gate || is_back_gate { continue; }
+                if is_gate || is_back_gate {
+                    continue;
+                }
 
                 if is_floor {
                     set_block(blocks, bx, by, bz, DARK_CONCRETE);
@@ -423,7 +484,12 @@ fn build_command_post(blocks: &mut [u8], ox: i32, oz: i32) {
                     let bx = ox + cx + x;
                     let bz = oz + cz + z;
                     let by = base_y + 1 + y;
-                    if bx >= WORLD_SIZE_X as i32 || bz >= WORLD_SIZE_Z as i32 || by >= WORLD_SIZE_Y as i32 { continue; }
+                    if bx >= WORLD_SIZE_X as i32
+                        || bz >= WORLD_SIZE_Z as i32
+                        || by >= WORLD_SIZE_Y as i32
+                    {
+                        continue;
+                    }
                     let is_edge = x == 0 || x == 3 || z == 0 || z == 3;
                     if is_edge {
                         set_block(blocks, bx, by, bz, DARK_CONCRETE);
@@ -439,10 +505,14 @@ fn build_command_post(blocks: &mut [u8], ox: i32, oz: i32) {
     // Sandbag perimeter
     for x in -2..=(w + 1) {
         for z in -2..=(d + 1) {
-            if x >= 0 && x < w && z >= 0 && z < d { continue; }
+            if x >= 0 && x < w && z >= 0 && z < d {
+                continue;
+            }
             let bx = ox + x;
             let bz = oz + z;
-            if bx < 0 || bx >= WORLD_SIZE_X as i32 || bz < 0 || bz >= WORLD_SIZE_Z as i32 { continue; }
+            if bx < 0 || bx >= WORLD_SIZE_X as i32 || bz < 0 || bz >= WORLD_SIZE_Z as i32 {
+                continue;
+            }
             if hash2d(bx * 23, bz * 29) < 0.3 {
                 let by = height_at(bx, bz) + 1;
                 if by < WORLD_SIZE_Y as i32 {
@@ -474,31 +544,54 @@ fn build_command_post(blocks: &mut [u8], ox: i32, oz: i32) {
 
 fn build_rubble_piles(blocks: &mut [u8]) {
     let piles: [(i32, i32); 19] = [
-        (12, 35), (38, 15), (72, 45), (55, 70), (95, 25),
-        (25, 80), (80, 60), (45, 105), (110, 45), (65, 15),
-        (32, 60), (90, 100), (50, 50), (15, 115), (105, 95),
-        (42, 42), (78, 78), (60, 95), (20, 50),
+        (12, 35),
+        (38, 15),
+        (72, 45),
+        (55, 70),
+        (95, 25),
+        (25, 80),
+        (80, 60),
+        (45, 105),
+        (110, 45),
+        (65, 15),
+        (32, 60),
+        (90, 100),
+        (50, 50),
+        (15, 115),
+        (105, 95),
+        (42, 42),
+        (78, 78),
+        (60, 95),
+        (20, 50),
     ];
 
     for (cx, cz) in piles {
-        if cx >= WORLD_SIZE_X as i32 || cz >= WORLD_SIZE_Z as i32 { continue; }
+        if cx >= WORLD_SIZE_X as i32 || cz >= WORLD_SIZE_Z as i32 {
+            continue;
+        }
         let radius = 2 + (hash2d(cx, cz) * 3.0).floor() as i32;
         let pile_height = 2 + (hash2d(cx * 3, cz * 7) * 3.0).floor() as i32;
 
         for dx in -radius..=radius {
             for dz in -radius..=radius {
                 let dist = ((dx * dx + dz * dz) as f64).sqrt();
-                if dist > radius as f64 { continue; }
+                if dist > radius as f64 {
+                    continue;
+                }
                 let x = cx + dx;
                 let z = cz + dz;
-                if x < 0 || x >= WORLD_SIZE_X as i32 || z < 0 || z >= WORLD_SIZE_Z as i32 { continue; }
+                if x < 0 || x >= WORLD_SIZE_X as i32 || z < 0 || z >= WORLD_SIZE_Z as i32 {
+                    continue;
+                }
 
                 let py = (pile_height as f64 * (1.0 - dist / radius as f64)).floor() as i32;
                 let base_h = height_at(x, z);
 
                 for y in 1..=py {
                     let by = base_h + y;
-                    if by >= WORLD_SIZE_Y as i32 { break; }
+                    if by >= WORLD_SIZE_Y as i32 {
+                        break;
+                    }
                     let r = hash2d(x * 11 + y, z * 17);
                     let bt = if r < 0.4 {
                         RUBBLE
@@ -541,12 +634,16 @@ fn build_barricades(blocks: &mut [u8]) {
         for i in 0..len {
             let x = if is_ns { ox } else { ox + i };
             let z = if is_ns { oz + i } else { oz };
-            if x >= WORLD_SIZE_X as i32 || z >= WORLD_SIZE_Z as i32 { continue; }
+            if x >= WORLD_SIZE_X as i32 || z >= WORLD_SIZE_Z as i32 {
+                continue;
+            }
             let base_h = height_at(x, z);
 
             for y in 1..=h {
                 let by = base_h + y;
-                if by >= WORLD_SIZE_Y as i32 { break; }
+                if by >= WORLD_SIZE_Y as i32 {
+                    break;
+                }
                 let is_sandbag = hash2d(x * 5 + y, z * 9) > 0.4;
                 set_block(blocks, x, by, z, if is_sandbag { SAND } else { CONCRETE });
             }
@@ -579,8 +676,14 @@ fn build_vehicles(blocks: &mut [u8]) {
                         let bx = ox + x;
                         let bz = oz + z;
                         let by = base_h + 1 + y;
-                        if bx >= WORLD_SIZE_X as i32 || bz >= WORLD_SIZE_Z as i32 || by >= WORLD_SIZE_Y as i32 { continue; }
-                        let is_shell = x == 0 || x == vw - 1 || y == 0 || y == vd - 1 || z == 0 || z == vh - 1;
+                        if bx >= WORLD_SIZE_X as i32
+                            || bz >= WORLD_SIZE_Z as i32
+                            || by >= WORLD_SIZE_Y as i32
+                        {
+                            continue;
+                        }
+                        let is_shell =
+                            x == 0 || x == vw - 1 || y == 0 || y == vd - 1 || z == 0 || z == vh - 1;
                         if is_shell {
                             set_block(blocks, bx, by, bz, METAL);
                         }
@@ -594,8 +697,14 @@ fn build_vehicles(blocks: &mut [u8]) {
                         let bx = ox + x;
                         let bz = oz + z;
                         let by = base_h + 1 + y;
-                        if bx >= WORLD_SIZE_X as i32 || bz >= WORLD_SIZE_Z as i32 || by >= WORLD_SIZE_Y as i32 { continue; }
-                        let is_shell = x == 0 || x == vw - 1 || y == 0 || y == vh - 1 || z == 0 || z == vd - 1;
+                        if bx >= WORLD_SIZE_X as i32
+                            || bz >= WORLD_SIZE_Z as i32
+                            || by >= WORLD_SIZE_Y as i32
+                        {
+                            continue;
+                        }
+                        let is_shell =
+                            x == 0 || x == vw - 1 || y == 0 || y == vh - 1 || z == 0 || z == vd - 1;
                         if is_shell {
                             set_block(blocks, bx, by, bz, METAL);
                         }
@@ -631,7 +740,9 @@ pub fn rle_decode(data: &[u8], output: &mut [u8]) {
         let val = data[i];
         let run = data[i + 1] as usize;
         for _ in 0..run {
-            if out_idx >= output.len() { break; }
+            if out_idx >= output.len() {
+                break;
+            }
             output[out_idx] = val;
             out_idx += 1;
         }
@@ -647,7 +758,12 @@ const MAX_BFS_NODES: usize = 200;
 const MAX_BFS_RADIUS: i32 = 12;
 
 const N6: [(i32, i32, i32); 6] = [
-    (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1),
+    (1, 0, 0),
+    (-1, 0, 0),
+    (0, 1, 0),
+    (0, -1, 0),
+    (0, 0, 1),
+    (0, 0, -1),
 ];
 
 fn pack_coord(x: i32, y: i32, z: i32) -> u32 {
@@ -662,7 +778,9 @@ struct BfsResult {
 
 fn bounded_bfs(
     blocks: &[u8],
-    start_x: i32, start_y: i32, start_z: i32,
+    start_x: i32,
+    start_y: i32,
+    start_z: i32,
     global_visited: &HashSet<u32>,
 ) -> BfsResult {
     let mut queue = vec![(start_x, start_y, start_z)];
@@ -706,7 +824,10 @@ fn bounded_bfs(
         // Support from below: solid block below that isn't part of this component
         let below_key = pack_coord(x, y - 1, z);
         let below_bt = get_block(blocks, x, y - 1, z);
-        if below_bt != AIR && !local_visited.contains(&below_key) && !global_visited.contains(&below_key) {
+        if below_bt != AIR
+            && !local_visited.contains(&below_key)
+            && !global_visited.contains(&below_key)
+        {
             is_supported = true;
             break;
         }
@@ -809,7 +930,11 @@ pub fn pack_chunk_id(cx: u8, cy: u8, cz: u8) -> u32 {
 }
 
 pub fn unpack_chunk_id(id: u32) -> (u8, u8, u8) {
-    ((id & 0xFF) as u8, ((id >> 8) & 0xFF) as u8, ((id >> 16) & 0xFF) as u8)
+    (
+        (id & 0xFF) as u8,
+        ((id >> 8) & 0xFF) as u8,
+        ((id >> 16) & 0xFF) as u8,
+    )
 }
 
 /// Extract a 16x16x16 chunk from the flat world array and RLE-compress it.
