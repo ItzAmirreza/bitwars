@@ -48,6 +48,8 @@ export class WeaponModel {
       this.buildRifle(),
       this.buildShotgun(),
       this.buildRPG(),
+      this.buildMachineGun(),
+      this.buildGrenadeLauncher(),
     ];
 
     this.weapons.forEach((w) => this.scene.add(w));
@@ -204,6 +206,87 @@ export class WeaponModel {
     return g;
   }
 
+  // ── Machine Gun: Belt-fed bruiser ──
+  private buildMachineGun(): THREE.Group {
+    const g = new THREE.Group();
+    const body = this.createMaterial(0x1a222c, 0.34, 0.82);
+    const steel = this.createMaterial(0x3b4658, 0.28, 0.9);
+    const cyan = this.createMaterial(0x2a8fa8, 0.36, 0.45, 0x115566, 0.5);
+
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.58), steel);
+    barrel.position.set(0, 0.01, -0.24);
+    g.add(barrel);
+
+    const shroud = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.08, 0.28), body);
+    shroud.position.set(0, 0.015, -0.02);
+    g.add(shroud);
+
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.09, 0.18), steel);
+    receiver.position.set(0, 0.01, 0.16);
+    g.add(receiver);
+
+    const boxMag = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.09), body);
+    boxMag.position.set(-0.02, -0.07, 0.1);
+    g.add(boxMag);
+
+    const carry = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.01, 0.17), cyan);
+    carry.position.set(0, 0.065, 0.08);
+    g.add(carry);
+
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.16), steel);
+    stock.position.set(0, -0.005, 0.3);
+    g.add(stock);
+
+    const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.03), cyan);
+    muzzle.position.set(0, 0.01, -0.53);
+    g.add(muzzle);
+
+    g.position.set(0.3, -0.26, -0.46);
+    return g;
+  }
+
+  // ── Grenade Launcher: Heavy drum-fed arc cannon ──
+  private buildGrenadeLauncher(): THREE.Group {
+    const g = new THREE.Group();
+    const dark = this.createMaterial(0x1c1f22, 0.42, 0.72);
+    const olive = this.createMaterial(0x3a4d2a, 0.68, 0.28);
+    const green = this.createMaterial(0x52b82f, 0.3, 0.22, 0x17480f, 0.45);
+
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.52, 10), olive);
+    tube.rotation.x = Math.PI / 2;
+    tube.position.set(0, 0.01, -0.18);
+    g.add(tube);
+
+    const breech = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.1, 0.15), dark);
+    breech.position.set(0, 0.01, 0.12);
+    g.add(breech);
+
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.07, 8), dark);
+    drum.rotation.z = Math.PI / 2;
+    drum.position.set(0, -0.07, 0.06);
+    g.add(drum);
+
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, 0.04), dark);
+    grip.position.set(0, -0.08, 0.2);
+    grip.rotation.x = -0.22;
+    g.add(grip);
+
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.17), olive);
+    stock.position.set(0, -0.005, 0.33);
+    g.add(stock);
+
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.006, 6, 10), green);
+    ring.position.set(0, 0.01, -0.43);
+    g.add(ring);
+
+    const sight = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.03, 0.012), green);
+    sight.position.set(0, 0.065, -0.08);
+    g.add(sight);
+
+    g.position.set(0.31, -0.29, -0.4);
+    return g;
+  }
+
   private showWeapon(index: number): void {
     this.weapons.forEach((w, i) => {
       w.visible = i === index;
@@ -314,6 +397,8 @@ export class WeaponModel {
       new THREE.Vector3(0.28, -0.26, -0.45),  // Rifle
       new THREE.Vector3(0.30, -0.28, -0.42),  // Shotgun
       new THREE.Vector3(0.32, -0.30, -0.38),  // RPG
+      new THREE.Vector3(0.30, -0.26, -0.46),  // Machine Gun
+      new THREE.Vector3(0.31, -0.29, -0.40),  // Grenade Launcher
     ];
     return positions[index] || positions[0];
   }

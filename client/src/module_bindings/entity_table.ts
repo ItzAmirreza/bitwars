@@ -9,13 +9,16 @@ import {
   type AlgebraicTypeType as __AlgebraicTypeType,
   type Infer as __Infer,
 } from "spacetimedb";
-
 import {
   Vec3,
   Rotation,
 } from "./types";
 
-export default {
+
+export default __t.row({
+  id: __t.u64().primaryKey(),
+  kind: __t.u8(),
+  subtype: __t.u8(),
   get pos() {
     return Vec3;
   },
@@ -25,5 +28,8 @@ export default {
   get rot() {
     return Rotation;
   },
-  weapon: __t.u8(),
-};
+  scale: __t.f32(),
+  active: __t.bool(),
+  createdAt: __t.timestamp().name("created_at"),
+  updatedAt: __t.timestamp().name("updated_at"),
+});

@@ -10,20 +10,10 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-import {
-  Vec3,
-  Rotation,
-} from "./types";
-
-export default {
-  get pos() {
-    return Vec3;
-  },
-  get vel() {
-    return Vec3;
-  },
-  get rot() {
-    return Rotation;
-  },
-  weapon: __t.u8(),
-};
+export default __t.row({
+  username: __t.string().primaryKey(),
+  slot1: __t.u8().name("slot_1"),
+  slot2: __t.u8().name("slot_2"),
+  slot3: __t.u8().name("slot_3"),
+  updatedAt: __t.timestamp().name("updated_at"),
+});

@@ -16,6 +16,7 @@ import {
 } from "./types";
 
 export default {
+  entityId: __t.u64(),
   get pos() {
     return Vec3;
   },
@@ -25,5 +26,4 @@ export default {
   get rot() {
     return Rotation;
   },
-  weapon: __t.u8(),
 };

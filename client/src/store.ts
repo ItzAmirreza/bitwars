@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { DbConnection } from './module_bindings';
+import { normalizeCharacterPreset } from './characterPresets';
 
 export type Screen = 'login' | 'lobby' | 'game';
 
@@ -35,6 +36,24 @@ function saveSettings(s: GameSettings): void {
   try { localStorage.setItem('bitwars-settings', JSON.stringify(s)); } catch { /* ignore */ }
 }
 
+function loadCharacterPreset(): number {
+  try {
+    const raw = localStorage.getItem('bitwars-character-preset');
+    if (raw !== null) return normalizeCharacterPreset(Number(raw));
+  } catch {
+    // ignore
+  }
+  return 0;
+}
+
+function saveCharacterPreset(preset: number): void {
+  try {
+    localStorage.setItem('bitwars-character-preset', String(normalizeCharacterPreset(preset)));
+  } catch {
+    // ignore
+  }
+}
+
 interface GameStore {
   screen: Screen;
   username: string;
@@ -44,6 +63,7 @@ interface GameStore {
   error: string | null;
   settings: GameSettings;
   showSettings: boolean;
+  selectedCharacterPreset: number;
 
   setScreen: (screen: Screen) => void;
   setUsername: (username: string) => void;
@@ -54,6 +74,7 @@ interface GameStore {
   setSettings: (partial: Partial<GameSettings>) => void;
   resetSettings: () => void;
   setShowSettings: (show: boolean) => void;
+  setSelectedCharacterPreset: (preset: number) => void;
 }
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -65,6 +86,7 @@ export const useGameStore = create<GameStore>((set) => ({
   error: null,
   settings: loadSettings(),
   showSettings: false,
+  selectedCharacterPreset: loadCharacterPreset(),
 
   setScreen: (screen) => set({ screen }),
   setUsername: (username) => set({ username }),
@@ -83,6 +105,11 @@ export const useGameStore = create<GameStore>((set) => ({
     set({ settings: { ...DEFAULT_SETTINGS } });
   },
   setShowSettings: (show) => set({ showSettings: show }),
+  setSelectedCharacterPreset: (preset) => {
+    const normalized = normalizeCharacterPreset(preset);
+    saveCharacterPreset(normalized);
+    set({ selectedCharacterPreset: normalized });
+  },
 }));
 
 export { DEFAULT_SETTINGS };

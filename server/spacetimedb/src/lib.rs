@@ -2,9 +2,11 @@ use spacetimedb::{
     reducer, table, Identity, ReducerContext, ScheduleAt, SpacetimeType, Table, Timestamp,
 };
 use std::collections::HashMap;
+use std::f32::consts::TAU;
 use std::time::Duration;
 
 mod worldgen;
+use std::collections::HashMap as StdHashMap;
 use worldgen::{
     AIR, CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z, WORLD_SIZE_X, WORLD_SIZE_Y,
     WORLD_SIZE_Z,
@@ -20,6 +22,14 @@ pub struct Vec3 {
     pub x: f32,
     pub y: f32,
     pub z: f32,
+}
+
+#[derive(SpacetimeType, Clone, Debug, PartialEq)]
+pub struct DestroyedBlock {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub block_type: u8,
 }
 
 #[derive(SpacetimeType, Clone, Debug, PartialEq)]
@@ -39,13 +49,13 @@ struct WeaponDef {
     projectile_speed: f32,
 }
 
-const WEAPON_DEFS: [WeaponDef; 3] = [
+const WEAPON_DEFS: [WeaponDef; 5] = [
     // Rifle: fast, precise, moderate damage (hitscan)
     WeaponDef {
         damage: 25,
         radius: 0.0,
         fire_rate: 5.0,
-        max_ammo: 30,
+        max_ammo: 90,
         max_range: 80.0,
         projectile_speed: 0.0,
     },
@@ -54,7 +64,7 @@ const WEAPON_DEFS: [WeaponDef; 3] = [
         damage: 12,
         radius: 1.5,
         fire_rate: 1.0,
-        max_ammo: 8,
+        max_ammo: 24,
         max_range: 30.0,
         projectile_speed: 0.0,
     },
@@ -63,31 +73,111 @@ const WEAPON_DEFS: [WeaponDef; 3] = [
         damage: 80,
         radius: 3.5,
         fire_rate: 0.5,
-        max_ammo: 4,
+        max_ammo: 12,
         max_range: 80.0,
-        projectile_speed: 40.0,
+        projectile_speed: 120.0,
+    },
+    // Machine Gun: very high fire-rate bullet hose (hitscan)
+    WeaponDef {
+        damage: 14,
+        radius: 0.0,
+        fire_rate: 13.0,
+        max_ammo: 180,
+        max_range: 90.0,
+        projectile_speed: 0.0,
+    },
+    // Grenade Launcher: arcing explosive sandbox chaos (projectile)
+    WeaponDef {
+        damage: 95,
+        radius: 4.8,
+        fire_rate: 1.4,
+        max_ammo: 14,
+        max_range: 85.0,
+        projectile_speed: 48.0,
     },
 ];
 
-const NUM_WEAPONS: u8 = 3;
+const NUM_WEAPONS: u8 = 5;
 
 // ── Tables ──
 
 /// Every connected player
+#[derive(Clone)]
 #[table(accessor = player, public)]
 pub struct Player {
     #[primary_key]
     pub identity: Identity,
+    pub entity_id: u64,
     pub username: String,
+    pub character_preset: u8,
     pub pos: Vec3,
+    pub vel: Vec3,
     pub rot: Rotation,
     pub health: i32,
     pub max_health: i32,
     pub current_weapon: u8,
     pub kills: u32,
     pub deaths: u32,
+    pub spawn_protected: bool,
     pub online: bool,
+    /// 0 means not mounted in a vehicle.
+    pub mounted_vehicle_id: u64,
     pub joined_at: Timestamp,
+    pub last_damage_time: Timestamp,
+}
+
+/// Abstract entity root shared by all world objects (player, vehicle, item, ...).
+#[derive(Clone)]
+#[table(accessor = entity, public)]
+pub struct Entity {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    /// 1 = Player, 2 = Vehicle
+    pub kind: u8,
+    /// Type inside the kind (e.g. helicopter type for vehicles)
+    pub subtype: u8,
+    pub pos: Vec3,
+    pub vel: Vec3,
+    pub rot: Rotation,
+    pub scale: f32,
+    pub active: bool,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+/// Vehicle entity component attached to an Entity row.
+#[derive(Clone)]
+#[table(accessor = vehicle, public)]
+pub struct Vehicle {
+    #[primary_key]
+    pub entity_id: u64,
+    /// 0 = Helicopter
+    pub vehicle_type: u8,
+    pub pilot_identity: Option<Identity>,
+    pub seat_count: u8,
+    pub input_forward: f32,
+    pub input_strafe: f32,
+    pub input_lift: f32,
+    pub input_yaw: f32,
+    pub boosting: bool,
+    /// Visual rotor spin amount, synced for all clients.
+    pub rotor_spin: f32,
+    pub health: i32,
+    pub created_at: Timestamp,
+    pub last_input_at: Timestamp,
+}
+
+/// Persistent 3-weapon loadout keyed by username.
+/// Used to restore player weapon choices across sessions.
+#[table(accessor = player_loadout, public)]
+pub struct PlayerLoadout {
+    #[primary_key]
+    pub username: String,
+    pub slot1: u8,
+    pub slot2: u8,
+    pub slot3: u8,
+    pub updated_at: Timestamp,
 }
 
 /// Server-authoritative weapon state per player
@@ -98,6 +188,8 @@ pub struct PlayerWeaponState {
     pub ammo_rifle: i32,
     pub ammo_shotgun: i32,
     pub ammo_rpg: i32,
+    pub ammo_machine_gun: i32,
+    pub ammo_grenade: i32,
     pub last_fire_time: Timestamp,
 }
 
@@ -132,6 +224,8 @@ pub struct ShotEvent {
     pub shooter: Identity,
     pub origin: Vec3,
     pub direction: Vec3,
+    pub hit_pos: Vec3,
+    pub has_hit: bool,
     pub weapon: u8,
     pub fired_at: Timestamp,
 }
@@ -147,6 +241,18 @@ pub struct DetachEvent {
     pub blocks_y: Vec<i32>,
     pub blocks_z: Vec<i32>,
     pub block_types: Vec<u8>,
+    /// 0 = free-fall shear, 1 = rotational topple
+    pub motion_mode: u8,
+    pub pivot: Vec3,
+    pub axis: Vec3,
+    pub drift: Vec3,
+    pub fracture_origin: Vec3,
+    pub fracture_dir: Vec3,
+    pub ang_accel: f32,
+    pub initial_ang_vel: f32,
+    pub gravity_scale: f32,
+    pub fracture_speed: f32,
+    pub lifetime_ms: u32,
     pub created_at: Timestamp,
 }
 
@@ -157,6 +263,29 @@ pub struct DetachCleanup {
     #[auto_inc]
     pub scheduled_id: u64,
     pub scheduled_at: ScheduleAt,
+}
+
+/// Scheduled cleanup for old ShotEvents and ExplosionEvents
+#[table(accessor = shot_cleanup, scheduled(cleanup_shots_scheduled))]
+pub struct ShotCleanup {
+    #[primary_key]
+    #[auto_inc]
+    pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+}
+
+/// Short-lived row: explosion event for all clients to render VFX.
+#[table(accessor = explosion_event, public)]
+pub struct ExplosionEvent {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub origin: Identity,
+    pub pos: Vec3,
+    pub radius: f32,
+    pub weapon: u8,
+    pub destroyed_blocks: Vec<DestroyedBlock>,
+    pub created_at: Timestamp,
 }
 
 /// Chat messages
@@ -200,16 +329,87 @@ pub struct EnvironmentTick {
     pub scheduled_at: ScheduleAt,
 }
 
+/// World config: stores current map seed and round info.
+#[table(accessor = world_config, public)]
+pub struct WorldConfig {
+    #[primary_key]
+    pub id: u32,
+    pub seed: u64,
+    pub round_number: u32,
+    pub round_start: Timestamp,
+}
+
+/// Scheduled map reset every 5 minutes.
+#[table(accessor = map_reset_timer, scheduled(reset_map))]
+pub struct MapResetTimer {
+    #[primary_key]
+    #[auto_inc]
+    pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+}
+
+/// Scheduled health regeneration tick — runs every 1 second.
+/// Regenerates 5 HP/s for players who haven't taken damage in 10 seconds.
+#[table(accessor = health_regen_tick, scheduled(tick_health_regen))]
+pub struct HealthRegenTick {
+    #[primary_key]
+    #[auto_inc]
+    pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+}
+
+/// Scheduled vehicle simulation tick (20Hz).
+#[table(accessor = vehicle_tick, scheduled(tick_vehicles))]
+pub struct VehicleTick {
+    #[primary_key]
+    #[auto_inc]
+    pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+}
+
 // ── Constants ──
 
 const SPAWN_POS: Vec3 = Vec3 {
-    x: 64.0,
+    x: WORLD_SIZE_X as f32 / 2.0,
     y: 20.0,
-    z: 64.0,
+    z: WORLD_SIZE_Z as f32 / 2.0,
 };
 const MAX_HEALTH: i32 = 100;
+const HEALTH_REGEN_RATE: i32 = 5; // HP per second
+const HEALTH_REGEN_DELAY_SECS: u64 = 10; // seconds after last damage before regen starts
 const MAX_MOVEMENT_SPEED: f32 = 35.0;
+const ZERO_VEL: Vec3 = Vec3 {
+    x: 0.0,
+    y: 0.0,
+    z: 0.0,
+};
 const SPEED_VIOLATION_THRESHOLD: u32 = 10;
+const PLAYER_EYE_HEIGHT: f32 = 1.7;
+const PLAYER_FOOT_RADIUS: f32 = 0.29;
+const DEFAULT_LOADOUT: [u8; 3] = [0, 1, 2];
+const NUM_CHARACTER_PRESETS: u8 = 5;
+const ENTITY_KIND_PLAYER: u8 = 1;
+const ENTITY_KIND_VEHICLE: u8 = 2;
+const VEHICLE_TYPE_HELICOPTER: u8 = 0;
+const SANDBOX_HELICOPTER_COUNT: usize = 1;
+const HELI_SPAWN_CLEARANCE_RADIUS: i32 = 4;
+const HELI_SPAWN_CLEARANCE_HEIGHT: i32 = 7;
+const HELI_SPAWN_MIN_SEPARATION: f32 = 28.0;
+const HELI_SCALE: f32 = 1.85;
+const HELI_MOUNT_RANGE: f32 = 8.5;
+const HELI_MIN_ALTITUDE_FROM_GROUND: f32 = 0.0;
+const HELI_MAX_ALTITUDE: f32 = 96.0;
+const HELI_CRUISE_SPEED: f32 = 34.0;
+const HELI_STRAFE_SPEED: f32 = 22.0;
+const HELI_LIFT_SPEED: f32 = 16.0;
+const HELI_YAW_SPEED: f32 = 1.5;
+const HELI_PILOT_SEAT_HEIGHT: f32 = 1.8;
+const HELI_HEALTH_MAX: i32 = 1000;
+const HELI_SKID_BOTTOM_LOCAL_Y: f32 = 1.325;
+const HELI_HITBOX_CENTER_Y: f32 = 2.5;
+const HELI_HITBOX_HALF_X: f32 = 6.4;
+const HELI_HITBOX_HALF_Y: f32 = 1.25;
+const HELI_HITBOX_HALF_Z: f32 = 4.9;
 
 // ── Helpers ──
 
@@ -226,6 +426,14 @@ fn dist_sq(a: &Vec3, b: &Vec3) -> f32 {
     dx * dx + dy * dy + dz * dz
 }
 
+fn vec3_from_tuple(v: (f32, f32, f32)) -> Vec3 {
+    Vec3 {
+        x: v.0,
+        y: v.1,
+        z: v.2,
+    }
+}
+
 fn init_weapon_state(ctx: &ReducerContext, identity: Identity) {
     if ctx
         .db
@@ -239,6 +447,8 @@ fn init_weapon_state(ctx: &ReducerContext, identity: Identity) {
             ammo_rifle: WEAPON_DEFS[0].max_ammo,
             ammo_shotgun: WEAPON_DEFS[1].max_ammo,
             ammo_rpg: WEAPON_DEFS[2].max_ammo,
+            ammo_machine_gun: WEAPON_DEFS[3].max_ammo,
+            ammo_grenade: WEAPON_DEFS[4].max_ammo,
             last_fire_time: ctx.timestamp,
         });
     }
@@ -270,6 +480,8 @@ fn get_ammo(state: &PlayerWeaponState, weapon: u8) -> i32 {
         0 => state.ammo_rifle,
         1 => state.ammo_shotgun,
         2 => state.ammo_rpg,
+        3 => state.ammo_machine_gun,
+        4 => state.ammo_grenade,
         _ => 0,
     }
 }
@@ -279,8 +491,63 @@ fn set_ammo(state: &mut PlayerWeaponState, weapon: u8, ammo: i32) {
         0 => state.ammo_rifle = ammo,
         1 => state.ammo_shotgun = ammo,
         2 => state.ammo_rpg = ammo,
+        3 => state.ammo_machine_gun = ammo,
+        4 => state.ammo_grenade = ammo,
         _ => {}
     }
+}
+
+fn loadout_slots_valid(slot1: u8, slot2: u8, slot3: u8) -> bool {
+    slot1 < NUM_WEAPONS
+        && slot2 < NUM_WEAPONS
+        && slot3 < NUM_WEAPONS
+        && slot1 != slot2
+        && slot1 != slot3
+        && slot2 != slot3
+}
+
+fn weapon_in_loadout(loadout: &PlayerLoadout, weapon: u8) -> bool {
+    weapon == loadout.slot1 || weapon == loadout.slot2 || weapon == loadout.slot3
+}
+
+fn normalize_character_preset(preset: u8) -> u8 {
+    if preset < NUM_CHARACTER_PRESETS {
+        preset
+    } else {
+        0
+    }
+}
+
+fn normalize_or_create_player_loadout(ctx: &ReducerContext, username: &str) -> PlayerLoadout {
+    let key = username.to_string();
+    if let Some(existing) = ctx.db.player_loadout().username().find(&key) {
+        if loadout_slots_valid(existing.slot1, existing.slot2, existing.slot3) {
+            return existing;
+        }
+
+        ctx.db.player_loadout().username().update(PlayerLoadout {
+            username: key.clone(),
+            slot1: DEFAULT_LOADOUT[0],
+            slot2: DEFAULT_LOADOUT[1],
+            slot3: DEFAULT_LOADOUT[2],
+            updated_at: ctx.timestamp,
+        });
+        return PlayerLoadout {
+            username: key,
+            slot1: DEFAULT_LOADOUT[0],
+            slot2: DEFAULT_LOADOUT[1],
+            slot3: DEFAULT_LOADOUT[2],
+            updated_at: ctx.timestamp,
+        };
+    }
+
+    ctx.db.player_loadout().insert(PlayerLoadout {
+        username: key,
+        slot1: DEFAULT_LOADOUT[0],
+        slot2: DEFAULT_LOADOUT[1],
+        slot3: DEFAULT_LOADOUT[2],
+        updated_at: ctx.timestamp,
+    })
 }
 
 fn clamp_pos(pos: &Vec3) -> Vec3 {
@@ -300,14 +567,394 @@ fn block_in_bounds(x: i32, y: i32, z: i32) -> bool {
         && z < WORLD_SIZE_Z as i32
 }
 
+fn get_block_type(ctx: &ReducerContext, x: i32, y: i32, z: i32) -> Option<u8> {
+    if !block_in_bounds(x, y, z) {
+        return Some(AIR);
+    }
+
+    let ux = x as usize;
+    let uy = y as usize;
+    let uz = z as usize;
+    let cx = (ux / CHUNK_SIZE) as u8;
+    let cy = (uy / CHUNK_SIZE) as u8;
+    let cz = (uz / CHUNK_SIZE) as u8;
+    let lx = ux % CHUNK_SIZE;
+    let ly = uy % CHUNK_SIZE;
+    let lz = uz % CHUNK_SIZE;
+    let chunk_id = worldgen::pack_chunk_id(cx, cy, cz);
+
+    let chunk = ctx.db.world_chunk().chunk_id().find(chunk_id)?;
+    let mut decoded = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+    worldgen::rle_decode(&chunk.data, &mut decoded);
+    let idx = lx + ly * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE;
+    Some(decoded[idx])
+}
+
+fn is_grounded(ctx: &ReducerContext, pos: &Vec3) -> bool {
+    let foot_y = pos.y - PLAYER_EYE_HEIGHT;
+    let probe_y = (foot_y - 0.05).floor() as i32;
+    let probes = [
+        (pos.x, pos.z),
+        (pos.x - PLAYER_FOOT_RADIUS, pos.z - PLAYER_FOOT_RADIUS),
+        (pos.x + PLAYER_FOOT_RADIUS, pos.z - PLAYER_FOOT_RADIUS),
+        (pos.x - PLAYER_FOOT_RADIUS, pos.z + PLAYER_FOOT_RADIUS),
+        (pos.x + PLAYER_FOOT_RADIUS, pos.z + PLAYER_FOOT_RADIUS),
+    ];
+
+    probes.iter().any(|(px, pz)| {
+        let bx = px.floor() as i32;
+        let bz = pz.floor() as i32;
+        matches!(get_block_type(ctx, bx, probe_y, bz), Some(bt) if bt != AIR)
+    })
+}
+
+fn hash_u64(mut x: u64) -> u64 {
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94d0_49bb_1331_11eb);
+    x ^ (x >> 31)
+}
+
+fn unit_from_seed(seed: u64) -> f32 {
+    ((hash_u64(seed) & 0xffff_ffff) as f64 / 4_294_967_295.0) as f32
+}
+
+fn create_player_entity(ctx: &ReducerContext, pos: &Vec3, vel: &Vec3, rot: &Rotation) -> u64 {
+    let row = ctx.db.entity().insert(Entity {
+        id: 0,
+        kind: ENTITY_KIND_PLAYER,
+        subtype: 0,
+        pos: pos.clone(),
+        vel: vel.clone(),
+        rot: rot.clone(),
+        scale: 1.0,
+        active: true,
+        created_at: ctx.timestamp,
+        updated_at: ctx.timestamp,
+    });
+    row.id
+}
+
+fn sync_player_entity(ctx: &ReducerContext, player: &Player) {
+    if player.entity_id == 0 {
+        return;
+    }
+
+    if let Some(entity) = ctx.db.entity().id().find(&player.entity_id) {
+        ctx.db.entity().id().update(Entity {
+            pos: player.pos.clone(),
+            vel: player.vel.clone(),
+            rot: player.rot.clone(),
+            active: player.online,
+            updated_at: ctx.timestamp,
+            ..entity
+        });
+    }
+}
+
+fn ensure_player_entity(ctx: &ReducerContext, player: &Player) -> u64 {
+    if player.entity_id != 0 {
+        if ctx.db.entity().id().find(&player.entity_id).is_some() {
+            return player.entity_id;
+        }
+    }
+
+    create_player_entity(ctx, &player.pos, &player.vel, &player.rot)
+}
+
+fn get_or_generate_chunk(ctx: &ReducerContext, cx: u8, cy: u8, cz: u8) -> Option<WorldChunk> {
+    let chunk_id = worldgen::pack_chunk_id(cx, cy, cz);
+    if let Some(chunk) = ctx.db.world_chunk().chunk_id().find(chunk_id) {
+        return Some(chunk);
+    }
+
+    let seed = ctx.db.world_config().id().find(1)?.seed;
+    let data = worldgen::generate_chunk(cx as usize, cy as usize, cz as usize, seed);
+    Some(ctx.db.world_chunk().insert(WorldChunk {
+        chunk_id,
+        cx,
+        cy,
+        cz,
+        data,
+        version: 1,
+    }))
+}
+
+fn get_block_type_generated_cached(
+    ctx: &ReducerContext,
+    x: i32,
+    y: i32,
+    z: i32,
+    chunk_cache: &mut StdHashMap<u32, [u8; 4096]>,
+) -> Option<u8> {
+    if !block_in_bounds(x, y, z) {
+        return Some(AIR);
+    }
+
+    let ux = x as usize;
+    let uy = y as usize;
+    let uz = z as usize;
+    let cx = (ux / CHUNK_SIZE) as u8;
+    let cy = (uy / CHUNK_SIZE) as u8;
+    let cz = (uz / CHUNK_SIZE) as u8;
+    let lx = ux % CHUNK_SIZE;
+    let ly = uy % CHUNK_SIZE;
+    let lz = uz % CHUNK_SIZE;
+
+    let chunk_id = worldgen::pack_chunk_id(cx, cy, cz);
+    if !chunk_cache.contains_key(&chunk_id) {
+        let chunk = get_or_generate_chunk(ctx, cx, cy, cz)?;
+        let mut decoded = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+        worldgen::rle_decode(&chunk.data, &mut decoded);
+        chunk_cache.insert(chunk_id, decoded);
+    }
+
+    let decoded = chunk_cache.get(&chunk_id)?;
+    let idx = lx + ly * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE;
+    Some(decoded[idx])
+}
+
+fn get_surface_height_generated(
+    ctx: &ReducerContext,
+    x: i32,
+    z: i32,
+    chunk_cache: &mut StdHashMap<u32, [u8; 4096]>,
+) -> Option<i32> {
+    if x < 0 || x >= WORLD_SIZE_X as i32 || z < 0 || z >= WORLD_SIZE_Z as i32 {
+        return None;
+    }
+
+    for y in (0..WORLD_SIZE_Y as i32).rev() {
+        if matches!(get_block_type_generated_cached(ctx, x, y, z, chunk_cache), Some(bt) if bt != AIR)
+        {
+            return Some(y);
+        }
+    }
+    None
+}
+
+fn helicopter_spawn_y_if_fit(
+    ctx: &ReducerContext,
+    center_x: i32,
+    center_z: i32,
+    chunk_cache: &mut StdHashMap<u32, [u8; 4096]>,
+) -> Option<f32> {
+    let mut min_surface = i32::MAX;
+    let mut max_surface = i32::MIN;
+
+    for dx in -HELI_SPAWN_CLEARANCE_RADIUS..=HELI_SPAWN_CLEARANCE_RADIUS {
+        for dz in -HELI_SPAWN_CLEARANCE_RADIUS..=HELI_SPAWN_CLEARANCE_RADIUS {
+            if dx * dx + dz * dz > HELI_SPAWN_CLEARANCE_RADIUS * HELI_SPAWN_CLEARANCE_RADIUS {
+                continue;
+            }
+            if (dx & 1) != 0 || (dz & 1) != 0 {
+                continue;
+            }
+
+            let sx = center_x + dx;
+            let sz = center_z + dz;
+            let surf = get_surface_height_generated(ctx, sx, sz, chunk_cache)?;
+            min_surface = min_surface.min(surf);
+            max_surface = max_surface.max(surf);
+        }
+    }
+
+    if min_surface == i32::MAX || max_surface - min_surface > 2 {
+        return None;
+    }
+
+    let base_y = max_surface + 1;
+    if base_y + HELI_SPAWN_CLEARANCE_HEIGHT >= WORLD_SIZE_Y as i32 - 1 {
+        return None;
+    }
+
+    for dx in -HELI_SPAWN_CLEARANCE_RADIUS..=HELI_SPAWN_CLEARANCE_RADIUS {
+        for dz in -HELI_SPAWN_CLEARANCE_RADIUS..=HELI_SPAWN_CLEARANCE_RADIUS {
+            if dx * dx + dz * dz > HELI_SPAWN_CLEARANCE_RADIUS * HELI_SPAWN_CLEARANCE_RADIUS {
+                continue;
+            }
+            let sx = center_x + dx;
+            let sz = center_z + dz;
+            for y in base_y..=base_y + HELI_SPAWN_CLEARANCE_HEIGHT {
+                if !matches!(
+                    get_block_type_generated_cached(ctx, sx, y, sz, chunk_cache),
+                    Some(AIR)
+                ) {
+                    return None;
+                }
+            }
+        }
+    }
+
+    let center = Vec3 {
+        x: center_x as f32 + 0.5,
+        y: (base_y as f32) + 1.0,
+        z: center_z as f32 + 0.5,
+    };
+
+    for p in ctx.db.player().iter() {
+        if dist_sq(&p.pos, &center) < HELI_SPAWN_MIN_SEPARATION * HELI_SPAWN_MIN_SEPARATION {
+            return None;
+        }
+    }
+
+    for v in ctx.db.vehicle().iter() {
+        if let Some(entity) = ctx.db.entity().id().find(&v.entity_id) {
+            if dist_sq(&entity.pos, &center) < HELI_SPAWN_MIN_SEPARATION * HELI_SPAWN_MIN_SEPARATION
+            {
+                return None;
+            }
+        }
+    }
+
+    Some(center.y)
+}
+
+fn helicopter_ground_rest_height(ctx: &ReducerContext, x: f32, z: f32) -> f32 {
+    let sx = x.floor() as i32;
+    let sz = z.floor() as i32;
+    if sx < 0 || sx >= WORLD_SIZE_X as i32 || sz < 0 || sz >= WORLD_SIZE_Z as i32 {
+        return 3.0;
+    }
+    let mut found = None;
+    for y in (0..WORLD_SIZE_Y as i32).rev() {
+        if matches!(get_block_type(ctx, sx, y, sz), Some(bt) if bt != AIR) {
+            found = Some(y);
+            break;
+        }
+    }
+    if let Some(surface) = found {
+        surface as f32 + 2.0
+    } else {
+        3.0
+    }
+}
+
+fn spawn_helicopter(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
+    let entity = ctx.db.entity().insert(Entity {
+        id: 0,
+        kind: ENTITY_KIND_VEHICLE,
+        subtype: VEHICLE_TYPE_HELICOPTER,
+        pos,
+        vel: ZERO_VEL,
+        rot: Rotation { yaw, pitch: 0.0 },
+        scale: HELI_SCALE,
+        active: true,
+        created_at: ctx.timestamp,
+        updated_at: ctx.timestamp,
+    });
+
+    ctx.db.vehicle().insert(Vehicle {
+        entity_id: entity.id,
+        vehicle_type: VEHICLE_TYPE_HELICOPTER,
+        pilot_identity: None,
+        seat_count: 4,
+        input_forward: 0.0,
+        input_strafe: 0.0,
+        input_lift: 0.0,
+        input_yaw: 0.0,
+        boosting: false,
+        rotor_spin: 0.0,
+        health: 500,
+        created_at: ctx.timestamp,
+        last_input_at: ctx.timestamp,
+    });
+
+    entity.id
+}
+
+fn spawn_sandbox_helicopters(ctx: &ReducerContext) {
+    let seed = timestamp_micros(ctx.timestamp) ^ 0x6a09e667f3bcc909;
+    let margin = (HELI_SPAWN_CLEARANCE_RADIUS + 12).max(10);
+    let span_x = (WORLD_SIZE_X as i32 - margin * 2).max(8);
+    let span_z = (WORLD_SIZE_Z as i32 - margin * 2).max(8);
+    let mut chunk_cache: StdHashMap<u32, [u8; 4096]> = StdHashMap::new();
+
+    let mut spawned = 0usize;
+    for attempt in 0..320u64 {
+        if spawned >= SANDBOX_HELICOPTER_COUNT {
+            break;
+        }
+
+        let rx = hash_u64(seed ^ attempt.wrapping_mul(0x9e3779b97f4a7c15));
+        let rz = hash_u64(seed ^ attempt.wrapping_mul(0xd1b54a32d192ed03));
+        let x = margin + (rx % span_x as u64) as i32;
+        let z = margin + (rz % span_z as u64) as i32;
+
+        let Some(y) = helicopter_spawn_y_if_fit(ctx, x, z, &mut chunk_cache) else {
+            continue;
+        };
+
+        let yaw = unit_from_seed(seed ^ attempt.wrapping_mul(0x94d049bb133111eb)) * TAU;
+        spawn_helicopter(
+            ctx,
+            Vec3 {
+                x: x as f32 + 0.5,
+                y,
+                z: z as f32 + 0.5,
+            },
+            yaw,
+        );
+        spawned += 1;
+    }
+
+    log::info!("Spawned {} sandbox helicopters", spawned);
+}
+
+fn clamp_vehicle_axis(v: f32) -> f32 {
+    v.clamp(-1.0, 1.0)
+}
+
+fn dismount_player_internal(ctx: &ReducerContext, player: Player, force_to_ground: bool) -> Player {
+    let mut next = player;
+    if next.mounted_vehicle_id == 0 {
+        return next;
+    }
+
+    let mut dismount_pos = next.pos.clone();
+    if let Some(entity) = ctx.db.entity().id().find(&next.mounted_vehicle_id) {
+        if let Some(vehicle) = ctx.db.vehicle().entity_id().find(&next.mounted_vehicle_id) {
+            ctx.db.vehicle().entity_id().update(Vehicle {
+                pilot_identity: None,
+                input_forward: 0.0,
+                input_strafe: 0.0,
+                input_lift: 0.0,
+                input_yaw: 0.0,
+                boosting: false,
+                ..vehicle
+            });
+        }
+
+        let right_x = entity.rot.yaw.cos();
+        let right_z = -entity.rot.yaw.sin();
+        dismount_pos = Vec3 {
+            x: entity.pos.x + right_x * 3.4,
+            y: entity.pos.y,
+            z: entity.pos.z + right_z * 3.4,
+        };
+    }
+
+    if force_to_ground {
+        let gy =
+            helicopter_ground_rest_height(ctx, dismount_pos.x, dismount_pos.z) + PLAYER_EYE_HEIGHT;
+        dismount_pos.y = gy.max(0.0);
+    }
+
+    next.pos = clamp_pos(&dismount_pos);
+    next.vel = ZERO_VEL;
+    next.mounted_vehicle_id = 0;
+    next
+}
+
 // ── Chunk Modification Helpers ──
 
 /// Destroy blocks in the world by modifying WorldChunk data.
-/// Returns the positions of blocks that were actually solid (and are now air).
+/// Returns the positions and block types of blocks that were actually solid (and are now air).
 fn destroy_blocks_in_world(
     ctx: &ReducerContext,
     blocks: &[(i32, i32, i32)],
-) -> Vec<(i32, i32, i32)> {
+) -> Vec<(i32, i32, i32, u8)> {
     let mut actually_destroyed = Vec::new();
 
     // Group by chunk
@@ -339,9 +986,10 @@ fn destroy_blocks_in_world(
             let mut modified = false;
             for (x, y, z, lx, ly, lz) in local_blocks {
                 let local_idx = lx + ly * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE;
-                if block_data[local_idx] != AIR {
+                let block_type = block_data[local_idx];
+                if block_type != AIR {
                     block_data[local_idx] = AIR;
-                    actually_destroyed.push((x, y, z));
+                    actually_destroyed.push((x, y, z, block_type));
                     modified = true;
                 }
             }
@@ -360,62 +1008,142 @@ fn destroy_blocks_in_world(
     actually_destroyed
 }
 
-/// Decompress all WorldChunk rows into a flat world array.
-fn decompress_world(ctx: &ReducerContext) -> Vec<u8> {
-    let total = WORLD_SIZE_X * WORLD_SIZE_Y * WORLD_SIZE_Z;
-    let mut blocks = vec![0u8; total];
+/// Decompress chunks near the given positions into a sparse map.
+/// Loads chunks within a local radius around each probe position.
+fn decompress_nearby_chunks(
+    ctx: &ReducerContext,
+    positions: &[(i32, i32, i32)],
+) -> StdHashMap<u32, [u8; 4096]> {
+    let mut needed_chunks = std::collections::HashSet::new();
+    let radius = 4i32; // chunk radius to load around each position
 
-    for chunk in ctx.db.world_chunk().iter() {
-        let mut chunk_data = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
-        worldgen::rle_decode(&chunk.data, &mut chunk_data);
-        worldgen::inject_chunk(
-            &mut blocks,
-            chunk.cx as usize,
-            chunk.cy as usize,
-            chunk.cz as usize,
-            &chunk_data,
-        );
+    for &(px, py, pz) in positions {
+        let pcx = px / CHUNK_SIZE as i32;
+        let pcy = py / CHUNK_SIZE as i32;
+        let pcz = pz / CHUNK_SIZE as i32;
+        for dcx in -radius..=radius {
+            for dcy in -radius..=radius {
+                for dcz in -radius..=radius {
+                    let cx = pcx + dcx;
+                    let cy = pcy + dcy;
+                    let cz = pcz + dcz;
+                    if cx >= 0
+                        && cx < NUM_CHUNKS_X as i32
+                        && cy >= 0
+                        && cy < NUM_CHUNKS_Y as i32
+                        && cz >= 0
+                        && cz < NUM_CHUNKS_Z as i32
+                    {
+                        needed_chunks.insert(worldgen::pack_chunk_id(cx as u8, cy as u8, cz as u8));
+                    }
+                }
+            }
+        }
     }
 
-    blocks
+    let mut result = StdHashMap::new();
+    for chunk_id in needed_chunks {
+        if let Some(chunk) = ctx.db.world_chunk().chunk_id().find(chunk_id) {
+            let mut data = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+            worldgen::rle_decode(&chunk.data, &mut data);
+            result.insert(chunk_id, data);
+        }
+    }
+    result
 }
 
 /// Run structural integrity check after block destruction.
-/// Decompresses the world, finds unsupported blocks via BFS, removes them,
-/// and emits a DetachEvent so all clients can animate the collapse.
+/// Uses sparse chunk loading (only nearby chunks) to avoid huge memory allocation.
 fn run_structural_check(ctx: &ReducerContext, destroyed_positions: &[(i32, i32, i32)]) {
     if destroyed_positions.is_empty() {
         return;
     }
 
-    let blocks = decompress_world(ctx);
-    let fallen = worldgen::check_structural_integrity(&blocks, destroyed_positions);
+    let max_structural_cascade_steps: usize = 6;
 
-    if fallen.is_empty() {
-        return;
+    let mut frontier: Vec<(i32, i32, i32)> = destroyed_positions.to_vec();
+    let mut total_components = 0usize;
+    let mut total_detached = 0usize;
+
+    for _ in 0..max_structural_cascade_steps {
+        if frontier.is_empty() {
+            break;
+        }
+
+        let chunks = decompress_nearby_chunks(ctx, &frontier);
+        let collapse_plans = worldgen::check_structural_integrity_sparse(&chunks, &frontier);
+        if collapse_plans.is_empty() {
+            break;
+        }
+
+        let mut candidate_coords: Vec<(i32, i32, i32)> = Vec::new();
+        for plan in &collapse_plans {
+            candidate_coords.extend(plan.blocks.iter().map(|&(x, y, z, _)| (x, y, z)));
+        }
+
+        // Remove detached blocks from authoritative world first.
+        let actually_detached = destroy_blocks_in_world(ctx, &candidate_coords);
+        if actually_detached.is_empty() {
+            break;
+        }
+
+        let detached_set: std::collections::HashSet<(i32, i32, i32)> = actually_detached
+            .iter()
+            .map(|&(x, y, z, _)| (x, y, z))
+            .collect();
+
+        // Emit one event per collapse component with deterministic motion parameters.
+        for plan in collapse_plans {
+            let filtered_blocks: Vec<(i32, i32, i32, u8)> = plan
+                .blocks
+                .into_iter()
+                .filter(|(x, y, z, _)| detached_set.contains(&(*x, *y, *z)))
+                .collect();
+            if filtered_blocks.is_empty() {
+                continue;
+            }
+
+            let blocks_x: Vec<i32> = filtered_blocks.iter().map(|&(x, _, _, _)| x).collect();
+            let blocks_y: Vec<i32> = filtered_blocks.iter().map(|&(_, y, _, _)| y).collect();
+            let blocks_z: Vec<i32> = filtered_blocks.iter().map(|&(_, _, z, _)| z).collect();
+            let block_types: Vec<u8> = filtered_blocks.iter().map(|&(_, _, _, bt)| bt).collect();
+
+            ctx.db.detach_event().insert(DetachEvent {
+                id: 0,
+                blocks_x,
+                blocks_y,
+                blocks_z,
+                block_types,
+                motion_mode: plan.motion_mode,
+                pivot: vec3_from_tuple(plan.pivot),
+                axis: vec3_from_tuple(plan.axis),
+                drift: vec3_from_tuple(plan.drift),
+                fracture_origin: vec3_from_tuple(plan.fracture_origin),
+                fracture_dir: vec3_from_tuple(plan.fracture_dir),
+                ang_accel: plan.ang_accel,
+                initial_ang_vel: plan.initial_ang_vel,
+                gravity_scale: plan.gravity_scale,
+                fracture_speed: plan.fracture_speed,
+                lifetime_ms: plan.lifetime_ms,
+                created_at: ctx.timestamp,
+            });
+            total_components += 1;
+        }
+
+        total_detached += actually_detached.len();
+        frontier = actually_detached
+            .iter()
+            .map(|&(x, y, z, _)| (x, y, z))
+            .collect();
     }
 
-    // Remove fallen blocks from the world chunks
-    let fallen_coords: Vec<(i32, i32, i32)> =
-        fallen.iter().map(|&(x, y, z, _)| (x, y, z)).collect();
-    destroy_blocks_in_world(ctx, &fallen_coords);
-
-    // Emit DetachEvent for clients to animate
-    let blocks_x: Vec<i32> = fallen.iter().map(|&(x, _, _, _)| x).collect();
-    let blocks_y: Vec<i32> = fallen.iter().map(|&(_, y, _, _)| y).collect();
-    let blocks_z: Vec<i32> = fallen.iter().map(|&(_, _, z, _)| z).collect();
-    let block_types: Vec<u8> = fallen.iter().map(|&(_, _, _, bt)| bt).collect();
-
-    ctx.db.detach_event().insert(DetachEvent {
-        id: 0,
-        blocks_x,
-        blocks_y,
-        blocks_z,
-        block_types,
-        created_at: ctx.timestamp,
-    });
-
-    log::info!("Structural check: {} blocks detached", fallen_coords.len());
+    if total_detached > 0 {
+        log::info!(
+            "Structural check: {} components, {} detached blocks",
+            total_components,
+            total_detached
+        );
+    }
 }
 
 // ── Lifecycle Reducers ──
@@ -424,13 +1152,29 @@ fn run_structural_check(ctx: &ReducerContext, destroyed_positions: &[(i32, i32, 
 pub fn init(ctx: &ReducerContext) {
     log::info!("BitWars module initialized — generating world...");
 
-    let blocks = worldgen::generate_world();
+    let seed = timestamp_micros(ctx.timestamp);
 
-    // Chunk the world and store each chunk as RLE-compressed blob
-    for cz in 0..NUM_CHUNKS_Z {
-        for cy in 0..NUM_CHUNKS_Y {
-            for cx in 0..NUM_CHUNKS_X {
-                let data = worldgen::extract_chunk(&blocks, cx, cy, cz);
+    // Create world config
+    ctx.db.world_config().insert(WorldConfig {
+        id: 1,
+        seed,
+        round_number: 1,
+        round_start: ctx.timestamp,
+    });
+
+    // Generate only spawn-area chunks (5x3x5 around center)
+    let center_cx = (WORLD_SIZE_X / 2 / CHUNK_SIZE) as i32;
+    let center_cz = (WORLD_SIZE_Z / 2 / CHUNK_SIZE) as i32;
+    let mut chunk_count = 0;
+    for dcx in -2..=2 {
+        for dcz in -2..=2 {
+            let cx = center_cx + dcx;
+            let cz = center_cz + dcz;
+            if cx < 0 || cx >= NUM_CHUNKS_X as i32 || cz < 0 || cz >= NUM_CHUNKS_Z as i32 {
+                continue;
+            }
+            for cy in 0..NUM_CHUNKS_Y as i32 {
+                let data = worldgen::generate_chunk(cx as usize, cy as usize, cz as usize, seed);
                 let chunk_id = worldgen::pack_chunk_id(cx as u8, cy as u8, cz as u8);
                 ctx.db.world_chunk().insert(WorldChunk {
                     chunk_id,
@@ -440,13 +1184,15 @@ pub fn init(ctx: &ReducerContext) {
                     data,
                     version: 1,
                 });
+                chunk_count += 1;
             }
         }
     }
 
     log::info!(
-        "World generation complete: {} chunks stored",
-        NUM_CHUNKS_X * NUM_CHUNKS_Y * NUM_CHUNKS_Z
+        "World generation complete: {} spawn-area chunks stored (seed={})",
+        chunk_count,
+        seed
     );
 
     // Schedule periodic DetachEvent cleanup
@@ -455,17 +1201,28 @@ pub fn init(ctx: &ReducerContext) {
         scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(5)),
     });
 
+    // Schedule periodic ShotEvent + ExplosionEvent cleanup
+    ctx.db.shot_cleanup().insert(ShotCleanup {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(3)),
+    });
+
+    // Schedule first map reset in 5 minutes
+    ctx.db.map_reset_timer().insert(MapResetTimer {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(300)),
+    });
+
     // Initialize world environment with random time and weather
-    let seed = timestamp_micros(ctx.timestamp);
     let initial_time = ((seed % 2400) as f32) / 100.0; // 0.0 - 24.0
     let initial_weather = ((seed / 2400) % 5) as u8;
     let wind = ((seed % 100) as f32) / 100.0;
     let cloud = match initial_weather {
-        0 => 0.1 + ((seed % 20) as f32) / 100.0, // Clear: low clouds
-        1 => 0.4 + ((seed % 30) as f32) / 100.0, // Cloudy
-        2 => 0.7 + ((seed % 20) as f32) / 100.0, // Overcast
-        3 => 0.6 + ((seed % 30) as f32) / 100.0, // Rainy
-        4 => 0.8 + ((seed % 20) as f32) / 100.0, // Stormy
+        0 => 0.1 + ((seed % 20) as f32) / 100.0,
+        1 => 0.4 + ((seed % 30) as f32) / 100.0,
+        2 => 0.7 + ((seed % 20) as f32) / 100.0,
+        3 => 0.6 + ((seed % 30) as f32) / 100.0,
+        4 => 0.8 + ((seed % 20) as f32) / 100.0,
         _ => 0.3,
     };
     let fog = match initial_weather {
@@ -493,6 +1250,21 @@ pub fn init(ctx: &ReducerContext) {
         scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(10)),
     });
 
+    // Schedule first health regen tick (every 1 second)
+    ctx.db.health_regen_tick().insert(HealthRegenTick {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(1)),
+    });
+
+    // Schedule vehicle simulation tick (20Hz)
+    ctx.db.vehicle_tick().insert(VehicleTick {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_millis(50)),
+    });
+
+    // Spawn sandbox vehicles (helicopters)
+    spawn_sandbox_helicopters(ctx);
+
     log::info!(
         "Environment initialized: time={:.1}h, weather={}",
         initial_time,
@@ -504,14 +1276,45 @@ pub fn init(ctx: &ReducerContext) {
 pub fn client_connected(ctx: &ReducerContext) {
     let sender = ctx.sender();
     if let Some(player) = ctx.db.player().identity().find(sender) {
+        let entity_id = ensure_player_entity(ctx, &player);
+        let loadout = normalize_or_create_player_loadout(ctx, &player.username);
+        let current_weapon = if weapon_in_loadout(&loadout, player.current_weapon) {
+            player.current_weapon
+        } else {
+            loadout.slot1
+        };
+        let character_preset = normalize_character_preset(player.character_preset);
+
         ctx.db.player().identity().update(Player {
             online: true,
             pos: SPAWN_POS,
+            vel: ZERO_VEL,
             health: MAX_HEALTH,
+            spawn_protected: true,
+            current_weapon,
+            character_preset,
+            entity_id,
+            mounted_vehicle_id: 0,
             ..player
         });
+        if let Some(updated) = ctx.db.player().identity().find(sender) {
+            sync_player_entity(ctx, &updated);
+        }
         init_weapon_state(ctx, sender);
         init_movement_state(ctx, sender, &SPAWN_POS);
+        if player.mounted_vehicle_id != 0 {
+            if let Some(vehicle) = ctx
+                .db
+                .vehicle()
+                .entity_id()
+                .find(&player.mounted_vehicle_id)
+            {
+                ctx.db.vehicle().entity_id().update(Vehicle {
+                    pilot_identity: Some(sender),
+                    ..vehicle
+                });
+            }
+        }
         log::info!("Player reconnected: {:?}", sender);
     }
 }
@@ -520,10 +1323,13 @@ pub fn client_connected(ctx: &ReducerContext) {
 pub fn client_disconnected(ctx: &ReducerContext) {
     let sender = ctx.sender();
     if let Some(player) = ctx.db.player().identity().find(sender) {
-        ctx.db.player().identity().update(Player {
+        let disconnected = dismount_player_internal(ctx, player, true);
+        let disconnected = Player {
             online: false,
-            ..player
-        });
+            ..disconnected
+        };
+        ctx.db.player().identity().update(disconnected.clone());
+        sync_player_entity(ctx, &disconnected);
         log::info!("Player disconnected: {:?}", sender);
     }
 }
@@ -531,11 +1337,16 @@ pub fn client_disconnected(ctx: &ReducerContext) {
 // ── Player Reducers ──
 
 #[reducer]
-pub fn set_username(ctx: &ReducerContext, username: String) -> Result<(), String> {
+pub fn set_username(
+    ctx: &ReducerContext,
+    username: String,
+    character_preset: u8,
+) -> Result<(), String> {
     let username = username.trim().to_string();
     if username.is_empty() || username.len() > 20 {
         return Err("Username must be 1-20 characters".to_string());
     }
+    let character_preset = normalize_character_preset(character_preset);
 
     let sender = ctx.sender();
     for p in ctx.db.player().iter() {
@@ -544,32 +1355,55 @@ pub fn set_username(ctx: &ReducerContext, username: String) -> Result<(), String
         }
     }
 
+    let loadout = normalize_or_create_player_loadout(ctx, &username);
+
     if let Some(player) = ctx.db.player().identity().find(sender) {
-        ctx.db
-            .player()
-            .identity()
-            .update(Player { username, ..player });
+        let entity_id = ensure_player_entity(ctx, &player);
+        let current_weapon = if weapon_in_loadout(&loadout, player.current_weapon) {
+            player.current_weapon
+        } else {
+            loadout.slot1
+        };
+
+        ctx.db.player().identity().update(Player {
+            username,
+            current_weapon,
+            character_preset,
+            entity_id,
+            ..player
+        });
     } else {
+        let base_rot = Rotation {
+            yaw: 0.0,
+            pitch: 0.0,
+        };
+        let entity_id = create_player_entity(ctx, &SPAWN_POS, &ZERO_VEL, &base_rot);
         ctx.db.player().insert(Player {
             identity: sender,
+            entity_id,
             username,
+            character_preset,
             pos: SPAWN_POS,
-            rot: Rotation {
-                yaw: 0.0,
-                pitch: 0.0,
-            },
+            vel: ZERO_VEL,
+            rot: base_rot,
             health: MAX_HEALTH,
             max_health: MAX_HEALTH,
-            current_weapon: 0,
+            current_weapon: loadout.slot1,
             kills: 0,
             deaths: 0,
+            spawn_protected: true,
             online: true,
+            mounted_vehicle_id: 0,
             joined_at: ctx.timestamp,
+            last_damage_time: ctx.timestamp,
         });
         init_weapon_state(ctx, sender);
     }
 
     init_movement_state(ctx, sender, &SPAWN_POS);
+    if let Some(updated) = ctx.db.player().identity().find(sender) {
+        sync_player_entity(ctx, &updated);
+    }
     Ok(())
 }
 
@@ -577,6 +1411,7 @@ pub fn set_username(ctx: &ReducerContext, username: String) -> Result<(), String
 pub fn update_position(
     ctx: &ReducerContext,
     pos: Vec3,
+    vel: Vec3,
     rot: Rotation,
     weapon: u8,
 ) -> Result<(), String> {
@@ -588,8 +1423,50 @@ pub fn update_position(
         .find(sender)
         .ok_or("Not registered")?;
 
-    if weapon >= NUM_WEAPONS {
-        return Err("Invalid weapon".to_string());
+    let loadout = normalize_or_create_player_loadout(ctx, &player.username);
+    let selected_weapon = if weapon_in_loadout(&loadout, weapon) {
+        weapon
+    } else {
+        loadout.slot1
+    };
+
+    if player.mounted_vehicle_id != 0 {
+        if let Some(vehicle) = ctx
+            .db
+            .vehicle()
+            .entity_id()
+            .find(&player.mounted_vehicle_id)
+        {
+            if vehicle.pilot_identity != Some(sender) {
+                return Err("Vehicle occupied".to_string());
+            }
+        } else {
+            let dismounted = Player {
+                mounted_vehicle_id: 0,
+                ..player
+            };
+            ctx.db.player().identity().update(dismounted.clone());
+            sync_player_entity(ctx, &dismounted);
+            return Ok(());
+        }
+
+        if let Some(vehicle_entity) = ctx.db.entity().id().find(&player.mounted_vehicle_id) {
+            let mounted = Player {
+                pos: Vec3 {
+                    x: vehicle_entity.pos.x,
+                    y: vehicle_entity.pos.y + HELI_PILOT_SEAT_HEIGHT,
+                    z: vehicle_entity.pos.z,
+                },
+                vel: vehicle_entity.vel.clone(),
+                rot,
+                current_weapon: selected_weapon,
+                spawn_protected: false,
+                ..player
+            };
+            ctx.db.player().identity().update(mounted.clone());
+            sync_player_entity(ctx, &mounted);
+        }
+        return Ok(());
     }
 
     let clamped_pos = clamp_pos(&pos);
@@ -603,6 +1480,35 @@ pub fn update_position(
             let dt = (now_us.saturating_sub(last_us)) as f64 / 1_000_000.0;
 
             if dt > 0.01 {
+                if dt > 0.4 {
+                    ctx.db
+                        .player_movement()
+                        .identity()
+                        .update(PlayerMovementState {
+                            identity: sender,
+                            last_pos: clamped_pos.clone(),
+                            last_update: ctx.timestamp,
+                            violation_count: 0,
+                        });
+                    let spawn_protected = if player.spawn_protected {
+                        !is_grounded(ctx, &clamped_pos)
+                    } else {
+                        false
+                    };
+
+                    let updated = Player {
+                        pos: clamped_pos,
+                        vel,
+                        rot,
+                        current_weapon: selected_weapon,
+                        spawn_protected,
+                        ..player
+                    };
+                    ctx.db.player().identity().update(updated.clone());
+                    sync_player_entity(ctx, &updated);
+                    return Ok(());
+                }
+
                 let d_sq = dist_sq(&clamped_pos, &mv_state.last_pos);
                 let dist = d_sq.sqrt();
                 let speed = dist / dt as f32;
@@ -611,12 +1517,14 @@ pub fn update_position(
                     let new_violations = mv_state.violation_count + 1;
 
                     if new_violations > SPEED_VIOLATION_THRESHOLD {
-                        ctx.db.player().identity().update(Player {
+                        let corrected = Player {
                             pos: mv_state.last_pos.clone(),
                             rot,
-                            current_weapon: weapon,
+                            current_weapon: selected_weapon,
                             ..player
-                        });
+                        };
+                        ctx.db.player().identity().update(corrected.clone());
+                        sync_player_entity(ctx, &corrected);
                         ctx.db
                             .player_movement()
                             .identity()
@@ -655,12 +1563,142 @@ pub fn update_position(
         }
     } // end admin_bypass
 
-    ctx.db.player().identity().update(Player {
+    let spawn_protected = if player.spawn_protected {
+        !is_grounded(ctx, &clamped_pos)
+    } else {
+        false
+    };
+
+    let updated = Player {
         pos: clamped_pos,
+        vel,
         rot,
-        current_weapon: weapon,
+        current_weapon: selected_weapon,
+        spawn_protected,
         ..player
-    });
+    };
+    ctx.db.player().identity().update(updated.clone());
+    sync_player_entity(ctx, &updated);
+
+    Ok(())
+}
+
+#[reducer]
+pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
+    let sender = ctx.sender();
+    let player = ctx
+        .db
+        .player()
+        .identity()
+        .find(sender)
+        .ok_or("Not registered")?;
+
+    if player.mounted_vehicle_id != 0 {
+        let dismounted = dismount_player_internal(ctx, player, true);
+        ctx.db.player().identity().update(dismounted.clone());
+        init_movement_state(ctx, sender, &dismounted.pos);
+        sync_player_entity(ctx, &dismounted);
+        return Ok(());
+    }
+
+    let mut best_vehicle: Option<(u64, Vec3, f32)> = None;
+    for v in ctx.db.vehicle().iter() {
+        if v.vehicle_type != VEHICLE_TYPE_HELICOPTER {
+            continue;
+        }
+        if v.pilot_identity.is_some() {
+            continue;
+        }
+        let Some(entity) = ctx.db.entity().id().find(&v.entity_id) else {
+            continue;
+        };
+        if !entity.active {
+            continue;
+        }
+
+        let d2 = dist_sq(&player.pos, &entity.pos);
+        if d2 > HELI_MOUNT_RANGE * HELI_MOUNT_RANGE {
+            continue;
+        }
+
+        match &best_vehicle {
+            Some((_, _, best_d2)) if *best_d2 <= d2 => {}
+            _ => best_vehicle = Some((v.entity_id, entity.pos.clone(), d2)),
+        }
+    }
+
+    let (vehicle_id, vehicle_pos, _) = best_vehicle.ok_or("No vehicle in range")?;
+
+    if let Some(vehicle) = ctx.db.vehicle().entity_id().find(&vehicle_id) {
+        ctx.db.vehicle().entity_id().update(Vehicle {
+            pilot_identity: Some(sender),
+            input_forward: 0.0,
+            input_strafe: 0.0,
+            input_lift: 0.0,
+            input_yaw: 0.0,
+            boosting: false,
+            last_input_at: ctx.timestamp,
+            ..vehicle
+        });
+    }
+
+    let mounted = Player {
+        mounted_vehicle_id: vehicle_id,
+        spawn_protected: false,
+        pos: Vec3 {
+            x: vehicle_pos.x,
+            y: vehicle_pos.y + HELI_PILOT_SEAT_HEIGHT,
+            z: vehicle_pos.z,
+        },
+        vel: ZERO_VEL,
+        ..player
+    };
+    ctx.db.player().identity().update(mounted.clone());
+    init_movement_state(ctx, sender, &mounted.pos);
+    sync_player_entity(ctx, &mounted);
+
+    Ok(())
+}
+
+#[reducer]
+pub fn update_vehicle_input(
+    ctx: &ReducerContext,
+    forward: f32,
+    strafe: f32,
+    lift: f32,
+    yaw: f32,
+    boosting: bool,
+) -> Result<(), String> {
+    let sender = ctx.sender();
+    let player = ctx
+        .db
+        .player()
+        .identity()
+        .find(sender)
+        .ok_or("Not registered")?;
+
+    if player.mounted_vehicle_id == 0 {
+        return Err("Not mounted".to_string());
+    }
+
+    let mut vehicle = ctx
+        .db
+        .vehicle()
+        .entity_id()
+        .find(&player.mounted_vehicle_id)
+        .ok_or("Vehicle not found")?;
+
+    if vehicle.pilot_identity != Some(sender) {
+        return Err("Not pilot".to_string());
+    }
+
+    vehicle.input_forward = clamp_vehicle_axis(forward);
+    vehicle.input_strafe = clamp_vehicle_axis(strafe);
+    vehicle.input_lift = clamp_vehicle_axis(lift);
+    vehicle.input_yaw = clamp_vehicle_axis(yaw);
+    vehicle.boosting = boosting;
+    vehicle.last_input_at = ctx.timestamp;
+    ctx.db.vehicle().entity_id().update(vehicle);
 
     Ok(())
 }
@@ -688,8 +1726,21 @@ pub fn fire_weapon(
         return Err("Invalid weapon".to_string());
     }
 
+    let loadout = normalize_or_create_player_loadout(ctx, &player.username);
+    if !weapon_in_loadout(&loadout, weapon) {
+        return Err("Weapon not in loadout".to_string());
+    }
+
     if player.health <= 0 {
         return Err("Cannot fire while dead".to_string());
+    }
+
+    if player.spawn_protected {
+        return Err("Cannot fire while spawn protected".to_string());
+    }
+
+    if player.mounted_vehicle_id != 0 {
+        return Err("Cannot fire while piloting".to_string());
     }
 
     let def = &WEAPON_DEFS[weapon as usize];
@@ -700,11 +1751,11 @@ pub fn fire_weapon(
         .find(sender)
         .ok_or("No weapon state")?;
 
-    // 1. Fire rate check
+    // 1. Fire rate check (150ms tolerance for network jitter)
     let now_us = timestamp_micros(ctx.timestamp);
     let last_us = timestamp_micros(wstate.last_fire_time);
     let cooldown_us = (1_000_000.0 / def.fire_rate) as u64;
-    if now_us.saturating_sub(last_us) < cooldown_us.saturating_sub(50_000) {
+    if now_us.saturating_sub(last_us) < cooldown_us.saturating_sub(150_000) {
         return Err("Firing too fast".to_string());
     }
 
@@ -714,8 +1765,9 @@ pub fn fire_weapon(
         return Err("No ammo".to_string());
     }
 
-    // 3. Origin validation
-    if dist_sq(&origin, &player.pos) > 9.0 {
+    // 3. Origin validation (generous to account for network latency —
+    //    at 35 u/s max speed, 143ms delay = 5 unit drift)
+    if dist_sq(&origin, &player.pos) > 25.0 {
         return Err("Shot origin too far from player".to_string());
     }
 
@@ -731,6 +1783,8 @@ pub fn fire_weapon(
             shooter: sender,
             origin,
             direction,
+            hit_pos: ZERO_VEL,
+            has_hit: false,
             weapon,
             fired_at: ctx.timestamp,
         });
@@ -747,7 +1801,7 @@ pub fn fire_weapon(
         }
 
         if let Some(target) = ctx.db.player().identity().find(*target_id) {
-            if target.health <= 0 || !target.online {
+            if target.health <= 0 || !target.online || target.spawn_protected {
                 continue;
             }
 
@@ -780,6 +1834,7 @@ pub fn fire_weapon(
             let new_health = (target.health - def.damage).max(0);
             ctx.db.player().identity().update(Player {
                 health: new_health,
+                last_damage_time: ctx.timestamp,
                 ..target
             });
 
@@ -823,17 +1878,71 @@ pub fn fire_weapon(
         .collect();
 
     let actually_destroyed = destroy_blocks_in_world(ctx, &block_coords);
-    run_structural_check(ctx, &actually_destroyed);
+    let destroyed_positions: Vec<(i32, i32, i32)> = actually_destroyed
+        .iter()
+        .map(|&(x, y, z, _)| (x, y, z))
+        .collect();
+    run_structural_check(ctx, &destroyed_positions);
 
-    // 7. Record shot event
+    // 7. Determine hit position for remote VFX
+    let (shot_hit_pos, shot_has_hit) = if !actually_destroyed.is_empty() {
+        let first = &actually_destroyed[0];
+        (
+            Vec3 {
+                x: first.0 as f32,
+                y: first.1 as f32,
+                z: first.2 as f32,
+            },
+            true,
+        )
+    } else if !hit_players.is_empty() {
+        // Use the first hit player's position as impact
+        if let Some(target) = ctx.db.player().identity().find(hit_players[0]) {
+            (target.pos.clone(), true)
+        } else {
+            (ZERO_VEL, false)
+        }
+    } else {
+        (ZERO_VEL, false)
+    };
+
+    // 8. Record shot event
     ctx.db.shot_event().insert(ShotEvent {
         id: 0,
         shooter: sender,
-        origin,
+        origin: origin.clone(),
         direction,
+        hit_pos: shot_hit_pos,
+        has_hit: shot_has_hit,
         weapon,
         fired_at: ctx.timestamp,
     });
+
+    // 9. Emit explosion event if weapon has radius (e.g., shotgun)
+    if def.radius > 0.0 && !actually_destroyed.is_empty() {
+        let center = &actually_destroyed[0];
+        ctx.db.explosion_event().insert(ExplosionEvent {
+            id: 0,
+            origin: sender,
+            pos: Vec3 {
+                x: center.0 as f32,
+                y: center.1 as f32,
+                z: center.2 as f32,
+            },
+            radius: def.radius,
+            weapon,
+            destroyed_blocks: actually_destroyed
+                .iter()
+                .map(|&(x, y, z, bt)| DestroyedBlock {
+                    x: x as f32,
+                    y: y as f32,
+                    z: z as f32,
+                    block_type: bt,
+                })
+                .collect(),
+            created_at: ctx.timestamp,
+        });
+    }
 
     Ok(())
 }
@@ -867,11 +1976,67 @@ pub fn reload_weapon(ctx: &ReducerContext) -> Result<(), String> {
     Ok(())
 }
 
+#[reducer]
+pub fn set_loadout(ctx: &ReducerContext, slot1: u8, slot2: u8, slot3: u8) -> Result<(), String> {
+    if !loadout_slots_valid(slot1, slot2, slot3) {
+        return Err("Loadout must contain 3 unique valid weapons".to_string());
+    }
+
+    let sender = ctx.sender();
+    let player = ctx
+        .db
+        .player()
+        .identity()
+        .find(sender)
+        .ok_or("Not registered")?;
+
+    if player.username.trim().is_empty() {
+        return Err("Set username first".to_string());
+    }
+
+    let username = player.username.clone();
+    let updated = PlayerLoadout {
+        username: username.clone(),
+        slot1,
+        slot2,
+        slot3,
+        updated_at: ctx.timestamp,
+    };
+
+    if ctx.db.player_loadout().username().find(&username).is_some() {
+        ctx.db.player_loadout().username().update(updated);
+    } else {
+        ctx.db.player_loadout().insert(updated);
+    }
+
+    if !weapon_in_loadout(
+        &PlayerLoadout {
+            username,
+            slot1,
+            slot2,
+            slot3,
+            updated_at: ctx.timestamp,
+        },
+        player.current_weapon,
+    ) {
+        let switched = Player {
+            current_weapon: slot1,
+            ..player
+        };
+        ctx.db.player().identity().update(switched.clone());
+        sync_player_entity(ctx, &switched);
+    }
+
+    Ok(())
+}
+
 /// Destroy blocks from physics simulation (falling blocks, cascades).
 /// Separate from fire_weapon because physics blocks can be far from player.
 #[reducer]
 pub fn destroy_blocks_physics(ctx: &ReducerContext, blocks: Vec<Vec3>) -> Result<(), String> {
     let sender = ctx.sender();
+    // We still verify the player exists, but don't check health —
+    // projectiles launched while alive should still impact after death.
     let _player = ctx
         .db
         .player()
@@ -890,7 +2055,48 @@ pub fn destroy_blocks_physics(ctx: &ReducerContext, blocks: Vec<Vec3>) -> Result
         .collect();
 
     let actually_destroyed = destroy_blocks_in_world(ctx, &block_coords);
-    run_structural_check(ctx, &actually_destroyed);
+    let destroyed_positions: Vec<(i32, i32, i32)> = actually_destroyed
+        .iter()
+        .map(|&(x, y, z, _)| (x, y, z))
+        .collect();
+    run_structural_check(ctx, &destroyed_positions);
+
+    Ok(())
+}
+
+#[reducer]
+pub fn sync_entity_transform(
+    ctx: &ReducerContext,
+    entity_id: u64,
+    pos: Vec3,
+    vel: Vec3,
+    rot: Rotation,
+) -> Result<(), String> {
+    let sender = ctx.sender();
+    let player = ctx
+        .db
+        .player()
+        .identity()
+        .find(sender)
+        .ok_or("Not registered")?;
+
+    if player.entity_id != entity_id {
+        return Err("Entity mismatch".to_string());
+    }
+
+    if let Some(entity) = ctx.db.entity().id().find(&entity_id) {
+        if entity.kind != ENTITY_KIND_PLAYER {
+            return Err("Not a player entity".to_string());
+        }
+        ctx.db.entity().id().update(Entity {
+            pos,
+            vel,
+            rot,
+            active: player.online,
+            updated_at: ctx.timestamp,
+            ..entity
+        });
+    }
 
     Ok(())
 }
@@ -905,15 +2111,29 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
         .find(sender)
         .ok_or("Not registered")?;
 
-    ctx.db.player().identity().update(Player {
+    let loadout = normalize_or_create_player_loadout(ctx, &player.username);
+    let respawn_weapon = if weapon_in_loadout(&loadout, player.current_weapon) {
+        player.current_weapon
+    } else {
+        loadout.slot1
+    };
+
+    let player = dismount_player_internal(ctx, player, true);
+
+    let respawned = Player {
         health: MAX_HEALTH,
         pos: SPAWN_POS,
+        vel: ZERO_VEL,
+        spawn_protected: true,
+        current_weapon: respawn_weapon,
         rot: Rotation {
             yaw: 0.0,
             pitch: 0.0,
         },
         ..player
-    });
+    };
+    ctx.db.player().identity().update(respawned.clone());
+    sync_player_entity(ctx, &respawned);
 
     if let Some(wstate) = ctx.db.player_weapon_state().identity().find(sender) {
         ctx.db
@@ -923,6 +2143,8 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
                 ammo_rifle: WEAPON_DEFS[0].max_ammo,
                 ammo_shotgun: WEAPON_DEFS[1].max_ammo,
                 ammo_rpg: WEAPON_DEFS[2].max_ammo,
+                ammo_machine_gun: WEAPON_DEFS[3].max_ammo,
+                ammo_grenade: WEAPON_DEFS[4].max_ammo,
                 ..wstate
             });
     }
@@ -996,10 +2218,13 @@ fn process_admin_command(ctx: &ReducerContext, sender: Identity, text: &str) -> 
                     .identity()
                     .find(sender)
                     .ok_or("Not registered")?;
-                ctx.db.player().identity().update(Player {
+                let player = dismount_player_internal(ctx, player, true);
+                let next = Player {
                     pos: new_pos.clone(),
                     ..player
-                });
+                };
+                ctx.db.player().identity().update(next.clone());
+                sync_player_entity(ctx, &next);
                 init_movement_state(ctx, sender, &new_pos);
                 insert_system_message(
                     ctx,
@@ -1018,10 +2243,13 @@ fn process_admin_command(ctx: &ReducerContext, sender: Identity, text: &str) -> 
                     .identity()
                     .find(sender)
                     .ok_or("Not registered")?;
-                ctx.db.player().identity().update(Player {
+                let player = dismount_player_internal(ctx, player, true);
+                let next = Player {
                     pos: target_pos.clone(),
                     ..player
-                });
+                };
+                ctx.db.player().identity().update(next.clone());
+                sync_player_entity(ctx, &next);
                 init_movement_state(ctx, sender, &target_pos);
                 insert_system_message(ctx, &format!("Teleported to {}", target_name));
             } else {
@@ -1046,12 +2274,15 @@ fn process_admin_command(ctx: &ReducerContext, sender: Identity, text: &str) -> 
 
             let target =
                 find_player_by_name(ctx, parts[1]).ok_or("Player not found".to_string())?;
+            let target = dismount_player_internal(ctx, target, true);
             let target_identity = target.identity;
             let target_name = target.username.clone();
-            ctx.db.player().identity().update(Player {
+            let moved = Player {
                 pos: admin_pos.clone(),
                 ..target
-            });
+            };
+            ctx.db.player().identity().update(moved.clone());
+            sync_player_entity(ctx, &moved);
             init_movement_state(ctx, target_identity, &admin_pos);
             insert_system_message(ctx, &format!("Summoned {} to your location", target_name));
             Ok(())
@@ -1065,11 +2296,15 @@ fn process_admin_command(ctx: &ReducerContext, sender: Identity, text: &str) -> 
             let target =
                 find_player_by_name(ctx, parts[1]).ok_or("Player not found".to_string())?;
             let target_name = target.username.clone();
-            ctx.db.player().identity().update(Player {
+            let target = dismount_player_internal(ctx, target, true);
+            let killed = Player {
                 health: 0,
                 deaths: target.deaths + 1,
+                last_damage_time: ctx.timestamp,
                 ..target
-            });
+            };
+            ctx.db.player().identity().update(killed.clone());
+            sync_player_entity(ctx, &killed);
             insert_system_message(ctx, &format!("Killed {}", target_name));
             Ok(())
         }
@@ -1083,19 +2318,23 @@ fn process_admin_command(ctx: &ReducerContext, sender: Identity, text: &str) -> 
                     .identity()
                     .find(sender)
                     .ok_or("Not registered")?;
-                ctx.db.player().identity().update(Player {
+                let healed = Player {
                     health: MAX_HEALTH,
                     ..player
-                });
+                };
+                ctx.db.player().identity().update(healed.clone());
+                sync_player_entity(ctx, &healed);
                 insert_system_message(ctx, "Healed yourself");
             } else if parts.len() == 2 {
                 let target =
                     find_player_by_name(ctx, parts[1]).ok_or("Player not found".to_string())?;
                 let target_name = target.username.clone();
-                ctx.db.player().identity().update(Player {
+                let healed = Player {
                     health: target.max_health,
                     ..target
-                });
+                };
+                ctx.db.player().identity().update(healed.clone());
+                sync_player_entity(ctx, &healed);
                 insert_system_message(ctx, &format!("Healed {}", target_name));
             } else {
                 insert_command_help(ctx, "Usage: /heal [player]");
@@ -1113,18 +2352,22 @@ fn process_admin_command(ctx: &ReducerContext, sender: Identity, text: &str) -> 
                 .ok_or("Not registered")?;
             let is_god = player.max_health >= 9999;
             if is_god {
-                ctx.db.player().identity().update(Player {
+                let toggled = Player {
                     health: MAX_HEALTH,
                     max_health: MAX_HEALTH,
                     ..player
-                });
+                };
+                ctx.db.player().identity().update(toggled.clone());
+                sync_player_entity(ctx, &toggled);
                 insert_system_message(ctx, "God mode OFF");
             } else {
-                ctx.db.player().identity().update(Player {
+                let toggled = Player {
                     health: 9999,
                     max_health: 9999,
                     ..player
-                });
+                };
+                ctx.db.player().identity().update(toggled.clone());
+                sync_player_entity(ctx, &toggled);
                 insert_system_message(ctx, "God mode ON");
             }
             Ok(())
@@ -1139,6 +2382,8 @@ fn process_admin_command(ctx: &ReducerContext, sender: Identity, text: &str) -> 
                         ammo_rifle: 999,
                         ammo_shotgun: 999,
                         ammo_rpg: 999,
+                        ammo_machine_gun: 999,
+                        ammo_grenade: 999,
                         ..wstate
                     });
             }
@@ -1251,11 +2496,15 @@ fn process_admin_command(ctx: &ReducerContext, sender: Identity, text: &str) -> 
             let count = target_ids.len();
             for id in target_ids {
                 if let Some(target) = ctx.db.player().identity().find(id) {
-                    ctx.db.player().identity().update(Player {
+                    let target = dismount_player_internal(ctx, target, true);
+                    let killed = Player {
                         health: 0,
                         deaths: target.deaths + 1,
+                        last_damage_time: ctx.timestamp,
                         ..target
-                    });
+                    };
+                    ctx.db.player().identity().update(killed.clone());
+                    sync_player_entity(ctx, &killed);
                 }
             }
             insert_system_message(ctx, &format!("Killed {} players", count));
@@ -1274,11 +2523,16 @@ fn process_admin_command(ctx: &ReducerContext, sender: Identity, text: &str) -> 
             let count = target_ids.len();
             for id in target_ids {
                 if let Some(target) = ctx.db.player().identity().find(id) {
-                    ctx.db.player().identity().update(Player {
+                    let target = dismount_player_internal(ctx, target, true);
+                    let respawned = Player {
                         health: MAX_HEALTH,
                         pos: SPAWN_POS,
+                        vel: ZERO_VEL,
+                        spawn_protected: true,
                         ..target
-                    });
+                    };
+                    ctx.db.player().identity().update(respawned.clone());
+                    sync_player_entity(ctx, &respawned);
                     init_movement_state(ctx, id, &SPAWN_POS);
                 }
             }
@@ -1344,11 +2598,13 @@ pub fn send_chat(ctx: &ReducerContext, text: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Scheduled cleanup: remove old ShotEvents and ExplosionEvents, then reschedule.
 #[reducer]
-pub fn cleanup_shots(ctx: &ReducerContext) -> Result<(), String> {
+pub fn cleanup_shots_scheduled(ctx: &ReducerContext, _job: ShotCleanup) {
     let now_micros = timestamp_micros(ctx.timestamp);
 
-    let stale: Vec<u64> = ctx
+    // Clean stale shot events (older than 2 seconds)
+    let stale_shots: Vec<u64> = ctx
         .db
         .shot_event()
         .iter()
@@ -1359,11 +2615,31 @@ pub fn cleanup_shots(ctx: &ReducerContext) -> Result<(), String> {
         .map(|s| s.id)
         .collect();
 
-    for id in stale {
+    for id in stale_shots {
         ctx.db.shot_event().id().delete(&id);
     }
 
-    Ok(())
+    // Clean stale explosion events (older than 3 seconds)
+    let stale_explosions: Vec<u64> = ctx
+        .db
+        .explosion_event()
+        .iter()
+        .filter(|e| {
+            let ev_micros = timestamp_micros(e.created_at);
+            now_micros.saturating_sub(ev_micros) > 3_000_000
+        })
+        .map(|e| e.id)
+        .collect();
+
+    for id in stale_explosions {
+        ctx.db.explosion_event().id().delete(&id);
+    }
+
+    // Reschedule next cleanup in 3 seconds
+    ctx.db.shot_cleanup().insert(ShotCleanup {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(3)),
+    });
 }
 
 /// Scheduled cleanup: remove old DetachEvents and reschedule.
@@ -1390,6 +2666,259 @@ pub fn cleanup_detach_events(ctx: &ReducerContext, _job: DetachCleanup) {
     ctx.db.detach_cleanup().insert(DetachCleanup {
         scheduled_id: 0,
         scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(5)),
+    });
+}
+
+/// Scheduled vehicle simulation tick (20Hz).
+#[reducer]
+pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
+    let dt = 0.05_f32;
+    let mut mounted_updates: Vec<Player> = Vec::new();
+    let vehicle_ids: Vec<u64> = ctx.db.vehicle().iter().map(|v| v.entity_id).collect();
+
+    for entity_id in vehicle_ids {
+        let Some(mut vehicle) = ctx.db.vehicle().entity_id().find(&entity_id) else {
+            continue;
+        };
+        if vehicle.vehicle_type != VEHICLE_TYPE_HELICOPTER {
+            continue;
+        }
+
+        let Some(mut entity) = ctx.db.entity().id().find(&entity_id) else {
+            continue;
+        };
+        if !entity.active {
+            continue;
+        }
+
+        if let Some(pilot_id) = vehicle.pilot_identity {
+            match ctx.db.player().identity().find(pilot_id) {
+                Some(pilot) if pilot.online && pilot.health > 0 => {}
+                Some(pilot) => {
+                    let dismounted = dismount_player_internal(ctx, pilot, true);
+                    ctx.db.player().identity().update(dismounted.clone());
+                    init_movement_state(ctx, dismounted.identity, &dismounted.pos);
+                    sync_player_entity(ctx, &dismounted);
+                    if let Some(v) = ctx.db.vehicle().entity_id().find(&entity_id) {
+                        vehicle = v;
+                    }
+                }
+                None => {
+                    vehicle.pilot_identity = None;
+                    vehicle.input_forward = 0.0;
+                    vehicle.input_strafe = 0.0;
+                    vehicle.input_lift = 0.0;
+                    vehicle.input_yaw = 0.0;
+                    vehicle.boosting = false;
+                }
+            }
+        }
+
+        let has_pilot = vehicle.pilot_identity.is_some();
+
+        let mut yaw_input = if has_pilot {
+            clamp_vehicle_axis(vehicle.input_yaw)
+        } else {
+            0.0
+        };
+
+        if let Some(pilot_id) = vehicle.pilot_identity {
+            if let Some(pilot) = ctx.db.player().identity().find(pilot_id) {
+                let mut yaw_delta = pilot.rot.yaw - entity.rot.yaw;
+                if yaw_delta > std::f32::consts::PI {
+                    yaw_delta -= TAU;
+                }
+                if yaw_delta < -std::f32::consts::PI {
+                    yaw_delta += TAU;
+                }
+                yaw_input = clamp_vehicle_axis(yaw_input + yaw_delta * 0.5);
+            }
+        }
+
+        let forward_input = if has_pilot {
+            clamp_vehicle_axis(vehicle.input_forward)
+        } else {
+            0.0
+        };
+        let strafe_input = if has_pilot {
+            clamp_vehicle_axis(vehicle.input_strafe)
+        } else {
+            0.0
+        };
+        let lift_input = if has_pilot {
+            clamp_vehicle_axis(vehicle.input_lift)
+        } else {
+            0.0
+        };
+
+        let boost_mul = if has_pilot && vehicle.boosting {
+            1.32
+        } else {
+            1.0
+        };
+
+        let forward_speed = forward_input * HELI_CRUISE_SPEED * boost_mul;
+        let strafe_speed = strafe_input * HELI_STRAFE_SPEED * boost_mul;
+        let lift_speed = lift_input * HELI_LIFT_SPEED;
+
+        let fx = -entity.rot.yaw.sin();
+        let fz = -entity.rot.yaw.cos();
+        let rx = entity.rot.yaw.cos();
+        let rz = -entity.rot.yaw.sin();
+
+        let target_vx = fx * forward_speed + rx * strafe_speed;
+        let target_vz = fz * forward_speed + rz * strafe_speed;
+        let target_vy = if has_pilot { lift_speed } else { -2.2 };
+
+        let horiz_blend = if has_pilot { 0.18 } else { 0.09 };
+        let vert_blend = if has_pilot { 0.14 } else { 0.06 };
+        entity.vel.x += (target_vx - entity.vel.x) * horiz_blend;
+        entity.vel.z += (target_vz - entity.vel.z) * horiz_blend;
+        entity.vel.y += (target_vy - entity.vel.y) * vert_blend;
+
+        let drag = if has_pilot { 0.992 } else { 0.962 };
+        entity.vel.x *= drag;
+        entity.vel.z *= drag;
+        if !has_pilot {
+            entity.vel.y *= 0.995;
+        }
+
+        entity.rot.yaw += yaw_input * HELI_YAW_SPEED * dt;
+        if entity.rot.yaw > std::f32::consts::PI {
+            entity.rot.yaw -= TAU;
+        }
+        if entity.rot.yaw < -std::f32::consts::PI {
+            entity.rot.yaw += TAU;
+        }
+        entity.rot.pitch = (-entity.vel.y / HELI_LIFT_SPEED).clamp(-0.18, 0.18);
+
+        let mut next_pos = Vec3 {
+            x: entity.pos.x + entity.vel.x * dt,
+            y: entity.pos.y + entity.vel.y * dt,
+            z: entity.pos.z + entity.vel.z * dt,
+        };
+
+        let min_x = 2.0;
+        let max_x = WORLD_SIZE_X as f32 - 2.0;
+        let min_z = 2.0;
+        let max_z = WORLD_SIZE_Z as f32 - 2.0;
+
+        if next_pos.x < min_x {
+            next_pos.x = min_x;
+            entity.vel.x = entity.vel.x.abs() * 0.2;
+        }
+        if next_pos.x > max_x {
+            next_pos.x = max_x;
+            entity.vel.x = -entity.vel.x.abs() * 0.2;
+        }
+        if next_pos.z < min_z {
+            next_pos.z = min_z;
+            entity.vel.z = entity.vel.z.abs() * 0.2;
+        }
+        if next_pos.z > max_z {
+            next_pos.z = max_z;
+            entity.vel.z = -entity.vel.z.abs() * 0.2;
+        }
+
+        let ground = helicopter_ground_rest_height(ctx, next_pos.x, next_pos.z);
+        let min_alt = ground + HELI_MIN_ALTITUDE_FROM_GROUND;
+        if next_pos.y < min_alt {
+            next_pos.y = min_alt;
+            if entity.vel.y < 0.0 {
+                entity.vel.y *= -0.08;
+            }
+            if !has_pilot {
+                entity.vel.y = 0.0;
+                entity.vel.x *= 0.93;
+                entity.vel.z *= 0.93;
+            }
+        }
+        if next_pos.y > HELI_MAX_ALTITUDE {
+            next_pos.y = HELI_MAX_ALTITUDE;
+            if entity.vel.y > 0.0 {
+                entity.vel.y *= 0.15;
+            }
+        }
+
+        entity.pos = next_pos;
+        entity.updated_at = ctx.timestamp;
+
+        let spin_target = if has_pilot {
+            10.0 + (forward_input.abs() + strafe_input.abs()) * 4.0 + lift_input.abs() * 2.0
+        } else {
+            2.4
+        };
+        vehicle.rotor_spin = (vehicle.rotor_spin + spin_target * dt) % TAU;
+
+        ctx.db.entity().id().update(entity.clone());
+        ctx.db.vehicle().entity_id().update(vehicle.clone());
+
+        if let Some(pilot_id) = vehicle.pilot_identity {
+            if let Some(pilot) = ctx.db.player().identity().find(pilot_id) {
+                mounted_updates.push(Player {
+                    pos: Vec3 {
+                        x: entity.pos.x,
+                        y: entity.pos.y + HELI_PILOT_SEAT_HEIGHT,
+                        z: entity.pos.z,
+                    },
+                    vel: entity.vel.clone(),
+                    spawn_protected: false,
+                    ..pilot
+                });
+            }
+        }
+    }
+
+    for mounted in mounted_updates {
+        ctx.db.player().identity().update(mounted.clone());
+        init_movement_state(ctx, mounted.identity, &mounted.pos);
+        sync_player_entity(ctx, &mounted);
+    }
+
+    ctx.db.vehicle_tick().insert(VehicleTick {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_millis(50)),
+    });
+}
+
+/// Scheduled health regen tick: regenerates 5 HP/s for players
+/// who haven't taken damage in 10 seconds. Runs every 1 second.
+#[reducer]
+pub fn tick_health_regen(ctx: &ReducerContext, _job: HealthRegenTick) {
+    let now_us = timestamp_micros(ctx.timestamp);
+    let regen_delay_us = HEALTH_REGEN_DELAY_SECS * 1_000_000;
+
+    // Collect eligible players first to avoid borrow issues
+    let eligible: Vec<Identity> = ctx
+        .db
+        .player()
+        .iter()
+        .filter(|p| {
+            p.online
+                && p.health > 0
+                && p.health < p.max_health
+                && p.max_health < 9999 // skip god mode
+                && now_us.saturating_sub(timestamp_micros(p.last_damage_time)) > regen_delay_us
+        })
+        .map(|p| p.identity)
+        .collect();
+
+    for id in eligible {
+        if let Some(p) = ctx.db.player().identity().find(id) {
+            let new_health = (p.health + HEALTH_REGEN_RATE).min(p.max_health);
+            let healed = Player {
+                health: new_health,
+                ..p
+            };
+            ctx.db.player().identity().update(healed.clone());
+            sync_player_entity(ctx, &healed);
+        }
+    }
+
+    // Reschedule next tick in 1 second
+    ctx.db.health_regen_tick().insert(HealthRegenTick {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(1)),
     });
 }
 
@@ -1530,6 +3059,207 @@ pub fn tick_environment(ctx: &ReducerContext, _job: EnvironmentTick) {
     });
 }
 
+// ── Chunk Request Reducer ──
+
+#[reducer]
+pub fn request_chunks(ctx: &ReducerContext, chunk_ids: Vec<u32>) -> Result<(), String> {
+    let _sender = ctx.sender();
+    // Must be registered
+    ctx.db
+        .player()
+        .identity()
+        .find(_sender)
+        .ok_or("Not registered")?;
+
+    if chunk_ids.len() > 20 {
+        return Err("Too many chunks requested (max 20)".to_string());
+    }
+
+    let config = ctx
+        .db
+        .world_config()
+        .id()
+        .find(1)
+        .ok_or("World not initialized")?;
+
+    for chunk_id in chunk_ids {
+        // Skip if already exists
+        if ctx.db.world_chunk().chunk_id().find(chunk_id).is_some() {
+            continue;
+        }
+
+        let (cx, cy, cz) = worldgen::unpack_chunk_id(chunk_id);
+        // Bounds validation
+        if (cx as usize) >= NUM_CHUNKS_X
+            || (cy as usize) >= NUM_CHUNKS_Y
+            || (cz as usize) >= NUM_CHUNKS_Z
+        {
+            continue;
+        }
+
+        let data = worldgen::generate_chunk(cx as usize, cy as usize, cz as usize, config.seed);
+        ctx.db.world_chunk().insert(WorldChunk {
+            chunk_id,
+            cx,
+            cy,
+            cz,
+            data,
+            version: 1,
+        });
+    }
+
+    Ok(())
+}
+
+// ── Map Reset Reducer ──
+
+#[reducer]
+pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
+    log::info!("MAP RESET triggered!");
+
+    // 1. Delete all WorldChunk rows
+    let chunk_ids: Vec<u32> = ctx.db.world_chunk().iter().map(|c| c.chunk_id).collect();
+    for id in chunk_ids {
+        ctx.db.world_chunk().chunk_id().delete(&id);
+    }
+
+    // 2. Generate new seed
+    let new_seed = timestamp_micros(ctx.timestamp);
+
+    // 3. Update world config
+    if let Some(config) = ctx.db.world_config().id().find(1) {
+        ctx.db.world_config().id().update(WorldConfig {
+            seed: new_seed,
+            round_number: config.round_number + 1,
+            round_start: ctx.timestamp,
+            ..config
+        });
+    }
+
+    // 4. Respawn all online players
+    let player_ids: Vec<Identity> = ctx
+        .db
+        .player()
+        .iter()
+        .filter(|p| p.online)
+        .map(|p| p.identity)
+        .collect();
+    for id in player_ids {
+        if let Some(p) = ctx.db.player().identity().find(id) {
+            let entity_id = ensure_player_entity(ctx, &p);
+            let loadout = normalize_or_create_player_loadout(ctx, &p.username);
+            let current_weapon = if weapon_in_loadout(&loadout, p.current_weapon) {
+                p.current_weapon
+            } else {
+                loadout.slot1
+            };
+
+            let p = dismount_player_internal(ctx, p, true);
+            let reset = Player {
+                entity_id,
+                health: MAX_HEALTH,
+                max_health: MAX_HEALTH,
+                pos: SPAWN_POS,
+                vel: ZERO_VEL,
+                kills: 0,
+                deaths: 0,
+                spawn_protected: true,
+                current_weapon,
+                ..p
+            };
+            ctx.db.player().identity().update(reset.clone());
+            sync_player_entity(ctx, &reset);
+            init_weapon_state(ctx, id);
+            init_movement_state(ctx, id, &SPAWN_POS);
+        }
+    }
+
+    // Remove old vehicle entities for the new map
+    let vehicle_entity_ids: Vec<u64> = ctx.db.vehicle().iter().map(|v| v.entity_id).collect();
+    for id in vehicle_entity_ids {
+        ctx.db.vehicle().entity_id().delete(&id);
+    }
+    let entity_ids: Vec<u64> = ctx
+        .db
+        .entity()
+        .iter()
+        .filter(|e| e.kind == ENTITY_KIND_VEHICLE)
+        .map(|e| e.id)
+        .collect();
+    for id in entity_ids {
+        ctx.db.entity().id().delete(&id);
+    }
+
+    // 5. Generate spawn-area chunks (5x3x5 around center)
+    let center_cx = (WORLD_SIZE_X / 2 / CHUNK_SIZE) as i32;
+    let center_cz = (WORLD_SIZE_Z / 2 / CHUNK_SIZE) as i32;
+    for dcx in -2..=2 {
+        for dcz in -2..=2 {
+            let cx = center_cx + dcx;
+            let cz = center_cz + dcz;
+            if cx < 0 || cx >= NUM_CHUNKS_X as i32 || cz < 0 || cz >= NUM_CHUNKS_Z as i32 {
+                continue;
+            }
+            for cy in 0..NUM_CHUNKS_Y as i32 {
+                let data =
+                    worldgen::generate_chunk(cx as usize, cy as usize, cz as usize, new_seed);
+                let chunk_id = worldgen::pack_chunk_id(cx as u8, cy as u8, cz as u8);
+                ctx.db.world_chunk().insert(WorldChunk {
+                    chunk_id,
+                    cx: cx as u8,
+                    cy: cy as u8,
+                    cz: cz as u8,
+                    data,
+                    version: 1,
+                });
+            }
+        }
+    }
+
+    // Spawn sandbox vehicles (helicopters) for the new world
+    spawn_sandbox_helicopters(ctx);
+
+    // 6. Clean up stale events
+    let event_ids: Vec<u64> = ctx.db.detach_event().iter().map(|e| e.id).collect();
+    for id in event_ids {
+        ctx.db.detach_event().id().delete(&id);
+    }
+    let shot_ids: Vec<u64> = ctx.db.shot_event().iter().map(|s| s.id).collect();
+    for id in shot_ids {
+        ctx.db.shot_event().id().delete(&id);
+    }
+    let explosion_ids: Vec<u64> = ctx.db.explosion_event().iter().map(|e| e.id).collect();
+    for id in explosion_ids {
+        ctx.db.explosion_event().id().delete(&id);
+    }
+
+    // 7. Schedule next reset in 5 minutes
+    ctx.db.map_reset_timer().insert(MapResetTimer {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(300)),
+    });
+
+    // 8. Broadcast system message
+    ctx.db.chat_message().insert(ChatMessage {
+        id: 0,
+        sender: ctx.sender(),
+        sender_name: "[SERVER]".to_string(),
+        text: "MAP RESET! New world generated. New round starting!".to_string(),
+        sent_at: ctx.timestamp,
+    });
+
+    log::info!(
+        "Map reset complete. New seed: {}, round: {}",
+        new_seed,
+        ctx.db
+            .world_config()
+            .id()
+            .find(1)
+            .map(|c| c.round_number)
+            .unwrap_or(0)
+    );
+}
+
 /// Handle projectile impact: validates travel time, applies damage and block destruction.
 #[reducer]
 pub fn projectile_impact(
@@ -1543,7 +3273,9 @@ pub fn projectile_impact(
     hit_blocks: Vec<Vec3>,
 ) -> Result<(), String> {
     let sender = ctx.sender();
-    let player = ctx
+    // We still verify the player exists, but don't check health —
+    // projectiles launched while alive should still impact after death.
+    let _player = ctx
         .db
         .player()
         .identity()
@@ -1554,9 +3286,10 @@ pub fn projectile_impact(
         return Err("Invalid weapon".to_string());
     }
 
-    if player.health <= 0 {
-        return Err("Cannot impact while dead".to_string());
-    }
+    // NOTE: We intentionally do NOT check player.health here.
+    // The projectile was already launched when the player was alive
+    // (validated by fire_weapon). If the player dies mid-flight,
+    // the projectile should still explode on impact.
 
     let def = &WEAPON_DEFS[weapon as usize];
 
@@ -1596,7 +3329,7 @@ pub fn projectile_impact(
         }
 
         if let Some(target) = ctx.db.player().identity().find(*target_id) {
-            if target.health <= 0 || !target.online {
+            if target.health <= 0 || !target.online || target.spawn_protected {
                 continue;
             }
 
@@ -1614,6 +3347,7 @@ pub fn projectile_impact(
             let new_health = (target.health - def.damage).max(0);
             ctx.db.player().identity().update(Player {
                 health: new_health,
+                last_damage_time: ctx.timestamp,
                 ..target
             });
 
@@ -1657,7 +3391,32 @@ pub fn projectile_impact(
         .collect();
 
     let actually_destroyed = destroy_blocks_in_world(ctx, &block_coords);
-    run_structural_check(ctx, &actually_destroyed);
+    let destroyed_positions: Vec<(i32, i32, i32)> = actually_destroyed
+        .iter()
+        .map(|&(x, y, z, _)| (x, y, z))
+        .collect();
+    run_structural_check(ctx, &destroyed_positions);
+
+    // Emit explosion event for all clients to render VFX
+    if def.radius > 0.0 {
+        ctx.db.explosion_event().insert(ExplosionEvent {
+            id: 0,
+            origin: sender,
+            pos: impact_pos,
+            radius: def.radius,
+            weapon,
+            destroyed_blocks: actually_destroyed
+                .iter()
+                .map(|&(x, y, z, bt)| DestroyedBlock {
+                    x: x as f32,
+                    y: y as f32,
+                    z: z as f32,
+                    block_type: bt,
+                })
+                .collect(),
+            created_at: ctx.timestamp,
+        });
+    }
 
     Ok(())
 }

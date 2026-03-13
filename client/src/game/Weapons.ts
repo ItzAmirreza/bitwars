@@ -20,6 +20,7 @@ export interface Weapon {
   fireRate: number;
   ammo: number;
   maxAmmo: number;
+  range: number;
   color: string;
   recoil: number;
   projectile: ProjectileConfig;
@@ -28,19 +29,29 @@ export interface Weapon {
 // Client-side weapon stats (used for prediction/VFX only — server is authority for damage/ammo)
 export const WEAPONS: Weapon[] = [
   {
-    name: 'Rifle', damage: 25, radius: 0, fireRate: 5, ammo: 30, maxAmmo: 30,
+    name: 'Rifle', damage: 25, radius: 0, fireRate: 5, ammo: 90, maxAmmo: 90, range: 80,
     color: '#4488ff', recoil: 0.02,
     projectile: { speed: Infinity, gravity: 0, size: 0, trailLength: 0, trailColor: 0, lightIntensity: 0, lightColor: 0, lightRange: 0, lifetime: 0 },
   },
   {
-    name: 'Shotgun', damage: 12, radius: 1.5, fireRate: 1, ammo: 8, maxAmmo: 8,
+    name: 'Shotgun', damage: 12, radius: 1.5, fireRate: 1, ammo: 24, maxAmmo: 24, range: 30,
     color: '#ff8844', recoil: 0.06,
     projectile: { speed: Infinity, gravity: 0, size: 0, trailLength: 0, trailColor: 0, lightIntensity: 0, lightColor: 0, lightRange: 0, lifetime: 0 },
   },
   {
-    name: 'RPG', damage: 80, radius: 3.5, fireRate: 0.5, ammo: 4, maxAmmo: 4,
+    name: 'RPG', damage: 80, radius: 3.5, fireRate: 0.5, ammo: 12, maxAmmo: 12, range: 80,
     color: '#ff4444', recoil: 0.1,
-    projectile: { speed: 40, gravity: 2, size: 0.15, trailLength: 0.5, trailColor: 0xff6600, lightIntensity: 3, lightColor: 0xff4400, lightRange: 8, lifetime: 5 },
+    projectile: { speed: 120, gravity: 2, size: 0.15, trailLength: 0.5, trailColor: 0xff6600, lightIntensity: 3, lightColor: 0xff4400, lightRange: 8, lifetime: 5 },
+  },
+  {
+    name: 'Machine Gun', damage: 14, radius: 0, fireRate: 13, ammo: 180, maxAmmo: 180, range: 90,
+    color: '#66e0ff', recoil: 0.016,
+    projectile: { speed: Infinity, gravity: 0, size: 0, trailLength: 0, trailColor: 0, lightIntensity: 0, lightColor: 0, lightRange: 0, lifetime: 0 },
+  },
+  {
+    name: 'Grenade Launcher', damage: 95, radius: 4.8, fireRate: 1.4, ammo: 14, maxAmmo: 14, range: 85,
+    color: '#6bff6b', recoil: 0.11,
+    projectile: { speed: 48, gravity: 8, size: 0.19, trailLength: 0.35, trailColor: 0x8dff66, lightIntensity: 2.8, lightColor: 0x9dff44, lightRange: 10, lifetime: 5 },
   },
 ];
 
@@ -61,26 +72,35 @@ const PLAYER_HITBOX_HALF_W = 0.4;
 const PLAYER_HITBOX_HEIGHT = 1.9;
 
 export class WeaponSystem {
-  currentWeapon = 0;
+  private equippedWeapons: [number, number, number] = [0, 1, 2];
+  private currentSlot = 0;
+  private inputEnabled = true;
   private lastFireTime = 0;
   private camera: THREE.PerspectiveCamera;
   private world: VoxelWorld;
   private otherPlayers: Map<string, THREE.Group> = new Map();
+  private pendingBlockDestructions: Map<string, number> = new Map();
 
   constructor(camera: THREE.PerspectiveCamera, world: VoxelWorld) {
     this.camera = camera;
     this.world = world;
 
     document.addEventListener('wheel', (e) => {
+      if (!this.inputEnabled) return;
       if (e.deltaY > 0) this.nextWeapon();
       else this.prevWeapon();
     });
 
     document.addEventListener('keydown', (e) => {
-      if (e.code === 'Digit1') this.switchTo(0);
-      if (e.code === 'Digit2') this.switchTo(1);
-      if (e.code === 'Digit3') this.switchTo(2);
+      if (!this.inputEnabled) return;
+      if (e.code === 'Digit1') this.switchToSlot(0);
+      if (e.code === 'Digit2') this.switchToSlot(1);
+      if (e.code === 'Digit3') this.switchToSlot(2);
     });
+  }
+
+  setInputEnabled(enabled: boolean): void {
+    this.inputEnabled = enabled;
   }
 
   /** Set reference to other players map for hit detection */
@@ -88,19 +108,54 @@ export class WeaponSystem {
     this.otherPlayers = players;
   }
 
+  get currentWeapon(): number { return this.equippedWeapons[this.currentSlot]; }
+
+  get loadout(): [number, number, number] {
+    return [this.equippedWeapons[0], this.equippedWeapons[1], this.equippedWeapons[2]];
+  }
+
   get weapon(): Weapon { return WEAPONS[this.currentWeapon]; }
 
-  private switchTo(index: number): void {
-    this.currentWeapon = index;
+  setLoadout(loadout: [number, number, number], preferredWeapon?: number): boolean {
+    const [slot1, slot2, slot3] = loadout;
+    if (slot1 < 0 || slot1 >= WEAPONS.length) return false;
+    if (slot2 < 0 || slot2 >= WEAPONS.length) return false;
+    if (slot3 < 0 || slot3 >= WEAPONS.length) return false;
+
+    const unique = new Set([slot1, slot2, slot3]);
+    if (unique.size !== 3) return false;
+
+    const previousWeapon = this.currentWeapon;
+    this.equippedWeapons = [slot1, slot2, slot3];
+
+    const preferred = preferredWeapon ?? previousWeapon;
+    const preferredSlot = this.equippedWeapons.indexOf(preferred);
+    this.currentSlot = preferredSlot >= 0 ? preferredSlot : 0;
+
+    return true;
+  }
+
+  setCurrentWeapon(weaponIndex: number): boolean {
+    const slot = this.equippedWeapons.indexOf(weaponIndex);
+    if (slot < 0) return false;
+    if (slot === this.currentSlot) return false;
+    this.currentSlot = slot;
+    return true;
+  }
+
+  switchToSlot(slotIndex: number): number {
+    if (slotIndex < 0 || slotIndex >= this.equippedWeapons.length) return this.currentWeapon;
+    this.currentSlot = slotIndex;
+    return this.currentWeapon;
   }
 
   nextWeapon(): number {
-    this.currentWeapon = (this.currentWeapon + 1) % WEAPONS.length;
+    this.currentSlot = (this.currentSlot + 1) % this.equippedWeapons.length;
     return this.currentWeapon;
   }
 
   prevWeapon(): number {
-    this.currentWeapon = (this.currentWeapon - 1 + WEAPONS.length) % WEAPONS.length;
+    this.currentSlot = (this.currentSlot - 1 + this.equippedWeapons.length) % this.equippedWeapons.length;
     return this.currentWeapon;
   }
 
@@ -126,6 +181,15 @@ export class WeaponSystem {
 
     // Raycast from camera center
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+    if (this.currentWeapon === 3) {
+      dir.x += (Math.random() - 0.5) * 0.05;
+      dir.y += (Math.random() - 0.5) * 0.03;
+      dir.z += (Math.random() - 0.5) * 0.05;
+      dir.normalize();
+    } else if (this.currentWeapon === 4) {
+      dir.y += 0.09;
+      dir.normalize();
+    }
     const origin = this.camera.position.clone();
 
     // Recoil (camera) — use YXZ euler to match FPSControls and avoid yaw drift
@@ -141,7 +205,7 @@ export class WeaponSystem {
         weaponIndex: this.currentWeapon,
         hitPos: null,
         destroyedBlocks: [],
-        tracerEnd: origin.clone().add(dir.clone().multiplyScalar(80)),
+        tracerEnd: origin.clone().add(dir.clone().multiplyScalar(this.weapon.range)),
         hitPlayerIds: [],
         origin,
         direction: dir,
@@ -150,12 +214,12 @@ export class WeaponSystem {
     }
 
     // Hitscan path: instant raycast
-    const hit = this.raycastVoxels(origin, dir, 80);
+    const hit = this.raycastVoxels(origin, dir, this.weapon.range);
 
     const destroyed: FireResult['destroyedBlocks'] = [];
     const tracerEnd = hit
       ? new THREE.Vector3(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5)
-      : origin.clone().add(dir.clone().multiplyScalar(80));
+      : origin.clone().add(dir.clone().multiplyScalar(this.weapon.range));
 
     if (hit) {
       if (this.weapon.radius > 0) {
@@ -169,6 +233,7 @@ export class WeaponSystem {
               if (dx * dx + dy * dy + dz * dz <= r2) {
                 const bt = this.world.getBlock(bx, by, bz);
                 if (bt !== 0) {
+                  this.pendingBlockDestructions.set(`${bx},${by},${bz}`, bt);
                   this.world.setBlock(bx, by, bz, 0);
                   destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
                 }
@@ -179,13 +244,14 @@ export class WeaponSystem {
       } else {
         // Single block
         const bt = this.world.getBlock(hit.x, hit.y, hit.z);
+        this.pendingBlockDestructions.set(`${hit.x},${hit.y},${hit.z}`, bt);
         this.world.setBlock(hit.x, hit.y, hit.z, 0);
         destroyed.push({ x: hit.x, y: hit.y, z: hit.z, blockType: bt });
       }
     }
 
     // Player hit detection: AABB raycast against other players
-    const hitPlayerIds = this.raycastPlayers(origin, dir, 80);
+    const hitPlayerIds = this.raycastPlayers(origin, dir, this.weapon.range);
 
     return {
       weaponIndex: this.currentWeapon,
@@ -197,6 +263,21 @@ export class WeaponSystem {
       direction: dir,
       isProjectile: false,
     };
+  }
+
+  /** Track a client-predicted block destruction */
+  trackPendingDestruction(x: number, y: number, z: number, blockType: number): void {
+    this.pendingBlockDestructions.set(`${x},${y},${z}`, blockType);
+  }
+
+  /** Check if a block position was already predicted-destroyed by client */
+  isPendingDestruction(key: string): boolean {
+    return this.pendingBlockDestructions.has(key);
+  }
+
+  /** Confirm a client-predicted block destruction (server agreed) */
+  confirmDestruction(key: string): void {
+    this.pendingBlockDestructions.delete(key);
   }
 
   reload(): void {

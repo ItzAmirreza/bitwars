@@ -17,8 +17,13 @@ import {
 
 export default __t.row({
   identity: __t.identity().primaryKey(),
+  entityId: __t.u64().name("entity_id"),
   username: __t.string(),
+  characterPreset: __t.u8().name("character_preset"),
   get pos() {
+    return Vec3;
+  },
+  get vel() {
     return Vec3;
   },
   get rot() {
@@ -29,6 +34,9 @@ export default __t.row({
   currentWeapon: __t.u8().name("current_weapon"),
   kills: __t.u32(),
   deaths: __t.u32(),
+  spawnProtected: __t.bool().name("spawn_protected"),
   online: __t.bool(),
+  mountedVehicleId: __t.u64().name("mounted_vehicle_id"),
   joinedAt: __t.timestamp().name("joined_at"),
+  lastDamageTime: __t.timestamp().name("last_damage_time"),
 });

@@ -39,6 +39,9 @@ export class FPSControls {
   justLanded = false;
   landingIntensity = 0; // 0-1
 
+  // Jump (public for Engine)
+  justJumped = false;
+
   // Camera effects (public for Engine)
   cameraTiltZ = 0;
   sprintFovOffset = 0;
@@ -48,11 +51,14 @@ export class FPSControls {
   speed = 12;
   sprintSpeed = 18;
   crouchSpeed = 5;
-  jumpForce = 8;
-  gravity = -25;
-  gravityAscending = -18;
+  jumpForce = 9.5;
+  gravity = -40;
+  gravityAscending = -22;
   sensitivity = 0.002;
   locked = false;
+
+  // Enhanced gravity feel
+  private readonly terminalVelocity = -35;
 
   // Acceleration-based movement
   private groundAccel = 65;
@@ -96,8 +102,6 @@ export class FPSControls {
 
   // Landing impact
   private landingDip = 0;
-  private landingRecoveryTimer = 0;
-  private landingRecoverySpeedMult = 1;
 
   // Strafe tracking
   private rawStrafeInput = 0;
@@ -159,9 +163,26 @@ export class FPSControls {
     this.onGround = false;
   }
 
+  /** Get current velocity vector for network sync */
+  getVelocity(): { x: number; y: number; z: number } {
+    return { x: this.hVelX, y: this.velocity.y, z: this.hVelZ };
+  }
+
   setSprintToggle(enabled: boolean): void {
     this.sprintToggleSetting = enabled;
     if (!enabled) this.sprintToggleActive = false;
+  }
+
+  get shiftHeld(): boolean {
+    return this.shiftDown;
+  }
+
+  get spacePressed(): boolean {
+    return this.spaceHeld;
+  }
+
+  get ctrlHeld(): boolean {
+    return this.ctrlDown;
   }
 
   releaseAllInput(): void {
@@ -192,6 +213,7 @@ export class FPSControls {
     this.velocity.y = this.jumpForce;
     this.onGround = false;
     this.isJumping = true;
+    this.justJumped = true;
     this.coyoteTimer = 0;
     this.jumpBuffered = false;
     this.jumpBufferTimer = 0;
@@ -449,6 +471,7 @@ export class FPSControls {
     this.isSliding = false;
     this.isClimbing = false;
     this.justLanded = false;
+    this.justJumped = false;
     this.headBobX = 0;
     this.headBobY = 0;
     this.horizontalSpeed = 0;
@@ -465,9 +488,9 @@ export class FPSControls {
     // Capture pre-gravity vertical velocity for landing detection
     const prevVelY = this.velocity.y;
 
-    // Sprint state
+    // Sprint state (persists through jumps like Minecraft)
     const wantsSprint = this.sprintToggleSetting ? this.sprintToggleActive : this.shiftDown;
-    this.isSprinting = wantsSprint && this.moveForward && !this.isCrouching && this.onGround && !this.isSliding;
+    this.isSprinting = wantsSprint && this.moveForward && !this.isCrouching && !this.isSliding;
 
     // Crouch with headroom check
     if (this.ctrlDown) {
@@ -488,9 +511,6 @@ export class FPSControls {
     let targetSpeed = this.speed;
     if (this.isSprinting) targetSpeed = this.sprintSpeed;
     else if (this.isCrouching && !this.isSliding) targetSpeed = this.crouchSpeed;
-
-    // Landing recovery speed penalty
-    targetSpeed *= this.landingRecoverySpeedMult;
 
     // Eye height interpolation
     this.targetEyeHeight = this.isCrouching ? this.crouchHeight : this.standHeight;
@@ -585,9 +605,12 @@ export class FPSControls {
     // Apply horizontal velocity with collision detection
     this.moveWithCollision(this.hVelX * delta, this.hVelZ * delta, world);
 
-    // Variable gravity
+    // Variable gravity + terminal velocity
     const grav = this.velocity.y > 0 ? this.gravityAscending : this.gravity;
     this.velocity.y += grav * delta;
+    if (this.velocity.y < this.terminalVelocity) {
+      this.velocity.y = this.terminalVelocity;
+    }
     this.camera.position.y += this.velocity.y * delta;
 
     // Ceiling collision
@@ -656,12 +679,8 @@ export class FPSControls {
         this.justLanded = true;
         this.landingIntensity = Math.min(1, Math.max(0, (-prevVelY - 2) / 18));
 
-        // Camera dip
-        this.landingDip = this.landingIntensity * 0.15;
-
-        // Landing recovery: brief speed reduction
-        this.landingRecoveryTimer = 0.15 + this.landingIntensity * 0.15;
-        this.landingRecoverySpeedMult = 1 - this.landingIntensity * 0.4;
+        // Camera dip — visual impact only, no speed penalty
+        this.landingDip = this.landingIntensity * 0.25;
 
         // Dampen head bob on landing
         this.bobTime = 0;
@@ -671,8 +690,10 @@ export class FPSControls {
       this.onGround = true;
       this.isJumping = false;
 
-      // Consume jump buffer on landing
-      if (this.jumpBuffered) {
+      // Auto-jump if space held or jump buffered (Minecraft style)
+      if (this.spaceHeld || this.jumpBuffered) {
+        // Cancel landing dip so it doesn't pull us back into ground next frame
+        this.landingDip = 0;
         this.executeJump();
       }
     } else if (this.camera.position.y > groundHeight + 0.2) {
@@ -686,20 +707,12 @@ export class FPSControls {
       }
     }
 
-    // Landing dip recovery
+    // Landing dip recovery (slower = more weight)
     if (this.landingDip > 0.001) {
-      this.landingDip *= Math.max(0, 1 - delta * 8);
+      this.landingDip *= Math.max(0, 1 - delta * 6);
       this.camera.position.y -= this.landingDip;
     } else {
       this.landingDip = 0;
-    }
-
-    // Landing recovery timer
-    if (this.landingRecoveryTimer > 0) {
-      this.landingRecoveryTimer -= delta;
-      if (this.landingRecoveryTimer <= 0) {
-        this.landingRecoverySpeedMult = 1;
-      }
     }
 
     // World bounds
@@ -712,20 +725,15 @@ export class FPSControls {
     const landingBobDampen = this.landingDip > 0.01 ? 0.2 : 1;
 
     if (this.onGround && this.horizontalSpeed > 1 && !this.isSliding) {
-      const bobFreq = this.isSprinting ? 12 : this.isCrouching ? 6 : 8;
-      const bobAmpY = (this.isSprinting ? 0.055 : this.isCrouching ? 0.02 : 0.035) * landingBobDampen;
-      const bobAmpX = (this.isSprinting ? 0.028 : this.isCrouching ? 0.01 : 0.018) * landingBobDampen;
+      const bobFreq = this.isSprinting ? 14 : this.isCrouching ? 6 : 10;
+      const bobAmpY = (this.isSprinting ? 0.04 : this.isCrouching ? 0.015 : 0.028) * landingBobDampen;
+      const bobAmpX = (this.isSprinting ? 0.02 : this.isCrouching ? 0.008 : 0.014) * landingBobDampen;
       const speedFactor = Math.min(1, this.horizontalSpeed / targetSpeed);
 
       this.bobTime += delta * bobFreq * speedFactor;
-      // Primary + subtle 2nd harmonic for organic feel
-      const primaryY = Math.sin(this.bobTime) * bobAmpY;
-      const secondaryY = Math.sin(this.bobTime * 2.3) * bobAmpY * 0.08;
-      this.headBobY = (primaryY + secondaryY) * speedFactor;
-
-      const primaryX = Math.cos(this.bobTime * 0.5) * bobAmpX;
-      const secondaryX = Math.cos(this.bobTime * 0.8) * bobAmpX * 0.1;
-      this.headBobX = (primaryX + secondaryX) * speedFactor;
+      // Simple single sine wave (Minecraft-style)
+      this.headBobY = Math.sin(this.bobTime) * bobAmpY * speedFactor;
+      this.headBobX = Math.cos(this.bobTime * 0.5) * bobAmpX * speedFactor;
 
       // Step trigger
       if (this.lastBobY >= 0 && this.headBobY < 0) {

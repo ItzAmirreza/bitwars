@@ -39,7 +39,21 @@ export function connect(
           .onError((_ctx: ErrorContext) => {
             console.error('[BitWars] Subscription error');
           })
-          .subscribeToAllTables();
+          .subscribe([
+            "SELECT * FROM player",
+            "SELECT * FROM player_loadout",
+            "SELECT * FROM shot_event",
+            "SELECT * FROM detach_event",
+            "SELECT * FROM player_weapon_state",
+            "SELECT * FROM player_movement",
+            "SELECT * FROM world_environment",
+            "SELECT * FROM world_config",
+            "SELECT * FROM chat_message",
+            "SELECT * FROM explosion_event",
+            "SELECT * FROM world_chunk",
+            "SELECT * FROM entity",
+            "SELECT * FROM vehicle",
+          ]);
       })
       .onConnectError((_ctx: ErrorContext, err: Error) => {
         console.error('[BitWars] Connection error:', err);

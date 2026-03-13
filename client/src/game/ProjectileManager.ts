@@ -36,6 +36,7 @@ interface ActiveProjectile {
   trailSpacing: number;
   // State
   isLocal: boolean;
+  shooterId: string | null;
   mesh: THREE.Mesh;
   light: THREE.PointLight | null;
 }
@@ -70,13 +71,19 @@ export class ProjectileManager {
   }
 
   /** Spawn a projectile from the local player's fire */
-  spawnLocal(weaponIndex: number, origin: THREE.Vector3, direction: THREE.Vector3): void {
-    this.spawn(weaponIndex, origin, direction, performance.now(), true);
+  spawnLocal(weaponIndex: number, origin: THREE.Vector3, direction: THREE.Vector3): boolean {
+    return this.spawn(weaponIndex, origin, direction, performance.now(), true) !== null;
   }
 
   /** Spawn a projectile from a remote player's ShotEvent */
-  spawnRemote(weaponIndex: number, origin: THREE.Vector3, direction: THREE.Vector3, firedAt: number): void {
-    const p = this.spawn(weaponIndex, origin, direction, firedAt, false);
+  spawnRemote(
+    weaponIndex: number,
+    origin: THREE.Vector3,
+    direction: THREE.Vector3,
+    firedAt: number,
+    shooterId: string,
+  ): void {
+    const p = this.spawn(weaponIndex, origin, direction, firedAt, false, shooterId);
     if (!p) return;
 
     // Advance projectile to compensate for network latency
@@ -95,8 +102,26 @@ export class ProjectileManager {
     direction: THREE.Vector3,
     firedAt: number,
     isLocal: boolean,
+    shooterId: string | null = null,
   ): ActiveProjectile | null {
-    if (this.projectiles.length >= MAX_PROJECTILES) return null;
+    if (this.projectiles.length >= MAX_PROJECTILES) {
+      if (!isLocal) {
+        // Keep local projectiles reliable; recycle oldest remote projectile first.
+        let oldestIdx = -1;
+        let oldestAge = -1;
+        for (let i = 0; i < this.projectiles.length; i++) {
+          const p = this.projectiles[i];
+          if (p.isLocal) continue;
+          if (p.age > oldestAge) {
+            oldestAge = p.age;
+            oldestIdx = i;
+          }
+        }
+        if (oldestIdx >= 0) this.removeProjectile(oldestIdx);
+      }
+
+      if (this.projectiles.length >= MAX_PROJECTILES) return null;
+    }
 
     const w = WEAPONS[weaponIndex];
     const cfg = w.projectile;
@@ -140,6 +165,7 @@ export class ProjectileManager {
       trailTimer: 0,
       trailSpacing: cfg.trailLength,
       isLocal,
+      shooterId,
       mesh,
       light,
     };
@@ -166,48 +192,63 @@ export class ProjectileManager {
       // Compute step
       const stepDist = p.vel.length() * delta;
 
-      // Collision detection (subdivide if step is large to prevent tunneling)
-      const subSteps = Math.max(1, Math.ceil(stepDist));
-      const subDist = stepDist / subSteps;
       let impacted = false;
+      if (p.isLocal) {
+        // Collision detection (subdivide if step is large to prevent tunneling)
+        const subSteps = Math.max(1, Math.ceil(stepDist));
+        const subDist = stepDist / subSteps;
 
-      for (let s = 0; s < subSteps; s++) {
-        const segOrigin = p.pos.clone();
-        const segDir = p.vel.clone().normalize();
+        for (let s = 0; s < subSteps; s++) {
+          const segOrigin = p.pos.clone();
+          const segDir = p.vel.clone().normalize();
 
-        // Block collision
-        const blockHit = this.weapons.raycastVoxels(segOrigin, segDir, subDist);
-        if (blockHit) {
-          p.pos.set(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
-          this.handleImpact(p, blockHit);
-          this.removeProjectile(i);
-          impacted = true;
-          break;
+          // Block collision
+          const blockHit = this.weapons.raycastVoxels(segOrigin, segDir, subDist);
+          if (blockHit) {
+            p.pos.set(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
+            this.handleImpact(p, blockHit);
+            this.removeProjectile(i);
+            impacted = true;
+            break;
+          }
+
+          // Player collision
+          const hitPlayerIds = this.weapons.raycastPlayers(segOrigin, segDir, subDist);
+          if (hitPlayerIds.length > 0) {
+            // Impact at current position
+            const hitPos = {
+              x: Math.floor(p.pos.x),
+              y: Math.floor(p.pos.y),
+              z: Math.floor(p.pos.z),
+            };
+            this.handleImpactPlayers(p, hitPos, hitPlayerIds);
+            this.removeProjectile(i);
+            impacted = true;
+            break;
+          }
+
+          // Advance position for this sub-step
+          p.pos.addScaledVector(segDir, subDist);
         }
-
-        // Player collision
-        const hitPlayerIds = this.weapons.raycastPlayers(segOrigin, segDir, subDist);
-        if (hitPlayerIds.length > 0) {
-          // Impact at current position
-          const hitPos = {
-            x: Math.floor(p.pos.x),
-            y: Math.floor(p.pos.y),
-            z: Math.floor(p.pos.z),
-          };
-          this.handleImpactPlayers(p, hitPos, hitPlayerIds);
-          this.removeProjectile(i);
-          impacted = true;
-          break;
-        }
-
-        // Advance position for this sub-step
-        p.pos.addScaledVector(segDir, subDist);
+      } else {
+        // Remote projectiles are visual only. Server explosion events determine true impacts.
+        const dir = p.vel.clone().normalize();
+        p.pos.addScaledVector(dir, stepDist);
       }
 
       if (impacted) continue;
 
-      // Out of bounds check
-      if (p.pos.y < -10 || p.pos.y > 100 || p.pos.x < -5 || p.pos.x > 133 || p.pos.z < -5 || p.pos.z > 133) {
+      // Out of bounds check (match actual world dimensions)
+      const margin = 5;
+      const maxY = Math.max(100, this.world.sizeY + 52);
+      if (
+        p.pos.y < -10
+        || p.pos.y > maxY
+        || p.pos.x < -margin
+        || p.pos.x > this.world.sizeX + margin
+        || p.pos.z < -margin
+        || p.pos.z > this.world.sizeZ + margin
+      ) {
         this.removeProjectile(i);
         continue;
       }
@@ -255,6 +296,7 @@ export class ProjectileManager {
               if (dx * dx + dy * dy + dz * dz <= r2) {
                 const bt = this.world.getBlock(bx, by, bz);
                 if (bt !== 0) {
+                  this.weapons.trackPendingDestruction(bx, by, bz, bt);
                   this.world.setBlock(bx, by, bz, 0);
                   destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
                 }
@@ -265,6 +307,7 @@ export class ProjectileManager {
       } else {
         const bt = this.world.getBlock(blockHit.x, blockHit.y, blockHit.z);
         if (bt !== 0) {
+          this.weapons.trackPendingDestruction(blockHit.x, blockHit.y, blockHit.z, bt);
           this.world.setBlock(blockHit.x, blockHit.y, blockHit.z, 0);
           destroyed.push({ x: blockHit.x, y: blockHit.y, z: blockHit.z, blockType: bt });
         }
@@ -326,6 +369,39 @@ export class ProjectileManager {
       this.vfx.emitExplosion(hitPos.x, hitPos.y, hitPos.z, w.radius);
     }
     this.vfx.emitImpact(hitPos.x, hitPos.y, hitPos.z);
+  }
+
+  /**
+   * Remove a remote projectile when the authoritative server explosion arrives.
+   * Uses shooter + weapon + nearest-to-impact matching with a generous radius.
+   */
+  resolveRemoteImpact(
+    shooterId: string,
+    weaponIndex: number,
+    impactPos: { x: number; y: number; z: number },
+    radius: number,
+  ): void {
+    const maxDistSq = Math.max(25, (radius + 6) * (radius + 6));
+    let bestIdx = -1;
+    let bestDistSq = Number.POSITIVE_INFINITY;
+
+    for (let i = 0; i < this.projectiles.length; i++) {
+      const p = this.projectiles[i];
+      if (p.isLocal) continue;
+      if (p.weaponIndex !== weaponIndex) continue;
+      if (p.shooterId !== shooterId) continue;
+
+      const dx = p.pos.x - impactPos.x;
+      const dy = p.pos.y - impactPos.y;
+      const dz = p.pos.z - impactPos.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 <= maxDistSq && d2 < bestDistSq) {
+        bestDistSq = d2;
+        bestIdx = i;
+      }
+    }
+
+    if (bestIdx >= 0) this.removeProjectile(bestIdx);
   }
 
   private removeProjectile(index: number): void {

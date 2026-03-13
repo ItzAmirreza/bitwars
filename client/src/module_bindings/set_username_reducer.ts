@@ -12,4 +12,5 @@ import {
 
 export default {
   username: __t.string(),
+  characterPreset: __t.u8(),
 };

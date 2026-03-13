@@ -6,23 +6,31 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
-import CleanupShotsReducer from "../cleanup_shots_reducer";
 import DestroyBlocksPhysicsReducer from "../destroy_blocks_physics_reducer";
 import FireWeaponReducer from "../fire_weapon_reducer";
+import InteractVehicleReducer from "../interact_vehicle_reducer";
 import ProjectileImpactReducer from "../projectile_impact_reducer";
 import ReloadWeaponReducer from "../reload_weapon_reducer";
+import RequestChunksReducer from "../request_chunks_reducer";
 import RespawnReducer from "../respawn_reducer";
 import SendChatReducer from "../send_chat_reducer";
+import SetLoadoutReducer from "../set_loadout_reducer";
 import SetUsernameReducer from "../set_username_reducer";
+import SyncEntityTransformReducer from "../sync_entity_transform_reducer";
 import UpdatePositionReducer from "../update_position_reducer";
+import UpdateVehicleInputReducer from "../update_vehicle_input_reducer";
 
-export type CleanupShotsParams = __Infer<typeof CleanupShotsReducer>;
 export type DestroyBlocksPhysicsParams = __Infer<typeof DestroyBlocksPhysicsReducer>;
 export type FireWeaponParams = __Infer<typeof FireWeaponReducer>;
+export type InteractVehicleParams = __Infer<typeof InteractVehicleReducer>;
 export type ProjectileImpactParams = __Infer<typeof ProjectileImpactReducer>;
 export type ReloadWeaponParams = __Infer<typeof ReloadWeaponReducer>;
+export type RequestChunksParams = __Infer<typeof RequestChunksReducer>;
 export type RespawnParams = __Infer<typeof RespawnReducer>;
 export type SendChatParams = __Infer<typeof SendChatReducer>;
+export type SetLoadoutParams = __Infer<typeof SetLoadoutReducer>;
 export type SetUsernameParams = __Infer<typeof SetUsernameReducer>;
+export type SyncEntityTransformParams = __Infer<typeof SyncEntityTransformReducer>;
 export type UpdatePositionParams = __Infer<typeof UpdatePositionReducer>;
+export type UpdateVehicleInputParams = __Infer<typeof UpdateVehicleInputReducer>;
 

@@ -15,9 +15,10 @@
   --c-red: #ff0033;
   --c-red-dim: #cc0029;
   --c-blue: #00aaff;
-  --c-text: #c8d0d8;
-  --c-muted: #4a5568;
-  --c-muted2: #2d3748;
+  --c-cyan: #00e5ff;
+  --c-text: #d4dce6;
+  --c-muted: #6b7a8d;
+  --c-muted2: #3d4d60;
 
   --font-pixel: 'Press Start 2P', monospace;
   --font-mono: 'Share Tech Mono', monospace;
@@ -97,8 +98,8 @@ body {
 .corner-brackets::after {
   content: '';
   position: absolute;
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   border-color: var(--c-green);
   pointer-events: none;
 }
@@ -136,7 +137,7 @@ body {
   51%, 100% { opacity: 0; }
 }
 .cursor-blink::after {
-  content: '█';
+  content: '\2588';
   animation: blink-cursor 1s infinite;
   color: var(--c-green);
   margin-left: 2px;
@@ -202,12 +203,13 @@ body {
   50% { box-shadow: 0 0 0 4px rgba(0, 255, 65, 0); }
 }
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--c-green);
   animation: status-pulse 2s infinite;
   display: inline-block;
+  flex-shrink: 0;
 }
 
 /* ═══ HORIZONTAL RULE ═══ */
@@ -220,21 +222,23 @@ body {
 /* ═══ INPUT STYLES ═══ */
 .input-tactical {
   background: var(--c-surface);
-  border: 1px solid var(--c-border);
+  border: 1px solid var(--c-border-bright);
   color: var(--c-green);
   font-family: var(--font-mono);
-  padding: 12px 16px;
+  padding: 14px 18px;
   outline: none;
   transition: all 0.2s ease;
   letter-spacing: 0.05em;
+  font-size: 16px;
 }
 .input-tactical:focus {
   border-color: var(--c-green-dim);
-  box-shadow: 0 0 20px rgba(0, 255, 65, 0.1), inset 0 0 20px rgba(0, 255, 65, 0.03);
+  box-shadow: 0 0 24px rgba(0, 255, 65, 0.12), inset 0 0 20px rgba(0, 255, 65, 0.04);
 }
 .input-tactical::placeholder {
   color: var(--c-muted);
   font-family: var(--font-mono);
+  font-size: 14px;
 }
 
 /* ═══ BUTTON STYLES ═══ */
@@ -246,11 +250,12 @@ body {
   font-weight: 700;
   letter-spacing: 0.15em;
   text-transform: uppercase;
-  padding: 14px 32px;
+  padding: 16px 36px;
   cursor: pointer;
   position: relative;
   overflow: hidden;
   transition: all 0.2s ease;
+  font-size: 16px;
 }
 .btn-primary::before {
   content: '';
@@ -264,6 +269,7 @@ body {
 .btn-primary:hover {
   color: var(--c-bg);
   text-shadow: none;
+  box-shadow: 0 0 30px rgba(0, 255, 65, 0.3), 0 0 60px rgba(0, 255, 65, 0.1);
 }
 .btn-primary:hover::before {
   opacity: 1;
@@ -274,15 +280,16 @@ body {
 
 .btn-ghost {
   background: transparent;
-  border: 1px solid var(--c-border);
+  border: 1px solid var(--c-border-bright);
   color: var(--c-muted);
   font-family: var(--font-ui);
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  padding: 12px 24px;
+  padding: 14px 28px;
   cursor: pointer;
   transition: all 0.2s ease;
+  font-size: 14px;
 }
 .btn-ghost:hover {
   border-color: var(--c-amber);
@@ -293,3 +300,215 @@ body {
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: var(--c-bg); }
 ::-webkit-scrollbar-thumb { background: var(--c-border-bright); }
+
+/* ═══ FLOATING PARTICLES ═══ */
+@keyframes particle-float {
+  0% { transform: translateY(100vh) translateX(0) scale(0); opacity: 0; }
+  10% { opacity: 1; scale: 1; }
+  90% { opacity: 0.6; }
+  100% { transform: translateY(-20vh) translateX(40px) scale(0.5); opacity: 0; }
+}
+
+@keyframes particle-float-reverse {
+  0% { transform: translateY(100vh) translateX(0) scale(0); opacity: 0; }
+  10% { opacity: 0.8; }
+  90% { opacity: 0.3; }
+  100% { transform: translateY(-20vh) translateX(-30px) scale(0.3); opacity: 0; }
+}
+
+.particle-field {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.particle-field .p {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--c-green);
+  opacity: 0;
+}
+
+/* ═══ HEX GRID BACKGROUND ═══ */
+@keyframes hex-pulse {
+  0%, 100% { opacity: 0.02; }
+  50% { opacity: 0.06; }
+}
+
+.hex-bg {
+  background-image:
+    radial-gradient(circle at 50% 50%, rgba(0, 255, 65, 0.04) 0%, transparent 60%),
+    linear-gradient(rgba(0, 255, 65, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 65, 0.02) 1px, transparent 1px);
+  background-size: 100% 100%, 40px 40px, 40px 40px;
+}
+
+/* ═══ TITLE GLOW ANIMATION ═══ */
+@keyframes title-glow {
+  0%, 100% {
+    text-shadow: 0 0 10px var(--c-green), 0 0 30px rgba(0, 255, 65, 0.3), 0 0 60px rgba(0, 255, 65, 0.1);
+    filter: brightness(1);
+  }
+  50% {
+    text-shadow: 0 0 20px var(--c-green), 0 0 50px rgba(0, 255, 65, 0.5), 0 0 100px rgba(0, 255, 65, 0.2);
+    filter: brightness(1.1);
+  }
+}
+
+.title-glow {
+  animation: title-glow 3s ease-in-out infinite;
+}
+
+/* ═══ GRADIENT LINE ANIMATION ═══ */
+@keyframes gradient-slide {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.gradient-line {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--c-green), var(--c-cyan), var(--c-green), transparent);
+  background-size: 200% 100%;
+  animation: gradient-slide 4s linear infinite;
+}
+
+/* ═══ BREATH ANIMATION ═══ */
+@keyframes breath {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.05); }
+}
+
+.anim-breath {
+  animation: breath 4s ease-in-out infinite;
+}
+
+/* ═══ SCALE IN ═══ */
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.anim-scale-in {
+  animation: scale-in 0.4s ease-out both;
+}
+
+/* ═══ SHIMMER BORDER ═══ */
+@keyframes shimmer-border {
+  0% { border-color: var(--c-border); }
+  50% { border-color: var(--c-green-dim); }
+  100% { border-color: var(--c-border); }
+}
+
+/* ═══ RADAR SWEEP ═══ */
+@keyframes radar-sweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ═══ FOCUS RING ON INTERACTIVE ELEMENTS ═══ */
+.interactive-glow {
+  transition: all 0.2s ease;
+}
+.interactive-glow:hover {
+  box-shadow: 0 0 20px rgba(0, 255, 65, 0.15);
+  border-color: var(--c-green-dim) !important;
+}
+
+/* ═══ LOADING BAR ═══ */
+@keyframes loading-bar {
+  0% { width: 0%; }
+  20% { width: 15%; }
+  50% { width: 45%; }
+  80% { width: 80%; }
+  100% { width: 100%; }
+}
+
+.loading-bar {
+  height: 3px;
+  background: linear-gradient(90deg, var(--c-green), var(--c-cyan));
+  animation: loading-bar 3s ease-out forwards;
+  box-shadow: 0 0 12px var(--c-green);
+}
+
+/* ═══ DATA STREAM ═══ */
+@keyframes data-stream {
+  0% { transform: translateY(-100%); opacity: 0; }
+  10% { opacity: 0.3; }
+  90% { opacity: 0.1; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+
+/* ═══ IN-GAME HUD ANIMATIONS ═══ */
+
+/* Low health screen pulse */
+@keyframes low-hp-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* Critical HP flashing number */
+@keyframes hud-critical-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Low ammo warning pulse */
+@keyframes hud-ammo-warn {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Low HP border pulse */
+@keyframes hud-low-hp-border {
+  0%, 100% { border-color: var(--c-red); }
+  50% { border-color: rgba(255, 0, 51, 0.3); }
+}
+
+/* Hit marker flash and scale */
+@keyframes hitmarker-flash {
+  0% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.9; }
+}
+
+/* Death screen fade in */
+@keyframes death-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Death text drop in */
+@keyframes death-text-in {
+  0% { transform: scale(1.5) translateY(-20px); opacity: 0; }
+  60% { transform: scale(0.95) translateY(2px); opacity: 1; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* Kill notification slide in from right (CS:GO style kill feed) */
+@keyframes kill-notif-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* HUD button hover glow */
+.hud-btn {
+  transition: all 0.15s ease;
+}
+.hud-btn:hover {
+  background: rgba(6,8,16,0.8) !important;
+}
+
+/* Loadout weapon card hover effect */
+.loadout-weapon-card {
+  transition: all 0.15s ease;
+}
+.loadout-weapon-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3), inset 0 0 20px rgba(102,224,255,0.04);
+}
+
+/* Weapon silhouette glow pulse for active weapon */
+@keyframes weapon-silhouette-pulse {
+  0%, 100% { filter: drop-shadow(0 0 3px currentColor); }
+  50% { filter: drop-shadow(0 0 8px currentColor); }
+}

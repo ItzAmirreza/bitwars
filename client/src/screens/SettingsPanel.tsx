@@ -1,5 +1,6 @@
 import { useGameStore } from '../store';
 import type { GameSettings } from '../store';
+import { menuAudio } from '../menuAudio';
 
 function Slider({
   label,
@@ -30,7 +31,7 @@ function Slider({
         <span
           style={{
             fontFamily: 'var(--font-mono)',
-            fontSize: '10px',
+            fontSize: '12px',
             color: 'var(--c-muted)',
             letterSpacing: '0.1em',
           }}
@@ -40,7 +41,7 @@ function Slider({
         <span
           style={{
             fontFamily: 'var(--font-mono)',
-            fontSize: '10px',
+            fontSize: '12px',
             color: 'var(--c-green)',
           }}
         >
@@ -85,7 +86,7 @@ function Toggle({
       <span
         style={{
           fontFamily: 'var(--font-mono)',
-          fontSize: '10px',
+          fontSize: '12px',
           color: 'var(--c-muted)',
           letterSpacing: '0.1em',
         }}
@@ -93,11 +94,14 @@ function Toggle({
         {label}
       </span>
       <button
-        onClick={() => onChange(!value)}
+        onClick={() => {
+          onChange(!value);
+          menuAudio.playUIClick();
+        }}
         style={{
           fontFamily: 'var(--font-mono)',
-          fontSize: '10px',
-          padding: '2px 12px',
+          fontSize: '12px',
+          padding: '4px 14px',
           background: value ? 'rgba(0,255,65,0.15)' : 'rgba(255,255,255,0.05)',
           border: `1px solid ${value ? 'var(--c-green)' : 'var(--c-border)'}`,
           color: value ? 'var(--c-green)' : 'var(--c-muted)',
@@ -132,7 +136,7 @@ function QualitySelect({
       <span
         style={{
           fontFamily: 'var(--font-mono)',
-          fontSize: '10px',
+          fontSize: '12px',
           color: 'var(--c-muted)',
           letterSpacing: '0.1em',
         }}
@@ -143,11 +147,14 @@ function QualitySelect({
         {options.map((opt) => (
           <button
             key={opt}
-            onClick={() => onChange(opt)}
+            onClick={() => {
+              onChange(opt);
+              menuAudio.playUIClick();
+            }}
             style={{
               fontFamily: 'var(--font-mono)',
-              fontSize: '9px',
-              padding: '2px 10px',
+              fontSize: '11px',
+              padding: '4px 12px',
               background:
                 value === opt
                   ? 'rgba(0,255,65,0.15)'
@@ -178,11 +185,11 @@ export function SettingsPanel() {
 
   const sectionTitleStyle = {
     fontFamily: 'var(--font-mono)' as const,
-    fontSize: '11px',
+    fontSize: '13px',
     color: 'var(--c-amber)',
     letterSpacing: '0.15em',
-    marginBottom: '10px',
-    paddingBottom: '4px',
+    marginBottom: '12px',
+    paddingBottom: '6px',
     borderBottom: '1px solid var(--c-border)',
   };
 
@@ -195,13 +202,13 @@ export function SettingsPanel() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'rgba(6,8,16,0.8)',
-        backdropFilter: 'blur(6px)',
+        background: 'rgba(6,8,16,0.85)',
+        backdropFilter: 'blur(12px)',
       }}
     >
       <div
         style={{
-          width: '380px',
+          width: 'min(420px, calc(100vw - 32px))',
           maxHeight: '80vh',
           overflowY: 'auto',
           background: 'rgba(10,12,20,0.95)',
@@ -230,14 +237,17 @@ export function SettingsPanel() {
             SETTINGS
           </span>
           <button
-            onClick={() => setShowSettings(false)}
+            onClick={() => {
+              setShowSettings(false);
+              menuAudio.playUIClick();
+            }}
             style={{
               fontFamily: 'var(--font-mono)',
-              fontSize: '14px',
+              fontSize: '16px',
               color: 'var(--c-muted)',
               background: 'none',
               border: '1px solid var(--c-border)',
-              padding: '2px 8px',
+              padding: '4px 10px',
               cursor: 'pointer',
               transition: 'all 0.15s',
             }}
@@ -317,15 +327,18 @@ export function SettingsPanel() {
 
         {/* Reset */}
         <button
-          onClick={resetSettings}
+          onClick={() => {
+            resetSettings();
+            menuAudio.playUINavigate();
+          }}
           style={{
             width: '100%',
             fontFamily: 'var(--font-mono)',
-            fontSize: '10px',
+            fontSize: '12px',
             color: 'var(--c-muted)',
             background: 'rgba(255,255,255,0.03)',
             border: '1px solid var(--c-border)',
-            padding: '8px',
+            padding: '10px',
             cursor: 'pointer',
             letterSpacing: '0.15em',
             transition: 'all 0.15s',

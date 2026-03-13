@@ -10,20 +10,9 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-import {
-  Vec3,
-  Rotation,
-} from "./types";
-
-export default {
-  get pos() {
-    return Vec3;
-  },
-  get vel() {
-    return Vec3;
-  },
-  get rot() {
-    return Rotation;
-  },
-  weapon: __t.u8(),
-};
+export default __t.row({
+  id: __t.u32().primaryKey(),
+  seed: __t.u64(),
+  roundNumber: __t.u32().name("round_number"),
+  roundStart: __t.timestamp().name("round_start"),
+});

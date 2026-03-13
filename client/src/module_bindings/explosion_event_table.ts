@@ -9,21 +9,22 @@ import {
   type AlgebraicTypeType as __AlgebraicTypeType,
   type Infer as __Infer,
 } from "spacetimedb";
-
 import {
   Vec3,
-  Rotation,
+  DestroyedBlock,
 } from "./types";
 
-export default {
+
+export default __t.row({
+  id: __t.u64().primaryKey(),
+  origin: __t.identity(),
   get pos() {
     return Vec3;
   },
-  get vel() {
-    return Vec3;
-  },
-  get rot() {
-    return Rotation;
-  },
+  radius: __t.f32(),
   weapon: __t.u8(),
-};
+  get destroyedBlocks() {
+    return __t.array(DestroyedBlock).name("destroyed_blocks");
+  },
+  createdAt: __t.timestamp().name("created_at"),
+});

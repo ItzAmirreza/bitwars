@@ -146,8 +146,12 @@ export class VFX {
 
     for (let i = 0; i < count && this.particles.length < MAX_PARTICLES; i++) {
       const theta = Math.random() * Math.PI * 2;
-      const phi = Math.random() * Math.PI;
-      const speed = (1.5 + Math.random() * 5) * (radius / 2.5);
+      const u = Math.random() * 2 - 1;
+      const ring = Math.sqrt(Math.max(0, 1 - u * u));
+      const dirX = Math.cos(theta) * ring;
+      const dirY = u;
+      const dirZ = Math.sin(theta) * ring;
+      const speed = (1.8 + Math.random() * 4.8) * (0.75 + radius * 0.28);
 
       const isFire = Math.random() > 0.25;
       let r: number, g: number, b: number;
@@ -161,13 +165,15 @@ export class VFX {
         r = v; g = v; b = v;
       }
 
+      const buoyancy = (isFire ? 0.25 : 0.12) * radius;
+
       this.particles.push({
         x: x + 0.5 + (Math.random() - 0.5) * 0.5,
         y: y + 0.5 + (Math.random() - 0.5) * 0.5,
         z: z + 0.5 + (Math.random() - 0.5) * 0.5,
-        vx: Math.sin(phi) * Math.cos(theta) * speed,
-        vy: Math.abs(Math.sin(phi) * Math.sin(theta)) * speed + 1.5,
-        vz: Math.cos(phi) * speed,
+        vx: dirX * speed,
+        vy: dirY * speed + buoyancy,
+        vz: dirZ * speed,
         r, g, b,
         life: 0,
         maxLife: 0.3 + Math.random() * 0.7,

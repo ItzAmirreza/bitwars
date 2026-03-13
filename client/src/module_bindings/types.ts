@@ -19,6 +19,14 @@ export const ChatMessage = __t.object("ChatMessage", {
 });
 export type ChatMessage = __Infer<typeof ChatMessage>;
 
+export const DestroyedBlock = __t.object("DestroyedBlock", {
+  x: __t.f32(),
+  y: __t.f32(),
+  z: __t.f32(),
+  blockType: __t.u8(),
+});
+export type DestroyedBlock = __Infer<typeof DestroyedBlock>;
+
 export const DetachCleanup = __t.object("DetachCleanup", {
   scheduledId: __t.u64(),
   scheduledAt: __t.scheduleAt(),
@@ -31,9 +39,50 @@ export const DetachEvent = __t.object("DetachEvent", {
   blocksY: __t.array(__t.i32()),
   blocksZ: __t.array(__t.i32()),
   blockTypes: __t.byteArray(),
+  motionMode: __t.u8(),
+  get pivot() {
+    return Vec3;
+  },
+  get axis() {
+    return Vec3;
+  },
+  get drift() {
+    return Vec3;
+  },
+  get fractureOrigin() {
+    return Vec3;
+  },
+  get fractureDir() {
+    return Vec3;
+  },
+  angAccel: __t.f32(),
+  initialAngVel: __t.f32(),
+  gravityScale: __t.f32(),
+  fractureSpeed: __t.f32(),
+  lifetimeMs: __t.u32(),
   createdAt: __t.timestamp(),
 });
 export type DetachEvent = __Infer<typeof DetachEvent>;
+
+export const Entity = __t.object("Entity", {
+  id: __t.u64(),
+  kind: __t.u8(),
+  subtype: __t.u8(),
+  get pos() {
+    return Vec3;
+  },
+  get vel() {
+    return Vec3;
+  },
+  get rot() {
+    return Rotation;
+  },
+  scale: __t.f32(),
+  active: __t.bool(),
+  createdAt: __t.timestamp(),
+  updatedAt: __t.timestamp(),
+});
+export type Entity = __Infer<typeof Entity>;
 
 export const EnvironmentTick = __t.object("EnvironmentTick", {
   scheduledId: __t.u64(),
@@ -41,10 +90,42 @@ export const EnvironmentTick = __t.object("EnvironmentTick", {
 });
 export type EnvironmentTick = __Infer<typeof EnvironmentTick>;
 
+export const ExplosionEvent = __t.object("ExplosionEvent", {
+  id: __t.u64(),
+  origin: __t.identity(),
+  get pos() {
+    return Vec3;
+  },
+  radius: __t.f32(),
+  weapon: __t.u8(),
+  get destroyedBlocks() {
+    return __t.array(DestroyedBlock);
+  },
+  createdAt: __t.timestamp(),
+});
+export type ExplosionEvent = __Infer<typeof ExplosionEvent>;
+
+export const HealthRegenTick = __t.object("HealthRegenTick", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type HealthRegenTick = __Infer<typeof HealthRegenTick>;
+
+export const MapResetTimer = __t.object("MapResetTimer", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type MapResetTimer = __Infer<typeof MapResetTimer>;
+
 export const Player = __t.object("Player", {
   identity: __t.identity(),
+  entityId: __t.u64(),
   username: __t.string(),
+  characterPreset: __t.u8(),
   get pos() {
+    return Vec3;
+  },
+  get vel() {
     return Vec3;
   },
   get rot() {
@@ -55,10 +136,22 @@ export const Player = __t.object("Player", {
   currentWeapon: __t.u8(),
   kills: __t.u32(),
   deaths: __t.u32(),
+  spawnProtected: __t.bool(),
   online: __t.bool(),
+  mountedVehicleId: __t.u64(),
   joinedAt: __t.timestamp(),
+  lastDamageTime: __t.timestamp(),
 });
 export type Player = __Infer<typeof Player>;
+
+export const PlayerLoadout = __t.object("PlayerLoadout", {
+  username: __t.string(),
+  slot1: __t.u8(),
+  slot2: __t.u8(),
+  slot3: __t.u8(),
+  updatedAt: __t.timestamp(),
+});
+export type PlayerLoadout = __Infer<typeof PlayerLoadout>;
 
 export const PlayerMovementState = __t.object("PlayerMovementState", {
   identity: __t.identity(),
@@ -75,6 +168,8 @@ export const PlayerWeaponState = __t.object("PlayerWeaponState", {
   ammoRifle: __t.i32(),
   ammoShotgun: __t.i32(),
   ammoRpg: __t.i32(),
+  ammoMachineGun: __t.i32(),
+  ammoGrenade: __t.i32(),
   lastFireTime: __t.timestamp(),
 });
 export type PlayerWeaponState = __Infer<typeof PlayerWeaponState>;
@@ -85,6 +180,12 @@ export const Rotation = __t.object("Rotation", {
 });
 export type Rotation = __Infer<typeof Rotation>;
 
+export const ShotCleanup = __t.object("ShotCleanup", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type ShotCleanup = __Infer<typeof ShotCleanup>;
+
 export const ShotEvent = __t.object("ShotEvent", {
   id: __t.u64(),
   shooter: __t.identity(),
@@ -94,6 +195,10 @@ export const ShotEvent = __t.object("ShotEvent", {
   get direction() {
     return Vec3;
   },
+  get hitPos() {
+    return Vec3;
+  },
+  hasHit: __t.bool(),
   weapon: __t.u8(),
   firedAt: __t.timestamp(),
 });
@@ -106,6 +211,29 @@ export const Vec3 = __t.object("Vec3", {
 });
 export type Vec3 = __Infer<typeof Vec3>;
 
+export const Vehicle = __t.object("Vehicle", {
+  entityId: __t.u64(),
+  vehicleType: __t.u8(),
+  pilotIdentity: __t.option(__t.identity()),
+  seatCount: __t.u8(),
+  inputForward: __t.f32(),
+  inputStrafe: __t.f32(),
+  inputLift: __t.f32(),
+  inputYaw: __t.f32(),
+  boosting: __t.bool(),
+  rotorSpin: __t.f32(),
+  health: __t.i32(),
+  createdAt: __t.timestamp(),
+  lastInputAt: __t.timestamp(),
+});
+export type Vehicle = __Infer<typeof Vehicle>;
+
+export const VehicleTick = __t.object("VehicleTick", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type VehicleTick = __Infer<typeof VehicleTick>;
+
 export const WorldChunk = __t.object("WorldChunk", {
   chunkId: __t.u32(),
   cx: __t.u8(),
@@ -115,6 +243,14 @@ export const WorldChunk = __t.object("WorldChunk", {
   version: __t.u64(),
 });
 export type WorldChunk = __Infer<typeof WorldChunk>;
+
+export const WorldConfig = __t.object("WorldConfig", {
+  id: __t.u32(),
+  seed: __t.u64(),
+  roundNumber: __t.u32(),
+  roundStart: __t.timestamp(),
+});
+export type WorldConfig = __Infer<typeof WorldConfig>;
 
 export const WorldEnvironment = __t.object("WorldEnvironment", {
   id: __t.u32(),
