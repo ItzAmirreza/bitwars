@@ -17,6 +17,8 @@ export class FPSControls {
   moveBackward = false;
   moveLeft = false;
   moveRight = false;
+  qPressed = false;
+  ePressed = false;
   isJumping = false;
   onGround = false;
 
@@ -190,6 +192,8 @@ export class FPSControls {
     this.moveBackward = false;
     this.moveLeft = false;
     this.moveRight = false;
+    this.qPressed = false;
+    this.ePressed = false;
     this.shiftDown = false;
     this.ctrlDown = false;
     this.spaceHeld = false;
@@ -230,6 +234,8 @@ export class FPSControls {
       case 'KeyS': case 'ArrowDown': this.moveBackward = true; break;
       case 'KeyA': case 'ArrowLeft': this.moveLeft = true; break;
       case 'KeyD': case 'ArrowRight': this.moveRight = true; break;
+      case 'KeyQ': this.qPressed = true; break;
+      case 'KeyE': this.ePressed = true; break;
       case 'ShiftLeft': case 'ShiftRight':
         if (this.sprintToggleSetting) {
           this.sprintToggleActive = !this.sprintToggleActive;
@@ -272,6 +278,8 @@ export class FPSControls {
       case 'KeyS': case 'ArrowDown': this.moveBackward = false; break;
       case 'KeyA': case 'ArrowLeft': this.moveLeft = false; break;
       case 'KeyD': case 'ArrowRight': this.moveRight = false; break;
+      case 'KeyQ': this.qPressed = false; break;
+      case 'KeyE': this.ePressed = false; break;
       case 'ShiftLeft': case 'ShiftRight':
         if (!this.sprintToggleSetting) this.shiftDown = false;
         break;

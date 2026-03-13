@@ -7,30 +7,38 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import DestroyBlocksPhysicsReducer from "../destroy_blocks_physics_reducer";
+import FireVehicleWeaponReducer from "../fire_vehicle_weapon_reducer";
 import FireWeaponReducer from "../fire_weapon_reducer";
 import InteractVehicleReducer from "../interact_vehicle_reducer";
 import ProjectileImpactReducer from "../projectile_impact_reducer";
+import ReloadVehicleWeaponReducer from "../reload_vehicle_weapon_reducer";
 import ReloadWeaponReducer from "../reload_weapon_reducer";
 import RequestChunksReducer from "../request_chunks_reducer";
 import RespawnReducer from "../respawn_reducer";
 import SendChatReducer from "../send_chat_reducer";
 import SetLoadoutReducer from "../set_loadout_reducer";
 import SetUsernameReducer from "../set_username_reducer";
+import SwitchVehicleWeaponReducer from "../switch_vehicle_weapon_reducer";
 import SyncEntityTransformReducer from "../sync_entity_transform_reducer";
 import UpdatePositionReducer from "../update_position_reducer";
 import UpdateVehicleInputReducer from "../update_vehicle_input_reducer";
+import VehicleProjectileImpactReducer from "../vehicle_projectile_impact_reducer";
 
 export type DestroyBlocksPhysicsParams = __Infer<typeof DestroyBlocksPhysicsReducer>;
+export type FireVehicleWeaponParams = __Infer<typeof FireVehicleWeaponReducer>;
 export type FireWeaponParams = __Infer<typeof FireWeaponReducer>;
 export type InteractVehicleParams = __Infer<typeof InteractVehicleReducer>;
 export type ProjectileImpactParams = __Infer<typeof ProjectileImpactReducer>;
+export type ReloadVehicleWeaponParams = __Infer<typeof ReloadVehicleWeaponReducer>;
 export type ReloadWeaponParams = __Infer<typeof ReloadWeaponReducer>;
 export type RequestChunksParams = __Infer<typeof RequestChunksReducer>;
 export type RespawnParams = __Infer<typeof RespawnReducer>;
 export type SendChatParams = __Infer<typeof SendChatReducer>;
 export type SetLoadoutParams = __Infer<typeof SetLoadoutReducer>;
 export type SetUsernameParams = __Infer<typeof SetUsernameReducer>;
+export type SwitchVehicleWeaponParams = __Infer<typeof SwitchVehicleWeaponReducer>;
 export type SyncEntityTransformParams = __Infer<typeof SyncEntityTransformReducer>;
 export type UpdatePositionParams = __Infer<typeof UpdatePositionReducer>;
 export type UpdateVehicleInputParams = __Infer<typeof UpdateVehicleInputReducer>;
+export type VehicleProjectileImpactParams = __Infer<typeof VehicleProjectileImpactReducer>;
 

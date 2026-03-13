@@ -105,6 +105,26 @@ export const ExplosionEvent = __t.object("ExplosionEvent", {
 });
 export type ExplosionEvent = __Infer<typeof ExplosionEvent>;
 
+export const GrenadeProjectile = __t.object("GrenadeProjectile", {
+  id: __t.u64(),
+  owner: __t.identity(),
+  get pos() {
+    return Vec3;
+  },
+  get vel() {
+    return Vec3;
+  },
+  fuseRemainingMs: __t.u32(),
+  createdAt: __t.timestamp(),
+});
+export type GrenadeProjectile = __Infer<typeof GrenadeProjectile>;
+
+export const GrenadeTick = __t.object("GrenadeTick", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type GrenadeTick = __Infer<typeof GrenadeTick>;
+
 export const HealthRegenTick = __t.object("HealthRegenTick", {
   scheduledId: __t.u64(),
   scheduledAt: __t.scheduleAt(),
@@ -200,6 +220,7 @@ export const ShotEvent = __t.object("ShotEvent", {
   },
   hasHit: __t.bool(),
   weapon: __t.u8(),
+  sourceVehicle: __t.u64(),
   firedAt: __t.timestamp(),
 });
 export type ShotEvent = __Infer<typeof ShotEvent>;
@@ -223,10 +244,28 @@ export const Vehicle = __t.object("Vehicle", {
   boosting: __t.bool(),
   rotorSpin: __t.f32(),
   health: __t.i32(),
+  weaponType: __t.u8(),
+  weaponAmmoPrimary: __t.i32(),
+  weaponAmmoSecondary: __t.i32(),
+  weaponLastFire: __t.timestamp(),
   createdAt: __t.timestamp(),
   lastInputAt: __t.timestamp(),
 });
 export type Vehicle = __Infer<typeof Vehicle>;
+
+export const VehicleDestroyEvent = __t.object("VehicleDestroyEvent", {
+  id: __t.u64(),
+  entityId: __t.u64(),
+  vehicleType: __t.u8(),
+  get pos() {
+    return Vec3;
+  },
+  get rot() {
+    return Rotation;
+  },
+  createdAt: __t.timestamp(),
+});
+export type VehicleDestroyEvent = __Infer<typeof VehicleDestroyEvent>;
 
 export const VehicleTick = __t.object("VehicleTick", {
   scheduledId: __t.u64(),

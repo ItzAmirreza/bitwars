@@ -22,6 +22,7 @@ export const BlockType = {
   Wood: 11,
   Stone: 12,
   Snow: 13,
+  Lantern: 14,
 } as const;
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
 
@@ -39,7 +40,29 @@ export const BLOCK_COLORS: Record<number, number> = {
   [BlockType.Wood]: 0x6b4423,
   [BlockType.Stone]: 0x6a6a6a,
   [BlockType.Snow]: 0xd8d8e0,
+  [BlockType.Lantern]: 0xffcf78,
 };
+
+const LANTERN_NEAR_BOOST_OFFSETS: Array<[number, number, number]> = [
+  [1, 0, 0],
+  [-1, 0, 0],
+  [0, 1, 0],
+  [0, -1, 0],
+  [0, 0, 1],
+  [0, 0, -1],
+  [1, 1, 0],
+  [1, -1, 0],
+  [-1, 1, 0],
+  [-1, -1, 0],
+  [1, 0, 1],
+  [1, 0, -1],
+  [-1, 0, 1],
+  [-1, 0, -1],
+  [0, 1, 1],
+  [0, 1, -1],
+  [0, -1, 1],
+  [0, -1, -1],
+];
 
 // ── Noise helpers ──
 
@@ -291,18 +314,31 @@ export class VoxelWorld {
           if (b === 0) continue;
           c.setHex(BLOCK_COLORS[b] || 0x808080);
 
+          if (b === BlockType.Lantern) {
+            c.multiplyScalar(1.45);
+            c.r = Math.min(1, c.r + 0.2);
+            c.g = Math.min(1, c.g + 0.12);
+          } else {
+            const nearBoost = lanternNeighborBoost(gb, x, y, z);
+            if (nearBoost > 1) {
+              c.multiplyScalar(nearBoost);
+              c.r = Math.min(1, c.r + 0.02 * (nearBoost - 1) * 10);
+              c.g = Math.min(1, c.g + 0.015 * (nearBoost - 1) * 10);
+            }
+          }
+
           // Subtle per-block color variation for gritty feel
           const variation = (hash2d(x * 7 + y, z * 13 + y) - 0.5) * 0.06;
           c.r = Math.max(0, Math.min(1, c.r + variation));
           c.g = Math.max(0, Math.min(1, c.g + variation));
           c.b = Math.max(0, Math.min(1, c.b + variation));
 
-          if (gb(x + 1, y, z) === 0) addFace(pos, nrm, col, c, x + 1, y, z, 0, computeFaceAO(gb, x, y, z, 0));
-          if (gb(x - 1, y, z) === 0) addFace(pos, nrm, col, c, x, y, z, 1, computeFaceAO(gb, x, y, z, 1));
-          if (gb(x, y + 1, z) === 0) addFace(pos, nrm, col, c, x, y + 1, z, 2, computeFaceAO(gb, x, y, z, 2));
-          if (gb(x, y - 1, z) === 0) addFace(pos, nrm, col, c, x, y, z, 3, computeFaceAO(gb, x, y, z, 3));
-          if (gb(x, y, z + 1) === 0) addFace(pos, nrm, col, c, x, y, z + 1, 4, computeFaceAO(gb, x, y, z, 4));
-          if (gb(x, y, z - 1) === 0) addFace(pos, nrm, col, c, x, y, z, 5, computeFaceAO(gb, x, y, z, 5));
+          if (gb(x + 1, y, z) === 0) addFace(pos, nrm, col, c, x + 1, y, z, 0, computeFaceAO(gb, x, y, z, 0), b);
+          if (gb(x - 1, y, z) === 0) addFace(pos, nrm, col, c, x, y, z, 1, computeFaceAO(gb, x, y, z, 1), b);
+          if (gb(x, y + 1, z) === 0) addFace(pos, nrm, col, c, x, y + 1, z, 2, computeFaceAO(gb, x, y, z, 2), b);
+          if (gb(x, y - 1, z) === 0) addFace(pos, nrm, col, c, x, y, z, 3, computeFaceAO(gb, x, y, z, 3), b);
+          if (gb(x, y, z + 1) === 0) addFace(pos, nrm, col, c, x, y, z + 1, 4, computeFaceAO(gb, x, y, z, 4), b);
+          if (gb(x, y, z - 1) === 0) addFace(pos, nrm, col, c, x, y, z, 5, computeFaceAO(gb, x, y, z, 5), b);
         }
       }
     }
@@ -383,10 +419,35 @@ function computeFaceAO(
   return ao;
 }
 
+function lanternLocalBoost(face: number, vx: number, vy: number, vz: number): number {
+  if (face === 2) return 1.28;
+  if (face === 3) return 1.02;
+  const centerDist = Math.abs(vx - 0.5) + Math.abs(vy - 0.5) + Math.abs(vz - 0.5);
+  return centerDist < 1.2 ? 1.22 : 1.14;
+}
+
+function lanternNeighborBoost(
+  gb: (x: number, y: number, z: number) => number,
+  bx: number,
+  by: number,
+  bz: number,
+): number {
+  let score = 0;
+  for (let i = 0; i < LANTERN_NEAR_BOOST_OFFSETS.length; i++) {
+    const o = LANTERN_NEAR_BOOST_OFFSETS[i]!;
+    if (gb(bx + o[0], by + o[1], bz + o[2]) === BlockType.Lantern) score++;
+    if (score >= 2) break;
+  }
+  if (score === 0) return 1;
+  if (score === 1) return 1.14;
+  return 1.24;
+}
+
 function addFace(
   pos: number[], nrm: number[], col: number[],
   color: THREE.Color, x: number, y: number, z: number, face: number,
   ao: [number, number, number, number],
+  blockType?: number,
 ): void {
   const verts = FACE_VERTS[face];
   const n = FACE_NORMALS[face];
@@ -398,7 +459,8 @@ function addFace(
   for (let i = 0; i < 6; i++) {
     const ci = idx[i];
     const v = corners[ci];
-    const m = aoMul[ci];
+    const lanternBoost = blockType === BlockType.Lantern ? lanternLocalBoost(face, v[0], v[1], v[2]) : 1;
+    const m = Math.min(1.85, aoMul[ci] * lanternBoost);
     pos.push(x + v[0], y + v[1], z + v[2]);
     nrm.push(n[0], n[1], n[2]);
     col.push(color.r * m, color.g * m, color.b * m);

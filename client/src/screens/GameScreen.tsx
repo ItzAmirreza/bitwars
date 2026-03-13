@@ -69,7 +69,7 @@ const WEAPON_DATA = [
     damage: 12, fireRate: 1, range: 30, ammo: 24 },
   { name: 'RPG', ...TYPE_COLORS.EXPLOSIVE,
     type: 'EXPLOSIVE' as const, desc: 'Explosive rocket. Destroys terrain and players.',
-    damage: 80, fireRate: 0.5, range: 80, ammo: 12 },
+    damage: 80, fireRate: 1.0, range: 80, ammo: 12 },
   { name: 'MACHINE GUN', ...TYPE_COLORS.HITSCAN,
     type: 'HITSCAN' as const, desc: 'Rapid fire suppression. Best sustained DPS.',
     damage: 14, fireRate: 13, range: 90, ammo: 180 },
@@ -78,6 +78,12 @@ const WEAPON_DATA = [
     damage: 95, fireRate: 1.4, range: 85, ammo: 14 },
 ];
 const WEAPON_INDEXES = [0, 1, 2, 3, 4] as const;
+
+// Vehicle weapon data for HUD
+const VEHICLE_WEAPON_DATA = [
+  { name: 'MINIGUN', type: 'HITSCAN' as const, color: '#ffaa00', maxAmmo: 300, fireRate: 15, damage: 8 },
+  { name: 'ROCKETS', type: 'EXPLOSIVE' as const, color: '#ff4444', maxAmmo: 16, fireRate: 2.5, damage: 45 },
+];
 
 // Stat normalization maxima for bar display
 const STAT_MAX = { damage: 100, fireRate: 15, range: 100, ammo: 200 } as const;
@@ -478,6 +484,15 @@ export function GameScreen() {
     worldLoadProgress: 0,
     mountedVehicleName: null,
     vehicleAltitude: 0,
+    vehicleHealth: 0,
+    vehicleMaxHealth: 1000,
+    vehicleWeapon: 0,
+    vehicleWeaponName: 'MINIGUN',
+    vehicleAmmo: 0,
+    vehicleMaxAmmo: 300,
+    vehicleSpeed: 0,
+    vehicleReloading: false,
+    nearVehicle: false,
   });
 
   // ── Kill/Death tracking ──
@@ -853,7 +868,7 @@ export function GameScreen() {
         return;
       }
 
-      if (e.code === 'KeyE' && state.locked && !showSettings) {
+      if (e.code === 'KeyE' && state.locked && !showSettings && !state.mountedVehicleName) {
         e.preventDefault();
         openLoadout();
         return;
@@ -1613,7 +1628,50 @@ export function GameScreen() {
       {/* ═══ CROSSHAIR + HIT MARKER ═══ */}
       {state.locked && !chatOpen && !loadoutOpen && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-          <div className="relative" style={{ width: '32px', height: '32px' }}>
+          {state.mountedVehicleName ? (
+            /* ── Vehicle targeting reticle ── */
+            <div className="relative" style={{ width: '64px', height: '64px' }}>
+              {/* Outer circle */}
+              <svg width="64" height="64" viewBox="0 0 64 64" fill="none" style={{ position: 'absolute', top: 0, left: 0 }}>
+                <circle cx="32" cy="32" r="28" stroke={VEHICLE_WEAPON_DATA[state.vehicleWeapon]?.color ?? '#ffaa00'} strokeWidth="1" opacity="0.4" strokeDasharray="4 4"/>
+                {/* Cardinal ticks */}
+                <line x1="32" y1="2" x2="32" y2="8" stroke={VEHICLE_WEAPON_DATA[state.vehicleWeapon]?.color ?? '#ffaa00'} strokeWidth="1.5" opacity="0.7"/>
+                <line x1="32" y1="56" x2="32" y2="62" stroke={VEHICLE_WEAPON_DATA[state.vehicleWeapon]?.color ?? '#ffaa00'} strokeWidth="1.5" opacity="0.7"/>
+                <line x1="2" y1="32" x2="8" y2="32" stroke={VEHICLE_WEAPON_DATA[state.vehicleWeapon]?.color ?? '#ffaa00'} strokeWidth="1.5" opacity="0.7"/>
+                <line x1="56" y1="32" x2="62" y2="32" stroke={VEHICLE_WEAPON_DATA[state.vehicleWeapon]?.color ?? '#ffaa00'} strokeWidth="1.5" opacity="0.7"/>
+                {/* Inner circle */}
+                <circle cx="32" cy="32" r="6" stroke={VEHICLE_WEAPON_DATA[state.vehicleWeapon]?.color ?? '#ffaa00'} strokeWidth="1" opacity="0.6"/>
+                {/* Center dot */}
+                <circle cx="32" cy="32" r="1.5" fill={VEHICLE_WEAPON_DATA[state.vehicleWeapon]?.color ?? '#ffaa00'} opacity="0.9"/>
+              </svg>
+
+              {/* Hit marker — X shape, colored by hit type */}
+              {state.hitMarker && (
+                <div style={{ animation: 'hitmarker-flash 0.2s ease-out' }}>
+                  <div className="absolute top-1/2 left-1/2" style={{
+                    width: state.hitMarkerType === 'player' ? '18px' : '14px',
+                    height: '2px',
+                    background: state.hitMarkerType === 'player' ? 'var(--c-red)' : 'rgba(255,255,255,0.95)',
+                    transform: 'translate(-50%, -50%) rotate(45deg)',
+                    boxShadow: state.hitMarkerType === 'player'
+                      ? '0 0 8px var(--c-red), 0 0 16px rgba(255,0,51,0.4)'
+                      : '0 0 6px rgba(255,255,255,0.5)',
+                  }} />
+                  <div className="absolute top-1/2 left-1/2" style={{
+                    width: state.hitMarkerType === 'player' ? '18px' : '14px',
+                    height: '2px',
+                    background: state.hitMarkerType === 'player' ? 'var(--c-red)' : 'rgba(255,255,255,0.95)',
+                    transform: 'translate(-50%, -50%) rotate(-45deg)',
+                    boxShadow: state.hitMarkerType === 'player'
+                      ? '0 0 8px var(--c-red), 0 0 16px rgba(255,0,51,0.4)'
+                      : '0 0 6px rgba(255,255,255,0.5)',
+                  }} />
+                </div>
+              )}
+            </div>
+          ) : (
+            /* ── Infantry crosshair ── */
+            <div className="relative" style={{ width: '32px', height: '32px' }}>
             {/* Crosshair lines with gap */}
             {/* Top */}
             <div className="absolute left-1/2 -translate-x-1/2" style={{
@@ -1669,6 +1727,48 @@ export function GameScreen() {
                 }} />
               </div>
             )}
+          </div>
+          )}
+        </div>
+      )}
+
+      {/* Click to deploy overlay */}
+
+      {/* ═══ ENTER HELICOPTER PROMPT (near crosshair) ═══ */}
+      {state.locked && !chatOpen && !loadoutOpen && !state.mountedVehicleName && state.nearVehicle && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+          <div style={{
+            marginTop: '80px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '13px',
+            letterSpacing: '0.1em',
+            color: 'var(--c-text)',
+            textShadow: '0 0 8px rgba(0,0,0,0.8), 0 0 20px rgba(102,224,255,0.3)',
+            background: 'rgba(6,8,16,0.7)',
+            border: '1px solid rgba(102,224,255,0.3)',
+            padding: '6px 16px',
+            backdropFilter: 'blur(4px)',
+          }}>
+            <span style={{ color: 'var(--c-cyan)', fontWeight: 'bold' }}>[F]</span> ENTER HELICOPTER
+          </div>
+        </div>
+      )}
+
+      {/* ═══ EJECT PROMPT (bottom-center) ═══ */}
+      {state.locked && !chatOpen && !loadoutOpen && state.mountedVehicleName && (
+        <div className="absolute bottom-32 left-0 right-0 flex justify-center pointer-events-none z-10">
+          <div style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '12px',
+            letterSpacing: '0.12em',
+            color: 'var(--c-text)',
+            textShadow: '0 0 8px rgba(0,0,0,0.8)',
+            background: 'rgba(6,8,16,0.65)',
+            border: '1px solid rgba(102,224,255,0.25)',
+            padding: '5px 14px',
+            backdropFilter: 'blur(4px)',
+          }}>
+            <span style={{ color: 'var(--c-cyan)', fontWeight: 'bold' }}>[F]</span> EJECT
           </div>
         </div>
       )}
@@ -1981,7 +2081,8 @@ export function GameScreen() {
                 </div>
               </div>
 
-              {/* Weapon + Ammo combined panel with silhouette */}
+              {/* Weapon + Ammo combined panel with silhouette (infantry only) */}
+              {!state.mountedVehicleName && (
               <div style={{
                 background: 'rgba(6,8,16,0.85)',
                 border: '1px solid var(--c-border)',
@@ -2102,6 +2203,7 @@ export function GameScreen() {
                   }} />
                 </div>
               </div>
+              )}
             </div>
 
             {/* ── RIGHT PANEL: K/D + Weapon Slots ── */}
@@ -2183,61 +2285,179 @@ export function GameScreen() {
                 </div>
               </div>
 
-              {state.mountedVehicleName && (
-                <div style={{
-                  background: 'rgba(8,18,26,0.86)',
-                  border: '1px solid rgba(102,224,255,0.32)',
-                  borderRight: '3px solid var(--c-cyan)',
-                  backdropFilter: 'blur(8px)',
-                  padding: '8px 14px',
-                  minWidth: '220px',
-                }}>
-                  <div style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '9px',
-                    color: 'var(--c-muted)',
-                    letterSpacing: '0.14em',
-                    marginBottom: '3px',
-                  }}>
-                    PILOTING
-                  </div>
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'baseline',
-                    gap: '10px',
-                  }}>
-                    <span style={{
-                      fontFamily: 'var(--font-ui)',
-                      fontSize: '14px',
-                      fontWeight: 700,
-                      color: 'var(--c-cyan)',
-                      letterSpacing: '0.08em',
-                      textShadow: '0 0 10px rgba(102,224,255,0.35)',
-                    }}>
-                      {state.mountedVehicleName.toUpperCase()}
-                    </span>
-                    <span style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '12px',
-                      color: 'var(--c-text)',
-                    }}>
-                      ALT {Math.round(state.vehicleAltitude)}m
-                    </span>
-                  </div>
-                  <div style={{
-                    marginTop: '6px',
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '9px',
-                    color: 'var(--c-muted2)',
-                    letterSpacing: '0.1em',
-                  }}>
-                    [SPACE/SHIFT] LIFT  [WASD] STRAFE  [F] EXIT
-                  </div>
-                </div>
-              )}
+              {state.mountedVehicleName && (() => {
+                const vw = VEHICLE_WEAPON_DATA[state.vehicleWeapon] ?? VEHICLE_WEAPON_DATA[0];
+                const vHealthPct = state.vehicleMaxHealth > 0 ? (state.vehicleHealth / state.vehicleMaxHealth) * 100 : 0;
+                const vHealthColor = vHealthPct > 50 ? '#66e0ff' : vHealthPct > 25 ? '#ff9800' : '#ff0033';
+                const vAmmoPct = vw.maxAmmo > 0 ? (state.vehicleAmmo / vw.maxAmmo) * 100 : 0;
+                const vAmmoLow = state.vehicleAmmo > 0 && state.vehicleAmmo <= Math.ceil(vw.maxAmmo * 0.15);
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
 
-              {/* Weapon slots with mini weapon icons and active glow */}
+                    {/* Vehicle Health Bar */}
+                    <div style={{
+                      background: 'rgba(8,18,26,0.88)',
+                      border: `1px solid ${vHealthPct <= 25 ? 'rgba(255,0,51,0.4)' : 'rgba(102,224,255,0.25)'}`,
+                      borderRight: `3px solid ${vHealthColor}`,
+                      backdropFilter: 'blur(8px)',
+                      padding: '8px 14px',
+                      minWidth: '240px',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {/* Helicopter icon */}
+                          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M2 5h12M8 5v4M4 9h8l1 2H3l1-2z" stroke={vHealthColor} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                            <circle cx="8" cy="4" r="1.5" stroke={vHealthColor} strokeWidth="1"/>
+                          </svg>
+                          <span style={{
+                            fontFamily: 'var(--font-mono)', fontSize: '9px',
+                            color: 'var(--c-muted)', letterSpacing: '0.14em',
+                          }}>VEHICLE</span>
+                        </div>
+                        <span style={{
+                          fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 'bold',
+                          color: vHealthColor, lineHeight: '1',
+                          textShadow: `0 0 8px ${vHealthColor}80`,
+                          animation: vHealthPct <= 25 ? 'hud-critical-flash 0.8s ease-in-out infinite' : 'none',
+                        }}>
+                          {Math.round(state.vehicleHealth)}
+                        </span>
+                      </div>
+                      {/* Segmented health bar */}
+                      <div style={{ display: 'flex', gap: '1px', height: '4px' }}>
+                        {Array.from({ length: 20 }, (_, i) => {
+                          const segPct = ((i + 1) / 20) * 100;
+                          const filled = vHealthPct >= segPct;
+                          const partial = !filled && vHealthPct > (i / 20) * 100;
+                          return (
+                            <div key={i} style={{
+                              flex: 1,
+                              background: filled ? vHealthColor : partial ? `${vHealthColor}60` : 'rgba(255,255,255,0.06)',
+                              boxShadow: filled ? `0 0 3px ${vHealthColor}30` : 'none',
+                              transition: 'all 0.3s ease',
+                            }} />
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Vehicle Weapon + Ammo Panel */}
+                    <div style={{
+                      background: 'rgba(8,18,26,0.88)',
+                      border: '1px solid rgba(102,224,255,0.2)',
+                      borderRight: `3px solid ${vw.color}`,
+                      backdropFilter: 'blur(8px)',
+                      padding: '8px 14px',
+                      minWidth: '240px',
+                    }}>
+                      {/* Weapon selector tabs */}
+                      <div style={{ display: 'flex', gap: '4px', marginBottom: '6px' }}>
+                        {VEHICLE_WEAPON_DATA.map((w, idx) => {
+                          const active = state.vehicleWeapon === idx;
+                          return (
+                            <div key={w.name} style={{
+                              flex: 1,
+                              padding: '3px 6px',
+                              background: active ? `${w.color}20` : 'rgba(255,255,255,0.03)',
+                              border: active ? `1px solid ${w.color}` : '1px solid rgba(255,255,255,0.08)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                              transition: 'all 0.15s ease',
+                              position: 'relative',
+                              overflow: 'hidden',
+                            }}>
+                              {active && <div style={{
+                                position: 'absolute', bottom: 0, left: 0, right: 0, height: '1px',
+                                background: w.color, boxShadow: `0 0 6px ${w.color}`,
+                              }}/>}
+                              <span style={{
+                                fontFamily: 'var(--font-mono)', fontSize: '8px', fontWeight: 'bold',
+                                color: active ? w.color : 'var(--c-muted2)',
+                                background: active ? `${w.color}30` : 'rgba(255,255,255,0.05)',
+                                padding: '0 3px', borderRadius: '2px', lineHeight: '1.4',
+                              }}>{idx + 1}</span>
+                              <span style={{
+                                fontFamily: 'var(--font-mono)', fontSize: '9px',
+                                color: active ? w.color : 'var(--c-muted)',
+                                letterSpacing: '0.08em', fontWeight: active ? 'bold' : 'normal',
+                              }}>{w.name}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Ammo display */}
+                      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+                        <span style={{
+                          fontFamily: 'var(--font-mono)', fontSize: '8px',
+                          color: state.vehicleReloading ? 'var(--c-amber)' : 'var(--c-muted)', letterSpacing: '0.15em',
+                          animation: state.vehicleReloading ? 'hud-ammo-warn 0.8s ease-in-out infinite' : 'none',
+                        }}>{state.vehicleReloading ? 'RELOADING' : 'AMMO'}</span>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
+                          <span style={{
+                            fontFamily: 'var(--font-mono)', fontSize: '24px', fontWeight: 'bold',
+                            color: state.vehicleAmmo === 0 ? 'var(--c-red)' : vAmmoLow ? 'var(--c-amber)' : 'var(--c-text)',
+                            lineHeight: '1',
+                            animation: state.vehicleAmmo === 0 ? 'hud-critical-flash 0.5s ease-in-out infinite' : vAmmoLow ? 'hud-ammo-warn 1s ease-in-out infinite' : 'none',
+                          }}>{state.vehicleAmmo}</span>
+                          <span style={{
+                            fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--c-muted)', fontWeight: 'bold',
+                          }}>|</span>
+                          <span style={{
+                            fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--c-muted)',
+                          }}>{vw.maxAmmo}</span>
+                        </div>
+                      </div>
+                      {/* Ammo bar */}
+                      <div style={{ height: '3px', background: 'rgba(255,255,255,0.06)', marginTop: '4px' }}>
+                        <div style={{
+                          height: '100%', width: `${vAmmoPct}%`,
+                          background: state.vehicleAmmo === 0 ? 'var(--c-red)' : vAmmoLow ? 'var(--c-amber)' : vw.color,
+                          transition: 'width 0.15s ease',
+                          boxShadow: `0 0 4px ${state.vehicleAmmo === 0 ? 'var(--c-red)' : vAmmoLow ? 'var(--c-amber)' : vw.color}`,
+                        }}/>
+                      </div>
+                    </div>
+
+                    {/* Telemetry: Altitude + Speed */}
+                    <div style={{
+                      background: 'rgba(8,18,26,0.88)',
+                      border: '1px solid rgba(102,224,255,0.15)',
+                      borderRight: '3px solid rgba(102,224,255,0.4)',
+                      backdropFilter: 'blur(8px)',
+                      padding: '6px 14px',
+                      minWidth: '240px',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'var(--c-muted)', letterSpacing: '0.12em' }}>ALT</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 'bold', color: 'var(--c-text)', lineHeight: '1' }}>
+                          {Math.round(state.vehicleAltitude)}
+                        </span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--c-muted)' }}>m</span>
+                      </div>
+                      <div style={{ width: '1px', height: '16px', background: 'var(--c-border)' }}/>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'var(--c-muted)', letterSpacing: '0.12em' }}>SPD</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 'bold', color: 'var(--c-text)', lineHeight: '1' }}>
+                          {Math.round(state.vehicleSpeed)}
+                        </span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--c-muted)' }}>m/s</span>
+                      </div>
+                      <div style={{ width: '1px', height: '16px', background: 'var(--c-border)' }}/>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'var(--c-muted)', letterSpacing: '0.12em' }}>HDG</span>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', fontWeight: 'bold', color: 'var(--c-cyan)', lineHeight: '1' }}>
+                          {String(Math.round(((state.heading % 360) + 360) % 360)).padStart(3, '0')}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Weapon slots with mini weapon icons and active glow (infantry only) */}
+              {!state.mountedVehicleName && (
               <div className="flex gap-1">
                 {state.loadout.map((weaponIndex, slotIndex) => {
                   const w = WEAPON_DATA[weaponIndex]!;
@@ -2296,6 +2516,7 @@ export function GameScreen() {
                   );
                 })}
               </div>
+              )}
             </div>
           </div>
         </div>

@@ -9,25 +9,27 @@ import {
   type AlgebraicTypeType as __AlgebraicTypeType,
   type Infer as __Infer,
 } from "spacetimedb";
+
 import {
   Vec3,
 } from "./types";
 
-
-export default __t.row({
-  id: __t.u64().primaryKey(),
-  shooter: __t.identity(),
-  get origin() {
+export default {
+  get shotOrigin() {
+    return Vec3;
+  },
+  get impactPos() {
     return Vec3;
   },
   get direction() {
     return Vec3;
   },
-  get hitPos() {
-    return Vec3.name("hit_pos");
+  vehicleWeapon: __t.u8(),
+  travelTimeMs: __t.u32(),
+  hitPlayers: __t.array(__t.identity()),
+  hitVehicles: __t.array(__t.u64()),
+  get hitBlocks() {
+    return __t.array(Vec3);
   },
-  hasHit: __t.bool().name("has_hit"),
-  weapon: __t.u8(),
-  sourceVehicle: __t.u64().name("source_vehicle"),
-  firedAt: __t.timestamp().name("fired_at"),
-});
+  sourceVehicleId: __t.u64(),
+};

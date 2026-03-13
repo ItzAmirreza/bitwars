@@ -1,7 +1,7 @@
 use spacetimedb::{
     reducer, table, Identity, ReducerContext, ScheduleAt, SpacetimeType, Table, Timestamp,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::f32::consts::TAU;
 use std::time::Duration;
 
@@ -68,11 +68,11 @@ const WEAPON_DEFS: [WeaponDef; 5] = [
         max_range: 30.0,
         projectile_speed: 0.0,
     },
-    // RPG: very slow, explosive, high damage (projectile)
+    // RPG: fast-firing explosive, high damage (projectile)
     WeaponDef {
         damage: 80,
         radius: 3.5,
-        fire_rate: 0.5,
+        fire_rate: 1.0,
         max_ammo: 12,
         max_range: 80.0,
         projectile_speed: 120.0,
@@ -98,6 +98,43 @@ const WEAPON_DEFS: [WeaponDef; 5] = [
 ];
 
 const NUM_WEAPONS: u8 = 5;
+
+// ── Vehicle Weapon Definitions ──
+
+struct VehicleWeaponDef {
+    damage: i32,
+    radius: f32,
+    fire_rate: f32,
+    max_ammo: i32,
+    max_range: f32,
+    projectile_speed: f32,
+    gravity: f32,
+}
+
+const VEHICLE_WEAPON_DEFS: [VehicleWeaponDef; 2] = [
+    // 0: Nose Minigun (hitscan)
+    VehicleWeaponDef {
+        damage: 8,
+        radius: 0.0,
+        fire_rate: 15.0,
+        max_ammo: 300,
+        max_range: 100.0,
+        projectile_speed: 0.0,
+        gravity: 0.0,
+    },
+    // 1: Hydra Rockets (projectile, explosive) — wide oblate destruction
+    VehicleWeaponDef {
+        damage: 45,
+        radius: 6.0,
+        fire_rate: 2.5,
+        max_ammo: 16,
+        max_range: 120.0,
+        projectile_speed: 80.0,
+        gravity: 3.0,
+    },
+];
+
+const NUM_VEHICLE_WEAPONS: u8 = 2;
 
 // ── Tables ──
 
@@ -164,6 +201,14 @@ pub struct Vehicle {
     /// Visual rotor spin amount, synced for all clients.
     pub rotor_spin: f32,
     pub health: i32,
+    /// Currently selected vehicle weapon index (0 = minigun, 1 = rockets)
+    pub weapon_type: u8,
+    /// Ammo for primary vehicle weapon (minigun)
+    pub weapon_ammo_primary: i32,
+    /// Ammo for secondary vehicle weapon (rockets)
+    pub weapon_ammo_secondary: i32,
+    /// Last time a vehicle weapon was fired (for fire-rate enforcement)
+    pub weapon_last_fire: Timestamp,
     pub created_at: Timestamp,
     pub last_input_at: Timestamp,
 }
@@ -227,6 +272,8 @@ pub struct ShotEvent {
     pub hit_pos: Vec3,
     pub has_hit: bool,
     pub weapon: u8,
+    /// 0 = infantry shot, non-zero = vehicle entity_id that fired
+    pub source_vehicle: u64,
     pub fired_at: Timestamp,
 }
 
@@ -285,6 +332,19 @@ pub struct ExplosionEvent {
     pub radius: f32,
     pub weapon: u8,
     pub destroyed_blocks: Vec<DestroyedBlock>,
+    pub created_at: Timestamp,
+}
+
+/// Short-lived row: helicopter destroyed, clients spawn breakup VFX.
+#[table(accessor = vehicle_destroy_event, public)]
+pub struct VehicleDestroyEvent {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub entity_id: u64,
+    pub vehicle_type: u8,
+    pub pos: Vec3,
+    pub rot: Rotation,
     pub created_at: Timestamp,
 }
 
@@ -367,6 +427,30 @@ pub struct VehicleTick {
     pub scheduled_at: ScheduleAt,
 }
 
+/// Server-authoritative grenade projectile that bounces and explodes on a 5-second fuse.
+#[derive(Clone)]
+#[table(accessor = grenade_projectile, public)]
+pub struct GrenadeProjectile {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub owner: Identity,
+    pub pos: Vec3,
+    pub vel: Vec3,
+    /// Remaining fuse time in milliseconds
+    pub fuse_remaining_ms: u32,
+    pub created_at: Timestamp,
+}
+
+/// Scheduled grenade physics tick (30Hz).
+#[table(accessor = grenade_tick, scheduled(tick_grenades))]
+pub struct GrenadeTick {
+    #[primary_key]
+    #[auto_inc]
+    pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+}
+
 // ── Constants ──
 
 const SPAWN_POS: Vec3 = Vec3 {
@@ -390,6 +474,17 @@ const DEFAULT_LOADOUT: [u8; 3] = [0, 1, 2];
 const NUM_CHARACTER_PRESETS: u8 = 5;
 const ENTITY_KIND_PLAYER: u8 = 1;
 const ENTITY_KIND_VEHICLE: u8 = 2;
+
+// ── Grenade Physics Constants ──
+const GRENADE_TICK_INTERVAL_MS: u64 = 33; // 30Hz physics tick
+const GRENADE_GRAVITY: f32 = 18.0; // gravity acceleration (units/s^2)
+const GRENADE_FUSE_MS: u32 = 5000; // 5-second fuse
+const GRENADE_BOUNCE_RESTITUTION: f32 = 0.45; // velocity retained on bounce (normal component)
+const GRENADE_BOUNCE_FRICTION: f32 = 0.7; // velocity retained on bounce (tangent component)
+const GRENADE_GROUND_FRICTION: f32 = 0.96; // rolling friction per tick when on ground
+const GRENADE_MIN_BOUNCE_VEL: f32 = 1.5; // below this, stop bouncing vertically
+const GRENADE_RADIUS: f32 = 0.19; // collision radius of the grenade sphere
+const GRENADE_WEAPON_INDEX: u8 = 4; // weapon index for grenade launcher
 const VEHICLE_TYPE_HELICOPTER: u8 = 0;
 const SANDBOX_HELICOPTER_COUNT: usize = 1;
 const HELI_SPAWN_CLEARANCE_RADIUS: i32 = 4;
@@ -399,10 +494,18 @@ const HELI_SCALE: f32 = 1.85;
 const HELI_MOUNT_RANGE: f32 = 8.5;
 const HELI_MIN_ALTITUDE_FROM_GROUND: f32 = 0.0;
 const HELI_MAX_ALTITUDE: f32 = 96.0;
+const HELI_TICK_INTERVAL_MS: u64 = 33;
 const HELI_CRUISE_SPEED: f32 = 34.0;
 const HELI_STRAFE_SPEED: f32 = 22.0;
 const HELI_LIFT_SPEED: f32 = 16.0;
-const HELI_YAW_SPEED: f32 = 1.5;
+const HELI_MAX_LOOK_PITCH: f32 = 0.62;
+const HELI_LOOK_YAW_GAIN: f32 = 7.2;
+const HELI_LOOK_PITCH_GAIN: f32 = 8.5;
+const HELI_MAX_YAW_RATE: f32 = 5.2;
+const HELI_MAX_PITCH_RATE: f32 = 4.2;
+const HELI_TILT_FORWARD_MIX: f32 = 1.1;
+const HELI_TILT_FORWARD_BASE: f32 = 0.55;
+const HELI_TILT_DESCENT_RATE: f32 = 5.2;
 const HELI_PILOT_SEAT_HEIGHT: f32 = 1.8;
 const HELI_HEALTH_MAX: i32 = 1000;
 const HELI_SKID_BOTTOM_LOCAL_Y: f32 = 1.325;
@@ -424,6 +527,164 @@ fn dist_sq(a: &Vec3, b: &Vec3) -> f32 {
     let dy = a.y - b.y;
     let dz = a.z - b.z;
     dx * dx + dy * dy + dz * dz
+}
+
+fn ray_aabb_t(origin: &Vec3, direction: &Vec3, min: &Vec3, max: &Vec3) -> Option<f32> {
+    let inv_x = if direction.x != 0.0 {
+        1.0 / direction.x
+    } else if direction.x >= 0.0 {
+        f32::INFINITY
+    } else {
+        f32::NEG_INFINITY
+    };
+    let inv_y = if direction.y != 0.0 {
+        1.0 / direction.y
+    } else if direction.y >= 0.0 {
+        f32::INFINITY
+    } else {
+        f32::NEG_INFINITY
+    };
+    let inv_z = if direction.z != 0.0 {
+        1.0 / direction.z
+    } else if direction.z >= 0.0 {
+        f32::INFINITY
+    } else {
+        f32::NEG_INFINITY
+    };
+
+    let t1 = (min.x - origin.x) * inv_x;
+    let t2 = (max.x - origin.x) * inv_x;
+    let t3 = (min.y - origin.y) * inv_y;
+    let t4 = (max.y - origin.y) * inv_y;
+    let t5 = (min.z - origin.z) * inv_z;
+    let t6 = (max.z - origin.z) * inv_z;
+
+    let tmin = f32::max(
+        f32::max(f32::min(t1, t2), f32::min(t3, t4)),
+        f32::min(t5, t6),
+    );
+    let tmax = f32::min(
+        f32::min(f32::max(t1, t2), f32::max(t3, t4)),
+        f32::max(t5, t6),
+    );
+
+    if tmax < 0.0 || tmin > tmax {
+        return None;
+    }
+    if tmin >= 0.0 {
+        Some(tmin)
+    } else {
+        Some(tmax)
+    }
+}
+
+fn helicopter_hitbox_bounds(entity: &Entity) -> (Vec3, Vec3) {
+    let center = Vec3 {
+        x: entity.pos.x,
+        y: entity.pos.y + HELI_HITBOX_CENTER_Y,
+        z: entity.pos.z,
+    };
+    (
+        Vec3 {
+            x: center.x - HELI_HITBOX_HALF_X,
+            y: center.y - HELI_HITBOX_HALF_Y,
+            z: center.z - HELI_HITBOX_HALF_Z,
+        },
+        Vec3 {
+            x: center.x + HELI_HITBOX_HALF_X,
+            y: center.y + HELI_HITBOX_HALF_Y,
+            z: center.z + HELI_HITBOX_HALF_Z,
+        },
+    )
+}
+
+fn apply_vehicle_damage(
+    ctx: &ReducerContext,
+    attacker: Identity,
+    vehicle_id: u64,
+    damage: i32,
+    hit_weapon: u8,
+    impact_pos: Vec3,
+) {
+    let Some(vehicle) = ctx.db.vehicle().entity_id().find(&vehicle_id) else {
+        return;
+    };
+    let Some(entity) = ctx.db.entity().id().find(&vehicle_id) else {
+        return;
+    };
+    if !entity.active || vehicle.health <= 0 {
+        return;
+    }
+
+    let heli_center = Vec3 {
+        x: entity.pos.x,
+        y: entity.pos.y + HELI_HITBOX_CENTER_Y,
+        z: entity.pos.z,
+    };
+
+    let next_health = (vehicle.health - damage).max(0);
+    if next_health > 0 {
+        ctx.db.vehicle().entity_id().update(Vehicle {
+            health: next_health,
+            ..vehicle
+        });
+
+        ctx.db.explosion_event().insert(ExplosionEvent {
+            id: 0,
+            origin: attacker,
+            pos: heli_center.clone(),
+            radius: 1.4,
+            weapon: hit_weapon,
+            destroyed_blocks: Vec::new(),
+            created_at: ctx.timestamp,
+        });
+        push_grenades_from_explosion(ctx, &heli_center, 1.4, 0);
+        return;
+    }
+
+    let pilot = vehicle.pilot_identity;
+    ctx.db.vehicle().entity_id().update(Vehicle {
+        pilot_identity: None,
+        input_forward: 0.0,
+        input_strafe: 0.0,
+        input_lift: 0.0,
+        input_yaw: 0.0,
+        boosting: false,
+        health: 0,
+        ..vehicle
+    });
+
+    if let Some(pilot_id) = pilot {
+        if let Some(player) = ctx.db.player().identity().find(pilot_id) {
+            let dismounted = dismount_player_internal(ctx, player, true);
+            ctx.db.player().identity().update(dismounted.clone());
+            init_movement_state(ctx, dismounted.identity, &dismounted.pos);
+            sync_player_entity(ctx, &dismounted);
+        }
+    }
+
+    ctx.db.explosion_event().insert(ExplosionEvent {
+        id: 0,
+        origin: attacker,
+        pos: impact_pos.clone(),
+        radius: 6.0,
+        weapon: 4,
+        destroyed_blocks: Vec::new(),
+        created_at: ctx.timestamp,
+    });
+    push_grenades_from_explosion(ctx, &impact_pos, 6.0, 0);
+
+    ctx.db.vehicle_destroy_event().insert(VehicleDestroyEvent {
+        id: 0,
+        entity_id: vehicle_id,
+        vehicle_type: vehicle.vehicle_type,
+        pos: entity.pos.clone(),
+        rot: entity.rot.clone(),
+        created_at: ctx.timestamp,
+    });
+
+    ctx.db.vehicle().entity_id().delete(&vehicle_id);
+    ctx.db.entity().id().delete(&vehicle_id);
 }
 
 fn vec3_from_tuple(v: (f32, f32, f32)) -> Vec3 {
@@ -856,7 +1117,11 @@ fn spawn_helicopter(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
         input_yaw: 0.0,
         boosting: false,
         rotor_spin: 0.0,
-        health: 500,
+        health: HELI_HEALTH_MAX,
+        weapon_type: 0,
+        weapon_ammo_primary: VEHICLE_WEAPON_DEFS[0].max_ammo,
+        weapon_ammo_secondary: VEHICLE_WEAPON_DEFS[1].max_ammo,
+        weapon_last_fire: ctx.timestamp,
         created_at: ctx.timestamp,
         last_input_at: ctx.timestamp,
     });
@@ -1256,10 +1521,20 @@ pub fn init(ctx: &ReducerContext) {
         scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(1)),
     });
 
-    // Schedule vehicle simulation tick (20Hz)
+    // Schedule vehicle simulation tick
     ctx.db.vehicle_tick().insert(VehicleTick {
         scheduled_id: 0,
-        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_millis(50)),
+        scheduled_at: ScheduleAt::Time(
+            ctx.timestamp + Duration::from_millis(HELI_TICK_INTERVAL_MS),
+        ),
+    });
+
+    // Schedule grenade physics tick
+    ctx.db.grenade_tick().insert(GrenadeTick {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(
+            ctx.timestamp + Duration::from_millis(GRENADE_TICK_INTERVAL_MS),
+        ),
     });
 
     // Spawn sandbox vehicles (helicopters)
@@ -1703,6 +1978,538 @@ pub fn update_vehicle_input(
     Ok(())
 }
 
+// ── Vehicle Weapon Reducers ──
+
+#[reducer]
+pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(), String> {
+    let sender = ctx.sender();
+    let player = ctx
+        .db
+        .player()
+        .identity()
+        .find(sender)
+        .ok_or("Not registered")?;
+
+    if player.mounted_vehicle_id == 0 {
+        return Err("Not in a vehicle".to_string());
+    }
+
+    if weapon_index >= NUM_VEHICLE_WEAPONS {
+        return Err("Invalid vehicle weapon index".to_string());
+    }
+
+    let vehicle = ctx
+        .db
+        .vehicle()
+        .entity_id()
+        .find(&player.mounted_vehicle_id)
+        .ok_or("Vehicle not found")?;
+
+    if vehicle.pilot_identity != Some(sender) {
+        return Err("Not the pilot".to_string());
+    }
+
+    ctx.db.vehicle().entity_id().update(Vehicle {
+        weapon_type: weapon_index,
+        ..vehicle
+    });
+
+    Ok(())
+}
+
+#[reducer]
+pub fn fire_vehicle_weapon(
+    ctx: &ReducerContext,
+    origin: Vec3,
+    direction: Vec3,
+    hit_players: Vec<Identity>,
+    hit_vehicles: Vec<u64>,
+    hit_blocks: Vec<Vec3>,
+) -> Result<(), String> {
+    let sender = ctx.sender();
+    let player = ctx
+        .db
+        .player()
+        .identity()
+        .find(sender)
+        .ok_or("Not registered")?;
+
+    if player.health <= 0 {
+        return Err("Cannot fire while dead".to_string());
+    }
+
+    if player.mounted_vehicle_id == 0 {
+        return Err("Not in a vehicle".to_string());
+    }
+
+    let vehicle = ctx
+        .db
+        .vehicle()
+        .entity_id()
+        .find(&player.mounted_vehicle_id)
+        .ok_or("Vehicle not found")?;
+
+    if vehicle.pilot_identity != Some(sender) {
+        return Err("Not the pilot".to_string());
+    }
+
+    if vehicle.health <= 0 {
+        return Err("Vehicle is destroyed".to_string());
+    }
+
+    let weapon_idx = vehicle.weapon_type as usize;
+    if weapon_idx >= VEHICLE_WEAPON_DEFS.len() {
+        return Err("Invalid vehicle weapon".to_string());
+    }
+    let def = &VEHICLE_WEAPON_DEFS[weapon_idx];
+
+    // Fire rate check (150ms tolerance)
+    let now_us = timestamp_micros(ctx.timestamp);
+    let last_us = timestamp_micros(vehicle.weapon_last_fire);
+    let cooldown_us = (1_000_000.0 / def.fire_rate) as u64;
+    if now_us.saturating_sub(last_us) < cooldown_us.saturating_sub(150_000) {
+        return Err("Firing too fast".to_string());
+    }
+
+    // Ammo check
+    let current_ammo = if vehicle.weapon_type == 0 {
+        vehicle.weapon_ammo_primary
+    } else {
+        vehicle.weapon_ammo_secondary
+    };
+    if current_ammo <= 0 {
+        return Err("No ammo".to_string());
+    }
+
+    // Origin validation: origin should be near vehicle (generous ~15 units for nose/wing mounts)
+    let entity = ctx
+        .db
+        .entity()
+        .id()
+        .find(&player.mounted_vehicle_id)
+        .ok_or("Vehicle entity not found")?;
+    if dist_sq(&origin, &entity.pos) > 225.0 {
+        return Err("Shot origin too far from vehicle".to_string());
+    }
+
+    // Deduct ammo and update fire time
+    let new_ammo_primary = if vehicle.weapon_type == 0 {
+        vehicle.weapon_ammo_primary - 1
+    } else {
+        vehicle.weapon_ammo_primary
+    };
+    let new_ammo_secondary = if vehicle.weapon_type == 1 {
+        vehicle.weapon_ammo_secondary - 1
+    } else {
+        vehicle.weapon_ammo_secondary
+    };
+    let vehicle_id = vehicle.entity_id;
+    ctx.db.vehicle().entity_id().update(Vehicle {
+        weapon_ammo_primary: new_ammo_primary,
+        weapon_ammo_secondary: new_ammo_secondary,
+        weapon_last_fire: ctx.timestamp,
+        ..vehicle
+    });
+
+    // Projectile weapons: just record the shot, impact handled by vehicle_projectile_impact
+    if def.projectile_speed > 0.0 {
+        ctx.db.shot_event().insert(ShotEvent {
+            id: 0,
+            shooter: sender,
+            origin,
+            direction,
+            hit_pos: ZERO_VEL,
+            has_hit: false,
+            weapon: 100 + vehicle.weapon_type, // 100+ = vehicle weapon namespace
+            source_vehicle: vehicle_id,
+            fired_at: ctx.timestamp,
+        });
+        return Ok(());
+    }
+
+    // Hitscan weapon path (minigun)
+    let dir_len =
+        (direction.x * direction.x + direction.y * direction.y + direction.z * direction.z).sqrt();
+    let normalized_direction = if dir_len > 0.01 {
+        Vec3 {
+            x: direction.x / dir_len,
+            y: direction.y / dir_len,
+            z: direction.z / dir_len,
+        }
+    } else {
+        ZERO_VEL
+    };
+
+    // Apply player hits
+    for target_id in &hit_players {
+        if *target_id == sender {
+            continue;
+        }
+
+        if let Some(target) = ctx.db.player().identity().find(*target_id) {
+            if target.health <= 0 || !target.online || target.spawn_protected {
+                continue;
+            }
+            if target.max_health >= 9999 {
+                continue;
+            }
+
+            let target_dist_sq = dist_sq(&origin, &target.pos);
+            let max_range = def.max_range + 3.0;
+            if target_dist_sq > max_range * max_range {
+                continue;
+            }
+
+            if dir_len > 0.01 {
+                let to_x = target.pos.x - origin.x;
+                let to_y = target.pos.y - origin.y;
+                let to_z = target.pos.z - origin.z;
+                let to_len = (to_x * to_x + to_y * to_y + to_z * to_z).sqrt();
+                if to_len > 0.1 {
+                    let dot = (to_x * direction.x + to_y * direction.y + to_z * direction.z)
+                        / (to_len * dir_len);
+                    if dot < 0.5 {
+                        continue;
+                    }
+                }
+            }
+
+            let new_health = (target.health - def.damage).max(0);
+            ctx.db.player().identity().update(Player {
+                health: new_health,
+                last_damage_time: ctx.timestamp,
+                ..target
+            });
+
+            if new_health == 0 {
+                if let Some(attacker) = ctx.db.player().identity().find(sender) {
+                    ctx.db.player().identity().update(Player {
+                        kills: attacker.kills + 1,
+                        ..attacker
+                    });
+                }
+                if let Some(dead) = ctx.db.player().identity().find(*target_id) {
+                    ctx.db.player().identity().update(Player {
+                        deaths: dead.deaths + 1,
+                        ..dead
+                    });
+                }
+                log::info!("{:?} killed {:?} with vehicle minigun", sender, target_id);
+            }
+        }
+    }
+
+    // Apply vehicle hits
+    let mut first_vehicle_hit_pos: Option<Vec3> = None;
+    let mut seen_vehicle_hits = HashSet::new();
+    for target_vehicle_id in hit_vehicles {
+        if target_vehicle_id == vehicle_id {
+            continue; // can't shoot your own helicopter
+        }
+        if !seen_vehicle_hits.insert(target_vehicle_id) {
+            continue;
+        }
+        let Some(target_entity) = ctx.db.entity().id().find(&target_vehicle_id) else {
+            continue;
+        };
+        if !target_entity.active
+            || target_entity.kind != ENTITY_KIND_VEHICLE
+            || target_entity.subtype != VEHICLE_TYPE_HELICOPTER
+        {
+            continue;
+        }
+
+        let center = Vec3 {
+            x: target_entity.pos.x,
+            y: target_entity.pos.y + HELI_HITBOX_CENTER_Y,
+            z: target_entity.pos.z,
+        };
+        let max_vehicle_range = def.max_range + HELI_HITBOX_HALF_X + 3.0;
+        if dist_sq(&origin, &center) > max_vehicle_range * max_vehicle_range {
+            continue;
+        }
+
+        let (hb_min, hb_max) = helicopter_hitbox_bounds(&target_entity);
+        let Some(t) = ray_aabb_t(&origin, &normalized_direction, &hb_min, &hb_max) else {
+            continue;
+        };
+        if t > max_vehicle_range {
+            continue;
+        }
+
+        if first_vehicle_hit_pos.is_none() {
+            first_vehicle_hit_pos = Some(center.clone());
+        }
+        apply_vehicle_damage(
+            ctx,
+            sender,
+            target_vehicle_id,
+            def.damage,
+            100 + vehicle.weapon_type,
+            center,
+        );
+    }
+
+    // Apply block destruction
+    if hit_blocks.len() > 500 {
+        return Err("Too many blocks".to_string());
+    }
+
+    let block_coords: Vec<(i32, i32, i32)> = hit_blocks
+        .iter()
+        .filter(|block| {
+            let bx = block.x as i32;
+            let by = block.y as i32;
+            let bz = block.z as i32;
+            if !block_in_bounds(bx, by, bz) {
+                return false;
+            }
+            let block_dist_sq = dist_sq(&origin, block);
+            let max_block_range = def.max_range + 5.0;
+            block_dist_sq <= max_block_range * max_block_range
+        })
+        .map(|b| (b.x as i32, b.y as i32, b.z as i32))
+        .collect();
+
+    let actually_destroyed = destroy_blocks_in_world(ctx, &block_coords);
+    let destroyed_positions: Vec<(i32, i32, i32)> = actually_destroyed
+        .iter()
+        .map(|&(x, y, z, _)| (x, y, z))
+        .collect();
+    run_structural_check(ctx, &destroyed_positions);
+
+    // Determine hit position for remote VFX
+    let (shot_hit_pos, shot_has_hit) = if !actually_destroyed.is_empty() {
+        let first = &actually_destroyed[0];
+        (
+            Vec3 {
+                x: first.0 as f32,
+                y: first.1 as f32,
+                z: first.2 as f32,
+            },
+            true,
+        )
+    } else if !hit_players.is_empty() {
+        if let Some(target) = ctx.db.player().identity().find(hit_players[0]) {
+            (target.pos.clone(), true)
+        } else {
+            (ZERO_VEL, false)
+        }
+    } else if let Some(vehicle_hit_pos) = first_vehicle_hit_pos {
+        (vehicle_hit_pos, true)
+    } else {
+        (ZERO_VEL, false)
+    };
+
+    // Record shot event
+    ctx.db.shot_event().insert(ShotEvent {
+        id: 0,
+        shooter: sender,
+        origin: origin.clone(),
+        direction,
+        hit_pos: shot_hit_pos,
+        has_hit: shot_has_hit,
+        weapon: 100 + vehicle.weapon_type,
+        source_vehicle: vehicle_id,
+        fired_at: ctx.timestamp,
+    });
+
+    Ok(())
+}
+
+#[reducer]
+pub fn vehicle_projectile_impact(
+    ctx: &ReducerContext,
+    shot_origin: Vec3,
+    impact_pos: Vec3,
+    _direction: Vec3,
+    vehicle_weapon: u8,
+    travel_time_ms: u32,
+    hit_players: Vec<Identity>,
+    hit_vehicles: Vec<u64>,
+    hit_blocks: Vec<Vec3>,
+    source_vehicle_id: u64,
+) -> Result<(), String> {
+    let sender = ctx.sender();
+    let _player = ctx
+        .db
+        .player()
+        .identity()
+        .find(sender)
+        .ok_or("Not registered")?;
+
+    if vehicle_weapon >= NUM_VEHICLE_WEAPONS {
+        return Err("Invalid vehicle weapon".to_string());
+    }
+
+    let def = &VEHICLE_WEAPON_DEFS[vehicle_weapon as usize];
+
+    if def.projectile_speed <= 0.0 {
+        return Err("Not a projectile weapon".to_string());
+    }
+
+    // Travel time validation
+    let dx = impact_pos.x - shot_origin.x;
+    let dy = impact_pos.y - shot_origin.y;
+    let dz = impact_pos.z - shot_origin.z;
+    let distance = (dx * dx + dy * dy + dz * dz).sqrt();
+    let expected_time_ms = (distance / def.projectile_speed * 1000.0) as u32;
+
+    let min_time = expected_time_ms / 2;
+    let max_time = expected_time_ms.saturating_mul(3).max(500);
+    if travel_time_ms < min_time || travel_time_ms > max_time {
+        log::warn!(
+            "Vehicle projectile travel time mismatch: got {}ms, expected ~{}ms (dist={:.1})",
+            travel_time_ms,
+            expected_time_ms,
+            distance
+        );
+    }
+
+    // Impact range check
+    let impact_dist_sq = dist_sq(&shot_origin, &impact_pos);
+    let max_range = def.max_range + 10.0;
+    if impact_dist_sq > max_range * max_range {
+        return Err("Impact too far from origin".to_string());
+    }
+
+    // Apply player hits (splash damage)
+    for target_id in &hit_players {
+        if *target_id == sender {
+            continue;
+        }
+
+        if let Some(target) = ctx.db.player().identity().find(*target_id) {
+            if target.health <= 0 || !target.online || target.spawn_protected {
+                continue;
+            }
+            if target.max_health >= 9999 {
+                continue;
+            }
+
+            let target_dist_sq = dist_sq(&impact_pos, &target.pos);
+            let hit_range = def.radius + 5.0;
+            if target_dist_sq > hit_range * hit_range {
+                continue;
+            }
+
+            let new_health = (target.health - def.damage).max(0);
+            ctx.db.player().identity().update(Player {
+                health: new_health,
+                last_damage_time: ctx.timestamp,
+                ..target
+            });
+
+            if new_health == 0 {
+                if let Some(attacker) = ctx.db.player().identity().find(sender) {
+                    ctx.db.player().identity().update(Player {
+                        kills: attacker.kills + 1,
+                        ..attacker
+                    });
+                }
+                if let Some(dead) = ctx.db.player().identity().find(*target_id) {
+                    ctx.db.player().identity().update(Player {
+                        deaths: dead.deaths + 1,
+                        ..dead
+                    });
+                }
+                log::info!("{:?} killed {:?} with vehicle rocket", sender, target_id);
+            }
+        }
+    }
+
+    // Apply vehicle hits
+    let mut seen_vehicle_hits = HashSet::new();
+    for target_vehicle_id in hit_vehicles {
+        if target_vehicle_id == source_vehicle_id {
+            continue; // can't hit own vehicle
+        }
+        if !seen_vehicle_hits.insert(target_vehicle_id) {
+            continue;
+        }
+        let Some(target_entity) = ctx.db.entity().id().find(&target_vehicle_id) else {
+            continue;
+        };
+        if !target_entity.active
+            || target_entity.kind != ENTITY_KIND_VEHICLE
+            || target_entity.subtype != VEHICLE_TYPE_HELICOPTER
+        {
+            continue;
+        }
+
+        let center = Vec3 {
+            x: target_entity.pos.x,
+            y: target_entity.pos.y + HELI_HITBOX_CENTER_Y,
+            z: target_entity.pos.z,
+        };
+        let explosion_range = def.radius + HELI_HITBOX_HALF_X + 2.0;
+        if dist_sq(&impact_pos, &center) > explosion_range * explosion_range {
+            continue;
+        }
+
+        apply_vehicle_damage(
+            ctx,
+            sender,
+            target_vehicle_id,
+            def.damage,
+            100 + vehicle_weapon,
+            impact_pos.clone(),
+        );
+    }
+
+    // Block destruction
+    if hit_blocks.len() > 500 {
+        return Err("Too many blocks".to_string());
+    }
+
+    let block_coords: Vec<(i32, i32, i32)> = hit_blocks
+        .iter()
+        .filter(|block| {
+            let bx = block.x as i32;
+            let by = block.y as i32;
+            let bz = block.z as i32;
+            if !block_in_bounds(bx, by, bz) {
+                return false;
+            }
+            let block_dist_sq = dist_sq(&impact_pos, block);
+            let max_block_range = def.radius + 5.0;
+            block_dist_sq <= max_block_range * max_block_range
+        })
+        .map(|b| (b.x as i32, b.y as i32, b.z as i32))
+        .collect();
+
+    let actually_destroyed = destroy_blocks_in_world(ctx, &block_coords);
+    let destroyed_positions: Vec<(i32, i32, i32)> = actually_destroyed
+        .iter()
+        .map(|&(x, y, z, _)| (x, y, z))
+        .collect();
+    run_structural_check(ctx, &destroyed_positions);
+
+    // Emit explosion event
+    if def.radius > 0.0 {
+        ctx.db.explosion_event().insert(ExplosionEvent {
+            id: 0,
+            origin: sender,
+            pos: impact_pos.clone(),
+            radius: def.radius,
+            weapon: 100 + vehicle_weapon,
+            destroyed_blocks: actually_destroyed
+                .iter()
+                .map(|&(x, y, z, bt)| DestroyedBlock {
+                    x: x as f32,
+                    y: y as f32,
+                    z: z as f32,
+                    block_type: bt,
+                })
+                .collect(),
+            created_at: ctx.timestamp,
+        });
+        push_grenades_from_explosion(ctx, &impact_pos, def.radius, 0);
+    }
+
+    Ok(())
+}
+
 // ── Combat Reducers ──
 
 #[reducer]
@@ -1712,6 +2519,7 @@ pub fn fire_weapon(
     direction: Vec3,
     weapon: u8,
     hit_players: Vec<Identity>,
+    hit_vehicles: Vec<u64>,
     hit_blocks: Vec<Vec3>,
 ) -> Result<(), String> {
     let sender = ctx.sender();
@@ -1778,6 +2586,39 @@ pub fn fire_weapon(
 
     // 4b. Projectile weapons: skip hit validation, just record shot event
     if def.projectile_speed > 0.0 {
+        // Grenade launcher: spawn a server-authoritative bouncing grenade
+        if weapon == GRENADE_WEAPON_INDEX {
+            let dir_len =
+                (direction.x * direction.x + direction.y * direction.y + direction.z * direction.z)
+                    .sqrt();
+            let norm_dir = if dir_len > 0.01 {
+                Vec3 {
+                    x: direction.x / dir_len,
+                    y: direction.y / dir_len,
+                    z: direction.z / dir_len,
+                }
+            } else {
+                Vec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: -1.0,
+                }
+            };
+            ctx.db.grenade_projectile().insert(GrenadeProjectile {
+                id: 0,
+                owner: sender,
+                pos: origin.clone(),
+                vel: Vec3 {
+                    x: norm_dir.x * def.projectile_speed,
+                    y: norm_dir.y * def.projectile_speed,
+                    z: norm_dir.z * def.projectile_speed,
+                },
+                fuse_remaining_ms: GRENADE_FUSE_MS,
+                created_at: ctx.timestamp,
+            });
+        }
+
+        // Still emit ShotEvent so remote clients can see the launch flash / audio
         ctx.db.shot_event().insert(ShotEvent {
             id: 0,
             shooter: sender,
@@ -1786,6 +2627,7 @@ pub fn fire_weapon(
             hit_pos: ZERO_VEL,
             has_hit: false,
             weapon,
+            source_vehicle: 0,
             fired_at: ctx.timestamp,
         });
         return Ok(());
@@ -1856,6 +2698,69 @@ pub fn fire_weapon(
         }
     }
 
+    let normalized_direction = if dir_len > 0.01 {
+        Vec3 {
+            x: direction.x / dir_len,
+            y: direction.y / dir_len,
+            z: direction.z / dir_len,
+        }
+    } else {
+        ZERO_VEL
+    };
+
+    let mut first_vehicle_hit_pos: Option<Vec3> = None;
+    let mut seen_vehicle_hits = HashSet::new();
+    for vehicle_id in hit_vehicles {
+        if !seen_vehicle_hits.insert(vehicle_id) {
+            continue;
+        }
+        let Some(entity) = ctx.db.entity().id().find(&vehicle_id) else {
+            continue;
+        };
+        if !entity.active
+            || entity.kind != ENTITY_KIND_VEHICLE
+            || entity.subtype != VEHICLE_TYPE_HELICOPTER
+        {
+            continue;
+        }
+
+        let center = Vec3 {
+            x: entity.pos.x,
+            y: entity.pos.y + HELI_HITBOX_CENTER_Y,
+            z: entity.pos.z,
+        };
+        let max_vehicle_range = def.max_range + HELI_HITBOX_HALF_X + 3.0;
+        if dist_sq(&origin, &center) > max_vehicle_range * max_vehicle_range {
+            continue;
+        }
+
+        let to_x = center.x - origin.x;
+        let to_y = center.y - origin.y;
+        let to_z = center.z - origin.z;
+        let to_len = (to_x * to_x + to_y * to_y + to_z * to_z).sqrt();
+        if dir_len <= 0.01 || to_len <= 0.1 {
+            continue;
+        }
+        let dot =
+            (to_x * direction.x + to_y * direction.y + to_z * direction.z) / (to_len * dir_len);
+        if dot < 0.35 {
+            continue;
+        }
+
+        let (hb_min, hb_max) = helicopter_hitbox_bounds(&entity);
+        let Some(t) = ray_aabb_t(&origin, &normalized_direction, &hb_min, &hb_max) else {
+            continue;
+        };
+        if t > max_vehicle_range {
+            continue;
+        }
+
+        if first_vehicle_hit_pos.is_none() {
+            first_vehicle_hit_pos = Some(center.clone());
+        }
+        apply_vehicle_damage(ctx, sender, vehicle_id, def.damage, weapon, center);
+    }
+
     // 6. Validate + apply block destruction via WorldChunks
     if hit_blocks.len() > 500 {
         return Err("Too many blocks".to_string());
@@ -1902,6 +2807,8 @@ pub fn fire_weapon(
         } else {
             (ZERO_VEL, false)
         }
+    } else if let Some(vehicle_hit_pos) = first_vehicle_hit_pos {
+        (vehicle_hit_pos, true)
     } else {
         (ZERO_VEL, false)
     };
@@ -1915,20 +2822,22 @@ pub fn fire_weapon(
         hit_pos: shot_hit_pos,
         has_hit: shot_has_hit,
         weapon,
+        source_vehicle: 0,
         fired_at: ctx.timestamp,
     });
 
     // 9. Emit explosion event if weapon has radius (e.g., shotgun)
     if def.radius > 0.0 && !actually_destroyed.is_empty() {
         let center = &actually_destroyed[0];
+        let explosion_pos = Vec3 {
+            x: center.0 as f32,
+            y: center.1 as f32,
+            z: center.2 as f32,
+        };
         ctx.db.explosion_event().insert(ExplosionEvent {
             id: 0,
             origin: sender,
-            pos: Vec3 {
-                x: center.0 as f32,
-                y: center.1 as f32,
-                z: center.2 as f32,
-            },
+            pos: explosion_pos.clone(),
             radius: def.radius,
             weapon,
             destroyed_blocks: actually_destroyed
@@ -1942,6 +2851,7 @@ pub fn fire_weapon(
                 .collect(),
             created_at: ctx.timestamp,
         });
+        push_grenades_from_explosion(ctx, &explosion_pos, def.radius, 0);
     }
 
     Ok(())
@@ -1972,6 +2882,58 @@ pub fn reload_weapon(ctx: &ReducerContext) -> Result<(), String> {
     let def = &WEAPON_DEFS[weapon as usize];
     set_ammo(&mut wstate, weapon, def.max_ammo);
     ctx.db.player_weapon_state().identity().update(wstate);
+
+    Ok(())
+}
+
+#[reducer]
+pub fn reload_vehicle_weapon(ctx: &ReducerContext) -> Result<(), String> {
+    let sender = ctx.sender();
+    let player = ctx
+        .db
+        .player()
+        .identity()
+        .find(sender)
+        .ok_or("Not registered")?;
+
+    if player.mounted_vehicle_id == 0 {
+        return Err("Not in a vehicle".to_string());
+    }
+
+    let vehicle = ctx
+        .db
+        .vehicle()
+        .entity_id()
+        .find(&player.mounted_vehicle_id)
+        .ok_or("Vehicle not found")?;
+
+    if vehicle.pilot_identity != Some(sender) {
+        return Err("Not the pilot".to_string());
+    }
+
+    let weapon_idx = vehicle.weapon_type as usize;
+    if weapon_idx >= VEHICLE_WEAPON_DEFS.len() {
+        return Err("Invalid vehicle weapon".to_string());
+    }
+    let def = &VEHICLE_WEAPON_DEFS[weapon_idx];
+
+    // Refill ammo for the currently selected weapon
+    let new_ammo_primary = if vehicle.weapon_type == 0 {
+        def.max_ammo
+    } else {
+        vehicle.weapon_ammo_primary
+    };
+    let new_ammo_secondary = if vehicle.weapon_type == 1 {
+        def.max_ammo
+    } else {
+        vehicle.weapon_ammo_secondary
+    };
+
+    ctx.db.vehicle().entity_id().update(Vehicle {
+        weapon_ammo_primary: new_ammo_primary,
+        weapon_ammo_secondary: new_ammo_secondary,
+        ..vehicle
+    });
 
     Ok(())
 }
@@ -2635,6 +3597,38 @@ pub fn cleanup_shots_scheduled(ctx: &ReducerContext, _job: ShotCleanup) {
         ctx.db.explosion_event().id().delete(&id);
     }
 
+    // Clean stale vehicle destroy events (older than 4 seconds)
+    let stale_vehicle_destroys: Vec<u64> = ctx
+        .db
+        .vehicle_destroy_event()
+        .iter()
+        .filter(|e| {
+            let ev_micros = timestamp_micros(e.created_at);
+            now_micros.saturating_sub(ev_micros) > 4_000_000
+        })
+        .map(|e| e.id)
+        .collect();
+
+    for id in stale_vehicle_destroys {
+        ctx.db.vehicle_destroy_event().id().delete(&id);
+    }
+
+    // Clean stale grenade projectiles (older than 10 seconds — safety net)
+    let stale_grenades: Vec<u64> = ctx
+        .db
+        .grenade_projectile()
+        .iter()
+        .filter(|g| {
+            let g_micros = timestamp_micros(g.created_at);
+            now_micros.saturating_sub(g_micros) > 10_000_000
+        })
+        .map(|g| g.id)
+        .collect();
+
+    for id in stale_grenades {
+        ctx.db.grenade_projectile().id().delete(&id);
+    }
+
     // Reschedule next cleanup in 3 seconds
     ctx.db.shot_cleanup().insert(ShotCleanup {
         scheduled_id: 0,
@@ -2669,10 +3663,10 @@ pub fn cleanup_detach_events(ctx: &ReducerContext, _job: DetachCleanup) {
     });
 }
 
-/// Scheduled vehicle simulation tick (20Hz).
+/// Scheduled vehicle simulation tick.
 #[reducer]
 pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
-    let dt = 0.05_f32;
+    let dt = HELI_TICK_INTERVAL_MS as f32 / 1000.0;
     let mut mounted_updates: Vec<Player> = Vec::new();
     let vehicle_ids: Vec<u64> = ctx.db.vehicle().iter().map(|v| v.entity_id).collect();
 
@@ -2716,24 +3710,13 @@ pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
 
         let has_pilot = vehicle.pilot_identity.is_some();
 
-        let mut yaw_input = if has_pilot {
+        // ── Battlefield-style: A/D yaw is direct rotation, NOT blending toward mouse ──
+        let yaw_input = if has_pilot {
             clamp_vehicle_axis(vehicle.input_yaw)
         } else {
             0.0
         };
-
-        if let Some(pilot_id) = vehicle.pilot_identity {
-            if let Some(pilot) = ctx.db.player().identity().find(pilot_id) {
-                let mut yaw_delta = pilot.rot.yaw - entity.rot.yaw;
-                if yaw_delta > std::f32::consts::PI {
-                    yaw_delta -= TAU;
-                }
-                if yaw_delta < -std::f32::consts::PI {
-                    yaw_delta += TAU;
-                }
-                yaw_input = clamp_vehicle_axis(yaw_input + yaw_delta * 0.5);
-            }
-        }
+        let yaw_step = yaw_input * HELI_MAX_YAW_RATE * dt;
 
         let forward_input = if has_pilot {
             clamp_vehicle_axis(vehicle.input_forward)
@@ -2751,14 +3734,19 @@ pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
             0.0
         };
 
-        let boost_mul = if has_pilot && vehicle.boosting {
-            1.32
+        // Derive pitch from forward movement: nose tilts down when moving forward
+        let target_pitch = if has_pilot {
+            -forward_input * 0.25
         } else {
-            1.0
+            0.0
         };
+        let pitch_step = (target_pitch - entity.rot.pitch)
+            .clamp(-HELI_MAX_PITCH_RATE * dt, HELI_MAX_PITCH_RATE * dt);
+        entity.rot.pitch += pitch_step;
 
-        let forward_speed = forward_input * HELI_CRUISE_SPEED * boost_mul;
-        let strafe_speed = strafe_input * HELI_STRAFE_SPEED * boost_mul;
+        // No boost — helicopter is already fast enough
+        let forward_speed = forward_input * HELI_CRUISE_SPEED;
+        let strafe_speed = strafe_input * HELI_STRAFE_SPEED;
         let lift_speed = lift_input * HELI_LIFT_SPEED;
 
         let fx = -entity.rot.yaw.sin();
@@ -2770,8 +3758,8 @@ pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
         let target_vz = fz * forward_speed + rz * strafe_speed;
         let target_vy = if has_pilot { lift_speed } else { -2.2 };
 
-        let horiz_blend = if has_pilot { 0.18 } else { 0.09 };
-        let vert_blend = if has_pilot { 0.14 } else { 0.06 };
+        let horiz_blend = if has_pilot { 0.28 } else { 0.09 };
+        let vert_blend = if has_pilot { 0.22 } else { 0.06 };
         entity.vel.x += (target_vx - entity.vel.x) * horiz_blend;
         entity.vel.z += (target_vz - entity.vel.z) * horiz_blend;
         entity.vel.y += (target_vy - entity.vel.y) * vert_blend;
@@ -2783,14 +3771,13 @@ pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
             entity.vel.y *= 0.995;
         }
 
-        entity.rot.yaw += yaw_input * HELI_YAW_SPEED * dt;
+        entity.rot.yaw += yaw_step;
         if entity.rot.yaw > std::f32::consts::PI {
             entity.rot.yaw -= TAU;
         }
         if entity.rot.yaw < -std::f32::consts::PI {
             entity.rot.yaw += TAU;
         }
-        entity.rot.pitch = (-entity.vel.y / HELI_LIFT_SPEED).clamp(-0.18, 0.18);
 
         let mut next_pos = Vec3 {
             x: entity.pos.x + entity.vel.x * dt,
@@ -2877,7 +3864,311 @@ pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
 
     ctx.db.vehicle_tick().insert(VehicleTick {
         scheduled_id: 0,
-        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_millis(50)),
+        scheduled_at: ScheduleAt::Time(
+            ctx.timestamp + Duration::from_millis(HELI_TICK_INTERVAL_MS),
+        ),
+    });
+}
+
+// ── Grenade Physics Tick ──
+
+/// Push all nearby grenades away from an explosion at `pos` with the given `radius`.
+/// Called from every explosion source so grenades react to any blast.
+/// `exclude_grenade_id` can be used to skip the exploding grenade itself (0 = skip none).
+fn push_grenades_from_explosion(
+    ctx: &ReducerContext,
+    pos: &Vec3,
+    radius: f32,
+    exclude_grenade_id: u64,
+) {
+    let push_range = radius + 3.0;
+    let push_range_sq = push_range * push_range;
+    let other_grenades: Vec<GrenadeProjectile> = ctx
+        .db
+        .grenade_projectile()
+        .iter()
+        .filter(|g| g.id != exclude_grenade_id && dist_sq(pos, &g.pos) <= push_range_sq)
+        .collect();
+    for other in other_grenades {
+        let dx = other.pos.x - pos.x;
+        let dy = other.pos.y - pos.y;
+        let dz = other.pos.z - pos.z;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt().max(0.5);
+        let force = (1.0 - dist / push_range).max(0.0) * 25.0;
+        let nx = dx / dist;
+        let ny = (dy / dist).max(0.3); // bias upward
+        let nz = dz / dist;
+        ctx.db.grenade_projectile().id().update(GrenadeProjectile {
+            vel: Vec3 {
+                x: other.vel.x + nx * force,
+                y: other.vel.y + ny * force,
+                z: other.vel.z + nz * force,
+            },
+            ..other
+        });
+    }
+}
+
+/// Explode a single grenade: apply damage, destroy blocks, emit ExplosionEvent,
+/// and push other nearby grenades.
+fn explode_grenade(ctx: &ReducerContext, grenade: &GrenadeProjectile) {
+    let def = &WEAPON_DEFS[GRENADE_WEAPON_INDEX as usize];
+    let pos = &grenade.pos;
+    let owner = grenade.owner;
+
+    // 1. Damage players within blast radius
+    let hit_range = def.radius + 2.0;
+    let hit_range_sq = hit_range * hit_range;
+    let players: Vec<Player> = ctx.db.player().iter().collect();
+    for target in players {
+        if target.health <= 0 || !target.online || target.spawn_protected {
+            continue;
+        }
+        if target.max_health >= 9999 {
+            continue; // god mode
+        }
+        if dist_sq(pos, &target.pos) > hit_range_sq {
+            continue;
+        }
+        let new_health = (target.health - def.damage).max(0);
+        let target_id = target.identity;
+        ctx.db.player().identity().update(Player {
+            health: new_health,
+            last_damage_time: ctx.timestamp,
+            ..target
+        });
+        if new_health == 0 {
+            if let Some(attacker) = ctx.db.player().identity().find(owner) {
+                ctx.db.player().identity().update(Player {
+                    kills: attacker.kills + 1,
+                    ..attacker
+                });
+            }
+            if let Some(dead) = ctx.db.player().identity().find(target_id) {
+                ctx.db.player().identity().update(Player {
+                    deaths: dead.deaths + 1,
+                    ..dead
+                });
+            }
+            log::info!("{:?} killed {:?} with grenade", owner, target_id);
+        }
+    }
+
+    // 2. Damage vehicles within blast radius
+    let explosion_range_sq = (def.radius + HELI_HITBOX_HALF_X + 2.0).powi(2);
+    let vehicle_ids: Vec<u64> = ctx.db.vehicle().iter().map(|v| v.entity_id).collect();
+    for vehicle_id in vehicle_ids {
+        if let Some(entity) = ctx.db.entity().id().find(&vehicle_id) {
+            if !entity.active || entity.kind != ENTITY_KIND_VEHICLE {
+                continue;
+            }
+            let center = Vec3 {
+                x: entity.pos.x,
+                y: entity.pos.y + HELI_HITBOX_CENTER_Y,
+                z: entity.pos.z,
+            };
+            if dist_sq(pos, &center) <= explosion_range_sq {
+                apply_vehicle_damage(
+                    ctx,
+                    owner,
+                    vehicle_id,
+                    def.damage,
+                    GRENADE_WEAPON_INDEX,
+                    pos.clone(),
+                );
+            }
+        }
+    }
+
+    // 3. Destroy blocks within blast radius
+    let r = def.radius;
+    let r2 = r * r;
+    let cx = pos.x;
+    let cy = pos.y;
+    let cz = pos.z;
+    let mut block_coords: Vec<(i32, i32, i32)> = Vec::new();
+    for bx in (cx - r).floor() as i32..=(cx + r).ceil() as i32 {
+        for by in (cy - r).floor() as i32..=(cy + r).ceil() as i32 {
+            for bz in (cz - r).floor() as i32..=(cz + r).ceil() as i32 {
+                let dx = bx as f32 - cx;
+                let dy = by as f32 - cy;
+                let dz = bz as f32 - cz;
+                if dx * dx + dy * dy + dz * dz <= r2 && block_in_bounds(bx, by, bz) {
+                    block_coords.push((bx, by, bz));
+                }
+            }
+        }
+    }
+    let actually_destroyed = destroy_blocks_in_world(ctx, &block_coords);
+    let destroyed_positions: Vec<(i32, i32, i32)> = actually_destroyed
+        .iter()
+        .map(|&(x, y, z, _)| (x, y, z))
+        .collect();
+    run_structural_check(ctx, &destroyed_positions);
+
+    // 4. Emit ExplosionEvent for all clients
+    ctx.db.explosion_event().insert(ExplosionEvent {
+        id: 0,
+        origin: owner,
+        pos: pos.clone(),
+        radius: def.radius,
+        weapon: GRENADE_WEAPON_INDEX,
+        destroyed_blocks: actually_destroyed
+            .iter()
+            .map(|&(x, y, z, bt)| DestroyedBlock {
+                x: x as f32,
+                y: y as f32,
+                z: z as f32,
+                block_type: bt,
+            })
+            .collect(),
+        created_at: ctx.timestamp,
+    });
+
+    // 5. Push other grenades within blast radius (chain reactions!)
+    push_grenades_from_explosion(ctx, pos, def.radius, grenade.id);
+}
+
+/// Scheduled grenade physics tick: move grenades, bounce off terrain, detonate on fuse expiry.
+#[reducer]
+pub fn tick_grenades(ctx: &ReducerContext, _job: GrenadeTick) {
+    let dt = GRENADE_TICK_INTERVAL_MS as f32 / 1000.0;
+    let tick_ms = GRENADE_TICK_INTERVAL_MS as u32;
+
+    // Collect all active grenades
+    let grenades: Vec<GrenadeProjectile> = ctx.db.grenade_projectile().iter().collect();
+
+    for mut g in grenades {
+        // Decrement fuse
+        if g.fuse_remaining_ms <= tick_ms {
+            // BOOM — fuse expired
+            explode_grenade(ctx, &g);
+            ctx.db.grenade_projectile().id().delete(&g.id);
+            continue;
+        }
+        g.fuse_remaining_ms -= tick_ms;
+
+        // Apply gravity
+        g.vel.y -= GRENADE_GRAVITY * dt;
+
+        // Compute new position
+        let mut new_pos = Vec3 {
+            x: g.pos.x + g.vel.x * dt,
+            y: g.pos.y + g.vel.y * dt,
+            z: g.pos.z + g.vel.z * dt,
+        };
+
+        // ── Bounce off terrain (check block collisions) ──
+        // Check the block at new position
+        let bx = new_pos.x.floor() as i32;
+        let by = new_pos.y.floor() as i32;
+        let bz = new_pos.z.floor() as i32;
+
+        // Check Y collision (floor/ceiling bounce)
+        let block_below = get_block_type(ctx, bx, (new_pos.y - GRENADE_RADIUS).floor() as i32, bz);
+        let block_above = get_block_type(ctx, bx, (new_pos.y + GRENADE_RADIUS).ceil() as i32, bz);
+        if matches!(block_below, Some(bt) if bt != AIR) && g.vel.y < 0.0 {
+            // Bounce off floor
+            new_pos.y = (new_pos.y - GRENADE_RADIUS).floor() as f32 + 1.0 + GRENADE_RADIUS;
+            if g.vel.y.abs() < GRENADE_MIN_BOUNCE_VEL {
+                g.vel.y = 0.0;
+                // Apply ground friction to horizontal velocity
+                g.vel.x *= GRENADE_GROUND_FRICTION;
+                g.vel.z *= GRENADE_GROUND_FRICTION;
+            } else {
+                g.vel.y = -g.vel.y * GRENADE_BOUNCE_RESTITUTION;
+                g.vel.x *= GRENADE_BOUNCE_FRICTION;
+                g.vel.z *= GRENADE_BOUNCE_FRICTION;
+            }
+        } else if matches!(block_above, Some(bt) if bt != AIR) && g.vel.y > 0.0 {
+            // Bounce off ceiling
+            new_pos.y = (new_pos.y + GRENADE_RADIUS).ceil() as f32 - GRENADE_RADIUS;
+            g.vel.y = -g.vel.y * GRENADE_BOUNCE_RESTITUTION;
+        }
+
+        // Check X collision (wall bounce)
+        let check_x_neg = get_block_type(
+            ctx,
+            (new_pos.x - GRENADE_RADIUS).floor() as i32,
+            new_pos.y.floor() as i32,
+            bz,
+        );
+        let check_x_pos = get_block_type(
+            ctx,
+            (new_pos.x + GRENADE_RADIUS).ceil() as i32,
+            new_pos.y.floor() as i32,
+            bz,
+        );
+        if matches!(check_x_neg, Some(bt) if bt != AIR) && g.vel.x < 0.0 {
+            new_pos.x = (new_pos.x - GRENADE_RADIUS).floor() as f32 + 1.0 + GRENADE_RADIUS;
+            g.vel.x = -g.vel.x * GRENADE_BOUNCE_RESTITUTION;
+            g.vel.z *= GRENADE_BOUNCE_FRICTION;
+        } else if matches!(check_x_pos, Some(bt) if bt != AIR) && g.vel.x > 0.0 {
+            new_pos.x = (new_pos.x + GRENADE_RADIUS).ceil() as f32 - GRENADE_RADIUS;
+            g.vel.x = -g.vel.x * GRENADE_BOUNCE_RESTITUTION;
+            g.vel.z *= GRENADE_BOUNCE_FRICTION;
+        }
+
+        // Check Z collision (wall bounce)
+        let check_z_neg = get_block_type(
+            ctx,
+            bx,
+            new_pos.y.floor() as i32,
+            (new_pos.z - GRENADE_RADIUS).floor() as i32,
+        );
+        let check_z_pos = get_block_type(
+            ctx,
+            bx,
+            new_pos.y.floor() as i32,
+            (new_pos.z + GRENADE_RADIUS).ceil() as i32,
+        );
+        if matches!(check_z_neg, Some(bt) if bt != AIR) && g.vel.z < 0.0 {
+            new_pos.z = (new_pos.z - GRENADE_RADIUS).floor() as f32 + 1.0 + GRENADE_RADIUS;
+            g.vel.z = -g.vel.z * GRENADE_BOUNCE_RESTITUTION;
+            g.vel.x *= GRENADE_BOUNCE_FRICTION;
+        } else if matches!(check_z_pos, Some(bt) if bt != AIR) && g.vel.z > 0.0 {
+            new_pos.z = (new_pos.z + GRENADE_RADIUS).ceil() as f32 - GRENADE_RADIUS;
+            g.vel.z = -g.vel.z * GRENADE_BOUNCE_RESTITUTION;
+            g.vel.x *= GRENADE_BOUNCE_FRICTION;
+        }
+
+        // World bounds clamping
+        new_pos.x = new_pos.x.clamp(0.5, WORLD_SIZE_X as f32 - 0.5);
+        new_pos.z = new_pos.z.clamp(0.5, WORLD_SIZE_Z as f32 - 0.5);
+
+        // If grenade falls below world, explode it
+        if new_pos.y < -5.0 {
+            explode_grenade(ctx, &g);
+            ctx.db.grenade_projectile().id().delete(&g.id);
+            continue;
+        }
+
+        // Clamp ceiling
+        if new_pos.y > WORLD_SIZE_Y as f32 + 20.0 {
+            new_pos.y = WORLD_SIZE_Y as f32 + 20.0;
+            if g.vel.y > 0.0 {
+                g.vel.y = -g.vel.y * GRENADE_BOUNCE_RESTITUTION;
+            }
+        }
+
+        // Stop very slow grenades from drifting forever
+        let speed_sq = g.vel.x * g.vel.x + g.vel.z * g.vel.z;
+        if speed_sq < 0.01 {
+            g.vel.x = 0.0;
+            g.vel.z = 0.0;
+        }
+
+        g.pos = new_pos;
+
+        ctx.db.grenade_projectile().id().update(g);
+    }
+
+    // Reschedule next tick
+    ctx.db.grenade_tick().insert(GrenadeTick {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(
+            ctx.timestamp + Duration::from_millis(GRENADE_TICK_INTERVAL_MS),
+        ),
     });
 }
 
@@ -3232,6 +4523,15 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
     for id in explosion_ids {
         ctx.db.explosion_event().id().delete(&id);
     }
+    let vehicle_destroy_ids: Vec<u64> = ctx
+        .db
+        .vehicle_destroy_event()
+        .iter()
+        .map(|e| e.id)
+        .collect();
+    for id in vehicle_destroy_ids {
+        ctx.db.vehicle_destroy_event().id().delete(&id);
+    }
 
     // 7. Schedule next reset in 5 minutes
     ctx.db.map_reset_timer().insert(MapResetTimer {
@@ -3270,6 +4570,7 @@ pub fn projectile_impact(
     weapon: u8,
     travel_time_ms: u32,
     hit_players: Vec<Identity>,
+    hit_vehicles: Vec<u64>,
     hit_blocks: Vec<Vec3>,
 ) -> Result<(), String> {
     let sender = ctx.sender();
@@ -3295,6 +4596,11 @@ pub fn projectile_impact(
 
     if def.projectile_speed <= 0.0 {
         return Err("Not a projectile weapon".to_string());
+    }
+
+    // Grenade launcher impacts are handled server-side by tick_grenades
+    if weapon == GRENADE_WEAPON_INDEX {
+        return Err("Grenade impacts are server-authoritative".to_string());
     }
 
     // Travel time validation
@@ -3369,6 +4675,46 @@ pub fn projectile_impact(
         }
     }
 
+    let mut seen_vehicle_hits = HashSet::new();
+    for vehicle_id in hit_vehicles {
+        if !seen_vehicle_hits.insert(vehicle_id) {
+            continue;
+        }
+        let Some(entity) = ctx.db.entity().id().find(&vehicle_id) else {
+            continue;
+        };
+        if !entity.active
+            || entity.kind != ENTITY_KIND_VEHICLE
+            || entity.subtype != VEHICLE_TYPE_HELICOPTER
+        {
+            continue;
+        }
+
+        let center = Vec3 {
+            x: entity.pos.x,
+            y: entity.pos.y + HELI_HITBOX_CENTER_Y,
+            z: entity.pos.z,
+        };
+        let explosion_range = def.radius + HELI_HITBOX_HALF_X + 2.0;
+        if dist_sq(&impact_pos, &center) > explosion_range * explosion_range {
+            continue;
+        }
+
+        let max_travel = def.max_range + HELI_HITBOX_HALF_X + 10.0;
+        if dist_sq(&shot_origin, &center) > max_travel * max_travel {
+            continue;
+        }
+
+        apply_vehicle_damage(
+            ctx,
+            sender,
+            vehicle_id,
+            def.damage,
+            weapon,
+            impact_pos.clone(),
+        );
+    }
+
     // Validate + apply block destruction via WorldChunks
     if hit_blocks.len() > 500 {
         return Err("Too many blocks".to_string());
@@ -3402,7 +4748,7 @@ pub fn projectile_impact(
         ctx.db.explosion_event().insert(ExplosionEvent {
             id: 0,
             origin: sender,
-            pos: impact_pos,
+            pos: impact_pos.clone(),
             radius: def.radius,
             weapon,
             destroyed_blocks: actually_destroyed
@@ -3416,6 +4762,7 @@ pub fn projectile_impact(
                 .collect(),
             created_at: ctx.timestamp,
         });
+        push_grenades_from_explosion(ctx, &impact_pos, def.radius, 0);
     }
 
     Ok(())

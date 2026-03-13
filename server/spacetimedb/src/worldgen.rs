@@ -25,6 +25,7 @@ pub const GRASS: u8 = 10;
 pub const WOOD: u8 = 11;
 pub const STONE: u8 = 12;
 pub const SNOW: u8 = 13;
+pub const LANTERN: u8 = 14;
 
 // ── Biome System ──
 
@@ -564,6 +565,12 @@ fn place_tower(
             }
         }
     }
+
+    let tower_top = base_y + height;
+    place_rooftop_lantern(cb, cx, cy, cz, ox, tower_top, oz);
+    place_rooftop_lantern(cb, cx, cy, cz, ox + tw - 1, tower_top, oz);
+    place_rooftop_lantern(cb, cx, cy, cz, ox, tower_top, oz + tw - 1);
+    place_rooftop_lantern(cb, cx, cy, cz, ox + tw - 1, tower_top, oz + tw - 1);
 }
 
 fn place_bunker(
@@ -987,6 +994,12 @@ fn place_city_block(
             }
         }
 
+        let roof_y = base_y + 1 + th;
+        place_rooftop_lantern(cb, cx, cy, cz, tx, roof_y, tz);
+        place_rooftop_lantern(cb, cx, cy, cz, tx + tw - 1, roof_y, tz);
+        place_rooftop_lantern(cb, cx, cy, cz, tx, roof_y, tz + td - 1);
+        place_rooftop_lantern(cb, cx, cy, cz, tx + tw - 1, roof_y, tz + td - 1);
+
         for x in -1..=tw {
             for z in -1..=td {
                 let bx = tx + x;
@@ -1089,6 +1102,12 @@ fn place_megatower(
                 set_chunk_block(cb, cx, cy, cz, bx, roof_y, bz, METAL);
             }
         }
+
+        place_rooftop_lantern(cb, cx, cy, cz, ox, roof_y, oz);
+        place_rooftop_lantern(cb, cx, cy, cz, ox + tw - 1, roof_y, oz);
+        place_rooftop_lantern(cb, cx, cy, cz, ox, roof_y, oz + td - 1);
+        place_rooftop_lantern(cb, cx, cy, cz, ox + tw - 1, roof_y, oz + td - 1);
+
         let antenna_h = 2 + (hash2d_seeded(ox * 83, oz * 89, seed.wrapping_add(4402)) * 4.0) as i32;
         let ax = ox + tw / 2;
         let az = oz + td / 2;
@@ -1099,6 +1118,7 @@ fn place_megatower(
             }
             set_chunk_block(cb, cx, cy, cz, ax, by, az, REBAR);
         }
+        place_rooftop_lantern(cb, cx, cy, cz, ax, roof_y + antenna_h, az);
     }
 
     for x in -2..=(tw + 1) {
@@ -1145,6 +1165,90 @@ fn is_road(wx: i32, wz: i32, _seed: u64) -> Option<u8> {
     }
 
     None
+}
+
+fn mod_wrap(v: i32, modulus: i32) -> i32 {
+    ((v % modulus) + modulus) % modulus
+}
+
+fn mod_wrap_dist(v: i32, modulus: i32, center: i32) -> i32 {
+    let m = mod_wrap(v, modulus);
+    let d = (m - center).abs();
+    d.min(modulus - d)
+}
+
+fn should_place_road_lantern(wx: i32, wz: i32, biome: Biome, seed: u64) -> bool {
+    if in_spawn_safe_zone(wx, wz) {
+        return false;
+    }
+    if biome != Biome::Urban {
+        return false;
+    }
+
+    const ROAD_SPACING: i32 = 48;
+    const ROAD_CENTER: i32 = 26;
+    const SIDEWALK_DIST: i32 = 3;
+
+    let dist_ns = mod_wrap_dist(wx, ROAD_SPACING, ROAD_CENTER);
+    let dist_ew = mod_wrap_dist(wz, ROAD_SPACING, ROAD_CENTER);
+    let near_ns = dist_ns == SIDEWALK_DIST;
+    let near_ew = dist_ew == SIDEWALK_DIST;
+    if !near_ns && !near_ew {
+        return false;
+    }
+
+    let axis_gate = if near_ns && !near_ew {
+        mod_wrap(wz, 28) == 0
+    } else if near_ew && !near_ns {
+        mod_wrap(wx, 28) == 0
+    } else {
+        mod_wrap(wx + wz, 42) == 0
+    };
+
+    if !axis_gate {
+        return false;
+    }
+
+    hash2d_seeded(
+        wx * 151 + wz * 17,
+        wz * 163 + wx * 13,
+        seed.wrapping_add(4600),
+    ) > 0.86
+}
+
+fn place_lantern_post(
+    cb: &mut [u8; 4096],
+    cx: i32,
+    cy: i32,
+    cz: i32,
+    wx: i32,
+    base_y: i32,
+    wz: i32,
+) {
+    if base_y < 0 || base_y + 4 >= WORLD_SIZE_Y as i32 {
+        return;
+    }
+
+    set_chunk_block_if_air(cb, cx, cy, cz, wx, base_y + 1, wz, REBAR);
+    set_chunk_block_if_air(cb, cx, cy, cz, wx, base_y + 2, wz, REBAR);
+    set_chunk_block_if_air(cb, cx, cy, cz, wx, base_y + 3, wz, LANTERN);
+}
+
+fn place_rooftop_lantern(
+    cb: &mut [u8; 4096],
+    cx: i32,
+    cy: i32,
+    cz: i32,
+    wx: i32,
+    roof_y: i32,
+    wz: i32,
+) {
+    if roof_y < 0 || roof_y + 2 >= WORLD_SIZE_Y as i32 {
+        return;
+    }
+
+    set_chunk_block_if_air(cb, cx, cy, cz, wx, roof_y + 1, wz, METAL);
+    set_chunk_block_if_air(cb, cx, cy, cz, wx, roof_y + 2, wz, LANTERN);
 }
 
 // ── Core Chunk Generation ──
@@ -1200,6 +1304,10 @@ pub fn generate_chunk(cx: usize, cy: usize, cz: usize, seed: u64) -> Vec<u8> {
                     let idx = lx + ly as usize * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE;
                     chunk_blocks[idx] = road_bt;
                 }
+            }
+
+            if should_place_road_lantern(wx, wz, biome, seed) {
+                place_lantern_post(&mut chunk_blocks, chunk_wx, chunk_wy, chunk_wz, wx, h, wz);
             }
 
             // Mountains: snow cap
@@ -1576,6 +1684,7 @@ fn block_weight(bt: u8) -> f32 {
         WOOD => 1.6,
         STONE => 3.2,
         SNOW => 0.4,
+        LANTERN => 0.45,
         _ => 2.0,
     }
 }

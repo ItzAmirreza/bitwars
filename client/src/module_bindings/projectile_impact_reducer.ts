@@ -27,6 +27,7 @@ export default {
   weapon: __t.u8(),
   travelTimeMs: __t.u32(),
   hitPlayers: __t.array(__t.identity()),
+  hitVehicles: __t.array(__t.u64()),
   get hitBlocks() {
     return __t.array(Vec3);
   },

@@ -11,23 +11,19 @@ import {
 } from "spacetimedb";
 import {
   Vec3,
+  Rotation,
 } from "./types";
 
 
 export default __t.row({
   id: __t.u64().primaryKey(),
-  shooter: __t.identity(),
-  get origin() {
+  entityId: __t.u64().name("entity_id"),
+  vehicleType: __t.u8().name("vehicle_type"),
+  get pos() {
     return Vec3;
   },
-  get direction() {
-    return Vec3;
+  get rot() {
+    return Rotation;
   },
-  get hitPos() {
-    return Vec3.name("hit_pos");
-  },
-  hasHit: __t.bool().name("has_hit"),
-  weapon: __t.u8(),
-  sourceVehicle: __t.u64().name("source_vehicle"),
-  firedAt: __t.timestamp().name("fired_at"),
+  createdAt: __t.timestamp().name("created_at"),
 });

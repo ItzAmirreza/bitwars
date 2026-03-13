@@ -35,18 +35,22 @@ import {
 
 // Import all reducer arg schemas
 import DestroyBlocksPhysicsReducer from "./destroy_blocks_physics_reducer";
+import FireVehicleWeaponReducer from "./fire_vehicle_weapon_reducer";
 import FireWeaponReducer from "./fire_weapon_reducer";
 import InteractVehicleReducer from "./interact_vehicle_reducer";
 import ProjectileImpactReducer from "./projectile_impact_reducer";
+import ReloadVehicleWeaponReducer from "./reload_vehicle_weapon_reducer";
 import ReloadWeaponReducer from "./reload_weapon_reducer";
 import RequestChunksReducer from "./request_chunks_reducer";
 import RespawnReducer from "./respawn_reducer";
 import SendChatReducer from "./send_chat_reducer";
 import SetLoadoutReducer from "./set_loadout_reducer";
 import SetUsernameReducer from "./set_username_reducer";
+import SwitchVehicleWeaponReducer from "./switch_vehicle_weapon_reducer";
 import SyncEntityTransformReducer from "./sync_entity_transform_reducer";
 import UpdatePositionReducer from "./update_position_reducer";
 import UpdateVehicleInputReducer from "./update_vehicle_input_reducer";
+import VehicleProjectileImpactReducer from "./vehicle_projectile_impact_reducer";
 
 // Import all procedure arg schemas
 
@@ -55,12 +59,14 @@ import ChatMessageRow from "./chat_message_table";
 import DetachEventRow from "./detach_event_table";
 import EntityRow from "./entity_table";
 import ExplosionEventRow from "./explosion_event_table";
+import GrenadeProjectileRow from "./grenade_projectile_table";
 import PlayerRow from "./player_table";
 import PlayerLoadoutRow from "./player_loadout_table";
 import PlayerMovementRow from "./player_movement_table";
 import PlayerWeaponStateRow from "./player_weapon_state_table";
 import ShotEventRow from "./shot_event_table";
 import VehicleRow from "./vehicle_table";
+import VehicleDestroyEventRow from "./vehicle_destroy_event_table";
 import WorldChunkRow from "./world_chunk_table";
 import WorldConfigRow from "./world_config_table";
 import WorldEnvironmentRow from "./world_environment_table";
@@ -113,6 +119,17 @@ const tablesSchema = __schema({
       { name: 'explosion_event_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, ExplosionEventRow),
+  grenade_projectile: __table({
+    name: 'grenade_projectile',
+    indexes: [
+      { accessor: 'id', name: 'grenade_projectile_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'grenade_projectile_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, GrenadeProjectileRow),
   player: __table({
     name: 'player',
     indexes: [
@@ -179,6 +196,17 @@ const tablesSchema = __schema({
       { name: 'vehicle_entity_id_key', constraint: 'unique', columns: ['entityId'] },
     ],
   }, VehicleRow),
+  vehicle_destroy_event: __table({
+    name: 'vehicle_destroy_event',
+    indexes: [
+      { accessor: 'id', name: 'vehicle_destroy_event_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'vehicle_destroy_event_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, VehicleDestroyEventRow),
   world_chunk: __table({
     name: 'world_chunk',
     indexes: [
@@ -217,18 +245,22 @@ const tablesSchema = __schema({
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("destroy_blocks_physics", DestroyBlocksPhysicsReducer),
+  __reducerSchema("fire_vehicle_weapon", FireVehicleWeaponReducer),
   __reducerSchema("fire_weapon", FireWeaponReducer),
   __reducerSchema("interact_vehicle", InteractVehicleReducer),
   __reducerSchema("projectile_impact", ProjectileImpactReducer),
+  __reducerSchema("reload_vehicle_weapon", ReloadVehicleWeaponReducer),
   __reducerSchema("reload_weapon", ReloadWeaponReducer),
   __reducerSchema("request_chunks", RequestChunksReducer),
   __reducerSchema("respawn", RespawnReducer),
   __reducerSchema("send_chat", SendChatReducer),
   __reducerSchema("set_loadout", SetLoadoutReducer),
   __reducerSchema("set_username", SetUsernameReducer),
+  __reducerSchema("switch_vehicle_weapon", SwitchVehicleWeaponReducer),
   __reducerSchema("sync_entity_transform", SyncEntityTransformReducer),
   __reducerSchema("update_position", UpdatePositionReducer),
   __reducerSchema("update_vehicle_input", UpdateVehicleInputReducer),
+  __reducerSchema("vehicle_projectile_impact", VehicleProjectileImpactReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */

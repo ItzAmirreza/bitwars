@@ -15,9 +15,13 @@ interface Snapshot {
  */
 export class InterpolationBuffer {
   private buffer: Snapshot[] = [];
-  private readonly BUFFER_TIME = 100; // ms behind real-time
+  private readonly bufferTimeMs: number;
   private readonly MAX_SNAPSHOTS = 10;
   private readonly EXTRAPOLATION_LIMIT = 200; // ms max extrapolation
+
+  constructor(bufferTimeMs = 100) {
+    this.bufferTimeMs = Math.max(0, bufferTimeMs);
+  }
 
   push(pos: THREE.Vector3, vel: THREE.Vector3, rot: { yaw: number; pitch: number }): void {
     this.buffer.push({
@@ -34,7 +38,7 @@ export class InterpolationBuffer {
   sample(outPos: THREE.Vector3, outRot: { yaw: number; pitch: number }): void {
     if (this.buffer.length === 0) return;
 
-    const renderTime = performance.now() - this.BUFFER_TIME;
+    const renderTime = performance.now() - this.bufferTimeMs;
 
     // Find the two snapshots that straddle renderTime
     let i = 0;

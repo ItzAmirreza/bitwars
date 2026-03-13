@@ -11,9 +11,13 @@ export interface ProjectileImpact {
   hitPos: { x: number; y: number; z: number };
   destroyedBlocks: { x: number; y: number; z: number; blockType: number }[];
   hitPlayerIds: string[];
+  hitVehicleIds: number[];
   origin: THREE.Vector3;
   direction: THREE.Vector3;
   travelTimeMs: number;
+  isVehicle: boolean;
+  vehicleWeaponIndex: number;
+  sourceVehicleId: number;
 }
 
 interface ActiveProjectile {
@@ -39,6 +43,10 @@ interface ActiveProjectile {
   shooterId: string | null;
   mesh: THREE.Mesh;
   light: THREE.PointLight | null;
+  // Vehicle metadata
+  isVehicle: boolean;
+  vehicleWeaponIndex: number;
+  sourceVehicleId: number;
 }
 
 // Shared geometry/material for all projectile meshes
@@ -75,6 +83,20 @@ export class ProjectileManager {
     return this.spawn(weaponIndex, origin, direction, performance.now(), true) !== null;
   }
 
+  /** Spawn a projectile from the local player's vehicle weapon */
+  spawnLocalVehicle(
+    weaponIndex: number,
+    origin: THREE.Vector3,
+    direction: THREE.Vector3,
+    vehicleWeaponIndex: number,
+    sourceVehicleId: number,
+  ): boolean {
+    return this.spawn(weaponIndex, origin, direction, performance.now(), true, null, {
+      vehicleWeaponIndex,
+      sourceVehicleId,
+    }) !== null;
+  }
+
   /** Spawn a projectile from a remote player's ShotEvent */
   spawnRemote(
     weaponIndex: number,
@@ -103,6 +125,7 @@ export class ProjectileManager {
     firedAt: number,
     isLocal: boolean,
     shooterId: string | null = null,
+    vehicleOpts?: { vehicleWeaponIndex: number; sourceVehicleId: number },
   ): ActiveProjectile | null {
     if (this.projectiles.length >= MAX_PROJECTILES) {
       if (!isLocal) {
@@ -168,6 +191,9 @@ export class ProjectileManager {
       shooterId,
       mesh,
       light,
+      isVehicle: !!vehicleOpts,
+      vehicleWeaponIndex: vehicleOpts?.vehicleWeaponIndex ?? 0,
+      sourceVehicleId: vehicleOpts?.sourceVehicleId ?? 0,
     };
 
     this.projectiles.push(proj);
@@ -222,6 +248,21 @@ export class ProjectileManager {
               z: Math.floor(p.pos.z),
             };
             this.handleImpactPlayers(p, hitPos, hitPlayerIds);
+            this.removeProjectile(i);
+            impacted = true;
+            break;
+          }
+
+          // Vehicle collision
+          const hitVehicleIds = this.weapons.raycastVehicles(segOrigin, segDir, subDist);
+          if (hitVehicleIds.length > 0) {
+            // Impact at current position
+            const hitPos = {
+              x: Math.floor(p.pos.x),
+              y: Math.floor(p.pos.y),
+              z: Math.floor(p.pos.z),
+            };
+            this.handleImpactVehicles(p, hitPos, hitVehicleIds);
             this.removeProjectile(i);
             impacted = true;
             break;
@@ -286,7 +327,28 @@ export class ProjectileManager {
       const destroyed: ProjectileImpact['destroyedBlocks'] = [];
       const w = WEAPONS[p.weaponIndex];
 
-      if (w.radius > 0) {
+      if (p.isVehicle) {
+        // Vehicle rockets: oblate spheroid — wide horizontal, shallow vertical
+        const hr = 6.0; // horizontal radius (x/z)
+        const vr = 3.0; // vertical radius (y)
+        const hr2 = hr * hr;
+        const vr2 = vr * vr;
+        for (let bx = Math.floor(blockHit.x - hr); bx <= Math.ceil(blockHit.x + hr); bx++) {
+          for (let by = Math.floor(blockHit.y - vr); by <= Math.ceil(blockHit.y + vr); by++) {
+            for (let bz = Math.floor(blockHit.z - hr); bz <= Math.ceil(blockHit.z + hr); bz++) {
+              const dx = bx - blockHit.x, dy = by - blockHit.y, dz = bz - blockHit.z;
+              if ((dx * dx + dz * dz) / hr2 + (dy * dy) / vr2 <= 1.0) {
+                const bt = this.world.getBlock(bx, by, bz);
+                if (bt !== 0) {
+                  this.weapons.trackPendingDestruction(bx, by, bz, bt);
+                  this.world.setBlock(bx, by, bz, 0);
+                  destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
+                }
+              }
+            }
+          }
+        }
+      } else if (w.radius > 0) {
         const r = w.radius;
         const r2 = r * r;
         for (let bx = Math.floor(blockHit.x - r); bx <= Math.ceil(blockHit.x + r); bx++) {
@@ -315,11 +377,12 @@ export class ProjectileManager {
 
       // Check for player hits near impact (for explosive projectiles)
       const hitPlayerIds: string[] = [];
-      if (w.radius > 0) {
+      const splashRadius = p.isVehicle ? 6.0 : w.radius;
+      if (splashRadius > 0) {
         const impactPos = new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
         for (const [id, group] of this.otherPlayers) {
           const dist = impactPos.distanceTo(group.position);
-          if (dist <= w.radius + 2) {
+          if (dist <= splashRadius + 2) {
             hitPlayerIds.push(id);
           }
         }
@@ -331,16 +394,24 @@ export class ProjectileManager {
         hitPos: blockHit,
         destroyedBlocks: destroyed,
         hitPlayerIds,
+        hitVehicleIds: this.weapons.vehiclesWithinRadius(
+          new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5),
+          splashRadius + 0.5,
+        ),
         origin: p.origin,
         direction: p.vel.clone().normalize(),
         travelTimeMs,
+        isVehicle: p.isVehicle,
+        vehicleWeaponIndex: p.vehicleWeaponIndex,
+        sourceVehicleId: p.sourceVehicleId,
       });
     } else {
       // Remote projectile: just VFX
       const w = WEAPONS[p.weaponIndex];
       this.vfx.emitImpact(blockHit.x, blockHit.y, blockHit.z);
-      if (w.radius > 0) {
-        this.vfx.emitExplosion(blockHit.x, blockHit.y, blockHit.z, w.radius);
+      const vfxRadius = p.isVehicle ? 6.0 : w.radius;
+      if (vfxRadius > 0) {
+        this.vfx.emitExplosion(blockHit.x, blockHit.y, blockHit.z, vfxRadius);
       }
     }
   }
@@ -352,21 +423,84 @@ export class ProjectileManager {
   ): void {
     if (p.isLocal) {
       const travelTimeMs = performance.now() - p.firedAt;
+      const splashRadius = p.isVehicle ? 6.0 : WEAPONS[p.weaponIndex].radius;
       this.onLocalImpact({
         weaponIndex: p.weaponIndex,
         hitPos,
         destroyedBlocks: [],
         hitPlayerIds,
+        hitVehicleIds: this.weapons.vehiclesWithinRadius(
+          new THREE.Vector3(hitPos.x + 0.5, hitPos.y + 0.5, hitPos.z + 0.5),
+          splashRadius + 0.5,
+        ),
         origin: p.origin,
         direction: p.vel.clone().normalize(),
         travelTimeMs,
+        isVehicle: p.isVehicle,
+        vehicleWeaponIndex: p.vehicleWeaponIndex,
+        sourceVehicleId: p.sourceVehicleId,
       });
     }
 
     // VFX for all (local and remote)
     const w = WEAPONS[p.weaponIndex];
-    if (w.radius > 0) {
-      this.vfx.emitExplosion(hitPos.x, hitPos.y, hitPos.z, w.radius);
+    const vfxRadius = p.isVehicle ? 6.0 : w.radius;
+    if (vfxRadius > 0) {
+      this.vfx.emitExplosion(hitPos.x, hitPos.y, hitPos.z, vfxRadius);
+    }
+    this.vfx.emitImpact(hitPos.x, hitPos.y, hitPos.z);
+  }
+
+  private handleImpactVehicles(
+    p: ActiveProjectile,
+    hitPos: { x: number; y: number; z: number },
+    directHitVehicleIds: number[],
+  ): void {
+    if (p.isLocal) {
+      const w = WEAPONS[p.weaponIndex];
+      const impactCenter = new THREE.Vector3(hitPos.x + 0.5, hitPos.y + 0.5, hitPos.z + 0.5);
+      const splashRadius = p.isVehicle ? 6.0 : w.radius;
+
+      const hitPlayerIds: string[] = [];
+      if (splashRadius > 0) {
+        for (const [id, group] of this.otherPlayers) {
+          const dist = impactCenter.distanceTo(group.position);
+          if (dist <= splashRadius + 2) {
+            hitPlayerIds.push(id);
+          }
+        }
+      }
+
+      const splashVehicleIds = this.weapons.vehiclesWithinRadius(
+        impactCenter,
+        splashRadius + 0.5,
+      );
+      const hitVehicleIds = Array.from(new Set<number>([
+        ...directHitVehicleIds,
+        ...splashVehicleIds,
+      ]));
+
+      const travelTimeMs = performance.now() - p.firedAt;
+      this.onLocalImpact({
+        weaponIndex: p.weaponIndex,
+        hitPos,
+        destroyedBlocks: [],
+        hitPlayerIds,
+        hitVehicleIds,
+        origin: p.origin,
+        direction: p.vel.clone().normalize(),
+        travelTimeMs,
+        isVehicle: p.isVehicle,
+        vehicleWeaponIndex: p.vehicleWeaponIndex,
+        sourceVehicleId: p.sourceVehicleId,
+      });
+    }
+
+    // VFX for all (local and remote)
+    const w = WEAPONS[p.weaponIndex];
+    const vfxRadius = p.isVehicle ? 6.0 : w.radius;
+    if (vfxRadius > 0) {
+      this.vfx.emitExplosion(hitPos.x, hitPos.y, hitPos.z, vfxRadius);
     }
     this.vfx.emitImpact(hitPos.x, hitPos.y, hitPos.z);
   }

@@ -213,6 +213,26 @@ export class VFX {
     }
   }
 
+  // ── World-space muzzle flash (for vehicles / remote shots) ──
+  emitMuzzleFlashAt(pos: THREE.Vector3, dir: THREE.Vector3, colorHex = 0xff9944): void {
+    const col = new THREE.Color(colorHex);
+    for (let i = 0; i < 6 && this.particles.length < MAX_PARTICLES; i++) {
+      this.particles.push({
+        x: pos.x + (Math.random() - 0.5) * 0.3,
+        y: pos.y + (Math.random() - 0.5) * 0.3,
+        z: pos.z + (Math.random() - 0.5) * 0.3,
+        vx: dir.x * 16 + (Math.random() - 0.5) * 6,
+        vy: dir.y * 16 + (Math.random() - 0.5) * 6 + 0.5,
+        vz: dir.z * 16 + (Math.random() - 0.5) * 6,
+        r: col.r, g: col.g, b: col.b,
+        life: 0,
+        maxLife: 0.03 + Math.random() * 0.05,
+        size: 8 + Math.random() * 10,
+        gravity: false,
+      });
+    }
+  }
+
   // ── Impact dust ──
   emitImpact(x: number, y: number, z: number): void {
     for (let i = 0; i < 5 && this.particles.length < MAX_PARTICLES; i++) {

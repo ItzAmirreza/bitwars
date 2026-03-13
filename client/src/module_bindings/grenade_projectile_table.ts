@@ -16,18 +16,13 @@ import {
 
 export default __t.row({
   id: __t.u64().primaryKey(),
-  shooter: __t.identity(),
-  get origin() {
+  owner: __t.identity(),
+  get pos() {
     return Vec3;
   },
-  get direction() {
+  get vel() {
     return Vec3;
   },
-  get hitPos() {
-    return Vec3.name("hit_pos");
-  },
-  hasHit: __t.bool().name("has_hit"),
-  weapon: __t.u8(),
-  sourceVehicle: __t.u64().name("source_vehicle"),
-  firedAt: __t.timestamp().name("fired_at"),
+  fuseRemainingMs: __t.u32().name("fuse_remaining_ms"),
+  createdAt: __t.timestamp().name("created_at"),
 });

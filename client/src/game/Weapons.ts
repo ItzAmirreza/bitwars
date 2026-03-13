@@ -39,7 +39,7 @@ export const WEAPONS: Weapon[] = [
     projectile: { speed: Infinity, gravity: 0, size: 0, trailLength: 0, trailColor: 0, lightIntensity: 0, lightColor: 0, lightRange: 0, lifetime: 0 },
   },
   {
-    name: 'RPG', damage: 80, radius: 3.5, fireRate: 0.5, ammo: 12, maxAmmo: 12, range: 80,
+    name: 'RPG', damage: 80, radius: 3.5, fireRate: 1.0, ammo: 12, maxAmmo: 12, range: 80,
     color: '#ff4444', recoil: 0.1,
     projectile: { speed: 120, gravity: 2, size: 0.15, trailLength: 0.5, trailColor: 0xff6600, lightIntensity: 3, lightColor: 0xff4400, lightRange: 8, lifetime: 5 },
   },
@@ -62,6 +62,7 @@ export interface FireResult {
   destroyedBlocks: { x: number; y: number; z: number; blockType: number }[];
   tracerEnd: THREE.Vector3;
   hitPlayerIds: string[];
+  hitVehicleIds: number[];
   origin: THREE.Vector3;
   direction: THREE.Vector3;
   isProjectile: boolean;
@@ -70,6 +71,10 @@ export interface FireResult {
 // Player hitbox: axis-aligned bounding box (width 0.6, height 1.9, centered at feet+0.95)
 const PLAYER_HITBOX_HALF_W = 0.4;
 const PLAYER_HITBOX_HEIGHT = 1.9;
+const HELI_HITBOX_CENTER_Y = 2.5;
+const HELI_HITBOX_HALF_X = 6.4;
+const HELI_HITBOX_HALF_Y = 1.25;
+const HELI_HITBOX_HALF_Z = 4.9;
 
 export class WeaponSystem {
   private equippedWeapons: [number, number, number] = [0, 1, 2];
@@ -79,6 +84,7 @@ export class WeaponSystem {
   private camera: THREE.PerspectiveCamera;
   private world: VoxelWorld;
   private otherPlayers: Map<string, THREE.Group> = new Map();
+  private vehicles: Map<number, THREE.Group> = new Map();
   private pendingBlockDestructions: Map<string, number> = new Map();
 
   constructor(camera: THREE.PerspectiveCamera, world: VoxelWorld) {
@@ -106,6 +112,10 @@ export class WeaponSystem {
   /** Set reference to other players map for hit detection */
   setOtherPlayers(players: Map<string, THREE.Group>): void {
     this.otherPlayers = players;
+  }
+
+  setVehicles(vehicles: Map<number, THREE.Group>): void {
+    this.vehicles = vehicles;
   }
 
   get currentWeapon(): number { return this.equippedWeapons[this.currentSlot]; }
@@ -207,6 +217,7 @@ export class WeaponSystem {
         destroyedBlocks: [],
         tracerEnd: origin.clone().add(dir.clone().multiplyScalar(this.weapon.range)),
         hitPlayerIds: [],
+        hitVehicleIds: [],
         origin,
         direction: dir,
         isProjectile: true,
@@ -252,6 +263,7 @@ export class WeaponSystem {
 
     // Player hit detection: AABB raycast against other players
     const hitPlayerIds = this.raycastPlayers(origin, dir, this.weapon.range);
+    const hitVehicleIds = this.raycastVehicles(origin, dir, this.weapon.range);
 
     return {
       weaponIndex: this.currentWeapon,
@@ -259,6 +271,7 @@ export class WeaponSystem {
       destroyedBlocks: destroyed,
       tracerEnd,
       hitPlayerIds,
+      hitVehicleIds,
       origin,
       direction: dir,
       isProjectile: false,
@@ -306,6 +319,42 @@ export class WeaponSystem {
       }
     }
 
+    return hitIds;
+  }
+
+  raycastVehicles(origin: THREE.Vector3, direction: THREE.Vector3, maxRange: number): number[] {
+    const hitIds: number[] = [];
+    for (const [entityId, vehicle] of this.vehicles) {
+      const pos = vehicle.position;
+      const minX = pos.x - HELI_HITBOX_HALF_X;
+      const maxX = pos.x + HELI_HITBOX_HALF_X;
+      const minY = pos.y + HELI_HITBOX_CENTER_Y - HELI_HITBOX_HALF_Y;
+      const maxY = pos.y + HELI_HITBOX_CENTER_Y + HELI_HITBOX_HALF_Y;
+      const minZ = pos.z - HELI_HITBOX_HALF_Z;
+      const maxZ = pos.z + HELI_HITBOX_HALF_Z;
+      const t = this.rayAABB(origin, direction, minX, minY, minZ, maxX, maxY, maxZ);
+      if (t !== null && t >= 0 && t <= maxRange) hitIds.push(entityId);
+    }
+    return hitIds;
+  }
+
+  vehiclesWithinRadius(center: THREE.Vector3, radius: number): number[] {
+    const hitIds: number[] = [];
+    const r2 = radius * radius;
+    for (const [entityId, vehicle] of this.vehicles) {
+      const pos = vehicle.position;
+      const cx = center.x - pos.x;
+      const cy = center.y - (pos.y + HELI_HITBOX_CENTER_Y);
+      const cz = center.z - pos.z;
+      const closestX = Math.max(-HELI_HITBOX_HALF_X, Math.min(HELI_HITBOX_HALF_X, cx));
+      const closestY = Math.max(-HELI_HITBOX_HALF_Y, Math.min(HELI_HITBOX_HALF_Y, cy));
+      const closestZ = Math.max(-HELI_HITBOX_HALF_Z, Math.min(HELI_HITBOX_HALF_Z, cz));
+      const dx = cx - closestX;
+      const dy = cy - closestY;
+      const dz = cz - closestZ;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 <= r2) hitIds.push(entityId);
+    }
     return hitIds;
   }
 

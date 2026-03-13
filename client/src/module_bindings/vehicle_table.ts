@@ -22,6 +22,10 @@ export default __t.row({
   boosting: __t.bool(),
   rotorSpin: __t.f32().name("rotor_spin"),
   health: __t.i32(),
+  weaponType: __t.u8().name("weapon_type"),
+  weaponAmmoPrimary: __t.i32().name("weapon_ammo_primary"),
+  weaponAmmoSecondary: __t.i32().name("weapon_ammo_secondary"),
+  weaponLastFire: __t.timestamp().name("weapon_last_fire"),
   createdAt: __t.timestamp().name("created_at"),
   lastInputAt: __t.timestamp().name("last_input_at"),
 });
