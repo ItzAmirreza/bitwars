@@ -57,21 +57,71 @@ interface SpatialSoundOptions {
   getDirection?: () => Vec3Like;
 }
 
+/** Persistent audio state for a single helicopter's looping sound. */
+interface HeliSoundNodes {
+  // Nodes that need per-frame parameter updates
+  chopLfo: OscillatorNode;        // frequency = blade-pass rate
+  chopOutput: GainNode;           // layer volume
+  engineOsc1: OscillatorNode;     // engine fundamental
+  engineOsc2: OscillatorNode;     // engine detuned harmonic
+  engineGain: GainNode;           // layer volume
+  tailOsc: OscillatorNode;        // tail rotor frequency
+  tailGain: GainNode;             // layer volume
+  windFilter: BiquadFilterNode;   // wind band center shifts with speed
+  windGain: GainNode;             // wind layer volume (speed-dependent)
+  mixGain: GainNode;              // overall mix volume
+  outputFilter: BiquadFilterNode; // lowpass cutoff (cockpit muffling vs open air)
+  panner: PannerNode;             // spatial position
+  // Cleanup
+  allSources: (AudioBufferSourceNode | OscillatorNode)[];
+  // State tracking
+  wasLocal: boolean;
+  stopping: boolean;
+  stopTimer: ReturnType<typeof setTimeout> | null;
+}
+
 export class AudioSystem {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
+  private limiter: DynamicsCompressorNode | null = null;
   private stepIndex = 0; // alternates left/right foot
   private occlusionSampler: OcclusionSampler | null = null;
   private listenerPos: Vec3Like = { x: 0, y: 0, z: 0 };
   private listenerForward: Vec3Like = { x: 0, y: 0, z: -1 };
   private listenerUp: Vec3Like = { x: 0, y: 1, z: 0 };
+  private helicopterNoiseBuffer: AudioBuffer | null = null;
+  private heliSounds = new Map<number, HeliSoundNodes>();
 
   private ensure(): AudioContext {
     if (!this.ctx) {
       this.ctx = new AudioContext();
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.35;
-      this.master.connect(this.ctx.destination);
+
+      // ── Dynamics processing chain ──
+      // Compressor: tames overlapping sounds (gunfire + explosion + heli)
+      // so they don't stack into hard clipping.
+      this.compressor = this.ctx.createDynamicsCompressor();
+      this.compressor.threshold.value = -12;  // start compressing at -12 dB
+      this.compressor.knee.value = 10;        // soft onset for transparency
+      this.compressor.ratio.value = 6;        // moderate squeeze
+      this.compressor.attack.value = 0.003;   // 3 ms — catches transients
+      this.compressor.release.value = 0.15;   // 150 ms — smooth recovery
+
+      // Brick-wall limiter: absolute safety net at -1 dB.
+      // Catches anything the compressor missed so the DAC never clips.
+      this.limiter = this.ctx.createDynamicsCompressor();
+      this.limiter.threshold.value = -1;
+      this.limiter.knee.value = 0;
+      this.limiter.ratio.value = 20;
+      this.limiter.attack.value = 0.001;
+      this.limiter.release.value = 0.05;
+
+      this.master
+        .connect(this.compressor)
+        .connect(this.limiter)
+        .connect(this.ctx.destination);
       this.applyListenerToContext(this.ctx);
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
@@ -357,12 +407,12 @@ export class AudioSystem {
     bp.Q.value = 1.5;
 
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.55, t0);
+    g.gain.setValueAtTime(0.35, t0);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.1);
 
     src.connect(bp).connect(g).connect(out);
     src.start(t0);
-    src.stop(t0 + 0.1);
+    src.stop(t0 + 0.11);
 
     // Low-end punch for body
     const punch = ctx.createOscillator();
@@ -370,11 +420,11 @@ export class AudioSystem {
     punch.frequency.setValueAtTime(180, t0);
     punch.frequency.exponentialRampToValueAtTime(60, t0 + 0.05);
     const pg = ctx.createGain();
-    pg.gain.setValueAtTime(0.25, t0);
+    pg.gain.setValueAtTime(0.16, t0);
     pg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.05);
     punch.connect(pg).connect(out);
     punch.start(t0);
-    punch.stop(t0 + 0.05);
+    punch.stop(t0 + 0.06);
 
     // Metallic ping — brighter
     const osc = ctx.createOscillator();
@@ -383,12 +433,12 @@ export class AudioSystem {
     osc.frequency.exponentialRampToValueAtTime(3000, t0 + 0.06);
 
     const og = ctx.createGain();
-    og.gain.setValueAtTime(0.1, t0);
+    og.gain.setValueAtTime(0.07, t0);
     og.gain.exponentialRampToValueAtTime(0.001, t0 + 0.06);
 
     osc.connect(og).connect(out);
     osc.start(t0);
-    osc.stop(t0 + 0.06);
+    osc.stop(t0 + 0.07);
 
     // Shell casing tinkle (delayed, tracks moving source)
     this.scheduleSpatialLayer(spatial, busOptions, 0.22, 0.08, (lateCtx, lateT, lateOut) => {
@@ -431,12 +481,12 @@ export class AudioSystem {
     lp.Q.value = 1.2;
 
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.75, t0);
+    g.gain.setValueAtTime(0.42, t0);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.28);
 
     src.connect(lp).connect(g).connect(out);
     src.start(t0);
-    src.stop(t0 + 0.28);
+    src.stop(t0 + 0.29);
 
     // Sub thump — deeper and wider
     const sub = ctx.createOscillator();
@@ -445,23 +495,26 @@ export class AudioSystem {
     sub.frequency.exponentialRampToValueAtTime(20, t0 + 0.2);
 
     const sg = ctx.createGain();
-    sg.gain.setValueAtTime(0.7, t0);
+    sg.gain.setValueAtTime(0.40, t0);
     sg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.2);
 
     sub.connect(sg).connect(out);
     sub.start(t0);
-    sub.stop(t0 + 0.2);
+    sub.stop(t0 + 0.21);
 
     // High snap (mechanical action)
     const snap = ctx.createOscillator();
     snap.type = 'square';
     snap.frequency.value = 3500;
+    const snapLp = ctx.createBiquadFilter();
+    snapLp.type = 'lowpass';
+    snapLp.frequency.value = 6000;
     const snapG = ctx.createGain();
-    snapG.gain.setValueAtTime(0.12, t0);
+    snapG.gain.setValueAtTime(0.07, t0);
     snapG.gain.exponentialRampToValueAtTime(0.001, t0 + 0.025);
-    snap.connect(snapG).connect(out);
+    snap.connect(snapLp).connect(snapG).connect(out);
     snap.start(t0);
-    snap.stop(t0 + 0.025);
+    snap.stop(t0 + 0.03);
 
     // Mid-range body (the "whump")
     const body = ctx.createOscillator();
@@ -472,11 +525,11 @@ export class AudioSystem {
     bodyLp.type = 'lowpass';
     bodyLp.frequency.value = 500;
     const bg = ctx.createGain();
-    bg.gain.setValueAtTime(0.3, t0);
+    bg.gain.setValueAtTime(0.18, t0);
     bg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.08);
     body.connect(bodyLp).connect(bg).connect(out);
     body.start(t0);
-    body.stop(t0 + 0.08);
+    body.stop(t0 + 0.09);
 
     // Pump-action rack (delayed, tracks moving source)
     this.scheduleSpatialLayer(spatial, busOptions, 0.24, 0.2, (lateCtx, lateT, lateOut) => {
@@ -522,7 +575,7 @@ export class AudioSystem {
     osc.frequency.exponentialRampToValueAtTime(60, t0 + 0.35);
 
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.35, t0);
+    g.gain.setValueAtTime(0.22, t0);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.35);
 
     const lp = ctx.createBiquadFilter();
@@ -531,17 +584,17 @@ export class AudioSystem {
 
     osc.connect(lp).connect(g).connect(out);
     osc.start(t0);
-    osc.stop(t0 + 0.35);
+    osc.stop(t0 + 0.36);
 
     // Hiss
     const src = ctx.createBufferSource();
     src.buffer = this.noise(0.3, 0.25);
     const hg = ctx.createGain();
-    hg.gain.setValueAtTime(0.15, t0);
+    hg.gain.setValueAtTime(0.10, t0);
     hg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.3);
     src.connect(hg).connect(out);
     src.start(t0);
-    src.stop(t0 + 0.3);
+    src.stop(t0 + 0.31);
   }
 
   // ── MACHINE GUN: Tight, bright chatter ──
@@ -571,22 +624,25 @@ export class AudioSystem {
     bp.frequency.value = 3200;
     bp.Q.value = 2.2;
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.28, t0);
+    g.gain.setValueAtTime(0.20, t0);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.05);
     src.connect(bp).connect(g).connect(out);
     src.start(t0);
-    src.stop(t0 + 0.05);
+    src.stop(t0 + 0.06);
 
     const crack = ctx.createOscillator();
     crack.type = 'square';
     crack.frequency.setValueAtTime(1900, t0);
     crack.frequency.exponentialRampToValueAtTime(1200, t0 + 0.03);
+    const crackLp = ctx.createBiquadFilter();
+    crackLp.type = 'lowpass';
+    crackLp.frequency.value = 5000;
     const cg = ctx.createGain();
-    cg.gain.setValueAtTime(0.1, t0);
+    cg.gain.setValueAtTime(0.06, t0);
     cg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.03);
-    crack.connect(cg).connect(out);
+    crack.connect(crackLp).connect(cg).connect(out);
     crack.start(t0);
-    crack.stop(t0 + 0.03);
+    crack.stop(t0 + 0.04);
   }
 
   // ── GRENADE LAUNCHER: Heavy thunk + pressurized pop ──
@@ -614,11 +670,11 @@ export class AudioSystem {
     thunk.frequency.setValueAtTime(130, t0);
     thunk.frequency.exponentialRampToValueAtTime(55, t0 + 0.12);
     const tg = ctx.createGain();
-    tg.gain.setValueAtTime(0.42, t0);
+    tg.gain.setValueAtTime(0.28, t0);
     tg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.12);
     thunk.connect(tg).connect(out);
     thunk.start(t0);
-    thunk.stop(t0 + 0.12);
+    thunk.stop(t0 + 0.13);
 
     const hiss = ctx.createBufferSource();
     hiss.buffer = this.noise(0.18, 0.2);
@@ -627,11 +683,11 @@ export class AudioSystem {
     hp.frequency.value = 1200;
     hp.Q.value = 0.9;
     const hg = ctx.createGain();
-    hg.gain.setValueAtTime(0.16, t0);
+    hg.gain.setValueAtTime(0.10, t0);
     hg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.18);
     hiss.connect(hp).connect(hg).connect(out);
     hiss.start(t0);
-    hiss.stop(t0 + 0.18);
+    hiss.stop(t0 + 0.19);
   }
 
   // ── EXPLOSION: Massive boom ──
@@ -664,12 +720,12 @@ export class AudioSystem {
     lp.frequency.exponentialRampToValueAtTime(80, t0 + 0.6);
 
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.9, t0);
+    g.gain.setValueAtTime(0.50, t0);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.6);
 
     src.connect(lp).connect(g).connect(out);
     src.start(t0);
-    src.stop(t0 + 0.6);
+    src.stop(t0 + 0.61);
 
     // Deep sub
     const sub = ctx.createOscillator();
@@ -677,11 +733,11 @@ export class AudioSystem {
     sub.frequency.setValueAtTime(65, t0);
     sub.frequency.exponentialRampToValueAtTime(18, t0 + 0.5);
     const sg = ctx.createGain();
-    sg.gain.setValueAtTime(0.8, t0);
+    sg.gain.setValueAtTime(0.45, t0);
     sg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.5);
     sub.connect(sg).connect(out);
     sub.start(t0);
-    sub.stop(t0 + 0.5);
+    sub.stop(t0 + 0.51);
 
     // Crackle overtone
     const src2 = ctx.createBufferSource();
@@ -690,11 +746,11 @@ export class AudioSystem {
     hp.type = 'highpass';
     hp.frequency.value = 4000;
     const g2 = ctx.createGain();
-    g2.gain.setValueAtTime(0.25, t0);
+    g2.gain.setValueAtTime(0.14, t0);
     g2.gain.exponentialRampToValueAtTime(0.001, t0 + 0.3);
     src2.connect(hp).connect(g2).connect(out);
     src2.start(t0);
-    src2.stop(t0 + 0.3);
+    src2.stop(t0 + 0.31);
 
     // Reverb echo tail — delayed quieter explosion for distance feel
     const echo = ctx.createBufferSource();
@@ -705,11 +761,11 @@ export class AudioSystem {
     echoLp.frequency.exponentialRampToValueAtTime(60, t0 + 0.9);
     const echoG = ctx.createGain();
     echoG.gain.setValueAtTime(0, t0);
-    echoG.gain.setValueAtTime(0.2, t0 + 0.15);
+    echoG.gain.setValueAtTime(0.12, t0 + 0.15);
     echoG.gain.exponentialRampToValueAtTime(0.001, t0 + 0.9);
     echo.connect(echoLp).connect(echoG).connect(out);
     echo.start(t0 + 0.15);
-    echo.stop(t0 + 0.9);
+    echo.stop(t0 + 0.91);
   }
 
   // ── BLOCK BREAK: Short crumble ──
@@ -785,12 +841,15 @@ export class AudioSystem {
     const osc = ctx.createOscillator();
     osc.type = 'square';
     osc.frequency.value = freq;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = Math.min(freq * 3, 8000); // tame harsh square harmonics
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.12, time);
+    g.gain.setValueAtTime(0.08, time);
     g.gain.exponentialRampToValueAtTime(0.001, time + dur);
-    osc.connect(g).connect(out);
+    osc.connect(lp).connect(g).connect(out);
     osc.start(time);
-    osc.stop(time + dur);
+    osc.stop(time + dur + 0.005);
   }
 
   // ── EMPTY CLICK ──
@@ -840,15 +899,15 @@ export class AudioSystem {
     o2.frequency.value = 2000;
 
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.25, t);
+    g.gain.setValueAtTime(0.15, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
 
     o1.connect(g).connect(this.master!);
     o2.connect(g);
     o1.start(t);
-    o1.stop(t + 0.1);
+    o1.stop(t + 0.11);
     o2.start(t);
-    o2.stop(t + 0.1);
+    o2.stop(t + 0.11);
 
     // Crispy noise transient for impact feel
     const crunch = ctx.createBufferSource();
@@ -857,11 +916,11 @@ export class AudioSystem {
     hp.type = 'highpass';
     hp.frequency.value = 3000;
     const cg = ctx.createGain();
-    cg.gain.setValueAtTime(0.1, t);
+    cg.gain.setValueAtTime(0.06, t);
     cg.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
     crunch.connect(hp).connect(cg).connect(this.master!);
     crunch.start(t);
-    crunch.stop(t + 0.03);
+    crunch.stop(t + 0.04);
   }
 
   // ── KILL CONFIRMED: Triumphant ascending tones ──
@@ -872,7 +931,7 @@ export class AudioSystem {
     // Three ascending tones for a satisfying "ding-ding-DING"
     const freqs = [880, 1175, 1760];
     const delays = [0, 0.06, 0.12];
-    const vols = [0.15, 0.18, 0.25];
+    const vols = [0.10, 0.12, 0.16];
 
     for (let i = 0; i < 3; i++) {
       const osc = ctx.createOscillator();
@@ -934,12 +993,12 @@ export class AudioSystem {
     lp.frequency.exponentialRampToValueAtTime(80, t + 0.8);
 
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.5, t);
+    g.gain.setValueAtTime(0.30, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
 
     osc.connect(lp).connect(g).connect(out);
     osc.start(t);
-    osc.stop(t + 0.8);
+    osc.stop(t + 0.81);
 
     // Impact noise
     const src = ctx.createBufferSource();
@@ -948,11 +1007,11 @@ export class AudioSystem {
     lp2.type = 'lowpass';
     lp2.frequency.value = 300;
     const g2 = ctx.createGain();
-    g2.gain.setValueAtTime(0.6, t);
+    g2.gain.setValueAtTime(0.35, t);
     g2.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
     src.connect(lp2).connect(g2).connect(out);
     src.start(t);
-    src.stop(t + 0.3);
+    src.stop(t + 0.31);
 
     // Flatline beep (delayed)
     const beep = ctx.createOscillator();
@@ -989,11 +1048,11 @@ export class AudioSystem {
     lub.frequency.setValueAtTime(55, t);
     lub.frequency.exponentialRampToValueAtTime(30, t + 0.1);
     const lg = ctx.createGain();
-    lg.gain.setValueAtTime(0.35, t);
+    lg.gain.setValueAtTime(0.22, t);
     lg.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
     lub.connect(lg).connect(out);
     lub.start(t);
-    lub.stop(t + 0.12);
+    lub.stop(t + 0.13);
 
     // Second beat (dub) - slightly delayed, tracks source
     this.scheduleSpatialLayer(spatial, busOptions, 0.05, 0.15, (lateCtx, lateT, lateOut) => {
@@ -1128,21 +1187,21 @@ export class AudioSystem {
     lp.type = 'lowpass';
     lp.frequency.value = 400;
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.5, t);
+    g.gain.setValueAtTime(0.30, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
     src.connect(lp).connect(g).connect(out);
     src.start(t);
-    src.stop(t + 0.15);
+    src.stop(t + 0.16);
 
     const sub = ctx.createOscillator();
     sub.type = 'sine';
     sub.frequency.value = 50;
     const sg = ctx.createGain();
-    sg.gain.setValueAtTime(0.4, t);
+    sg.gain.setValueAtTime(0.24, t);
     sg.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
     sub.connect(sg).connect(out);
     sub.start(t);
-    sub.stop(t + 0.12);
+    sub.stop(t + 0.13);
   }
 
   // ── CRUMBLE: Blocks becoming unstable ──
@@ -1230,85 +1289,95 @@ export class AudioSystem {
       {
         gain: 1,
         minDistance: 1.5,
-        maxDistance: 70,
-        rolloff: 1.9,
+        maxDistance: 45,
+        rolloff: 2.2,
         coneInner: 360,
         coneOuter: 360,
         coneOuterGain: 1,
         occlusionStrength: 0.95,
-        baseLowpass: 9500,
-        reverbAmount: 0.04,
+        baseLowpass: 3500,
+        reverbAmount: 0.08,
       },
-      0.08,
+      0.12,
     );
 
-    // Alternate left/right foot: ±5% pitch variation
     this.stepIndex++;
-    const footPitch = this.stepIndex % 2 === 0 ? 1.05 : 0.95;
-    // Random organic variation ±15%
-    const variation = 0.85 + Math.random() * 0.30;
+    const footPitch = this.stepIndex % 2 === 0 ? 1.04 : 0.96;
+    const variation = 0.92 + Math.random() * 0.16;
+    const baseVol = sprinting ? 0.04 : 0.025;
 
-    const baseVol = sprinting ? 0.10 : 0.06;
+    // ── Layer 1: Heel strike — soft thud, gentle attack ──
+    const heel = ctx.createBufferSource();
+    const heelLen = sprinting ? 0.07 : 0.08;
+    heel.buffer = this.noise(heelLen, 0.45);
+    heel.playbackRate.value = footPitch * variation;
+    const heelLp = ctx.createBiquadFilter();
+    heelLp.type = 'lowpass';
+    heelLp.frequency.value = (sprinting ? 350 : 280) * variation;
+    heelLp.Q.value = 0.5;
+    const heelGain = ctx.createGain();
+    // Gentle fade-in to avoid harsh transient click
+    heelGain.gain.setValueAtTime(0, t);
+    heelGain.gain.linearRampToValueAtTime(baseVol * 0.8, t + 0.005);
+    heelGain.gain.linearRampToValueAtTime(baseVol * 0.35, t + 0.025);
+    heelGain.gain.exponentialRampToValueAtTime(0.001, t + heelLen);
+    heel.connect(heelLp).connect(heelGain).connect(out);
+    heel.start(t);
+    heel.stop(t + heelLen);
 
-    // ── Layer 1: Impact thump (low-frequency sine for "weight") ──
-    const impact = ctx.createOscillator();
-    impact.type = 'sine';
-    const impactFreq = (sprinting ? 100 : 80) * footPitch * variation;
-    impact.frequency.setValueAtTime(impactFreq, t);
-    impact.frequency.exponentialRampToValueAtTime(impactFreq * 0.5, t + 0.04);
-    const impactGain = ctx.createGain();
-    const impactVol = baseVol * 1.2;
-    impactGain.gain.setValueAtTime(impactVol, t);
-    impactGain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
-    impact.connect(impactGain).connect(out);
-    impact.start(t);
-    impact.stop(t + 0.04);
+    // ── Layer 2: Scuff / sole scrape — subdued mid-frequency texture ──
+    const scuff = ctx.createBufferSource();
+    const scuffLen = sprinting ? 0.05 : 0.06;
+    scuff.buffer = this.noise(scuffLen, 0.5);
+    scuff.playbackRate.value = (0.9 + Math.random() * 0.2) * footPitch;
+    const scuffBp = ctx.createBiquadFilter();
+    scuffBp.type = 'lowpass';
+    scuffBp.frequency.value = (sprinting ? 900 : 700) * variation;
+    scuffBp.Q.value = 0.25;
+    const scuffHp = ctx.createBiquadFilter();
+    scuffHp.type = 'highpass';
+    scuffHp.frequency.value = 250;
+    scuffHp.Q.value = 0.25;
+    const scuffGain = ctx.createGain();
+    const scuffVol = baseVol * (sprinting ? 0.3 : 0.2);
+    scuffGain.gain.setValueAtTime(0, t);
+    scuffGain.gain.linearRampToValueAtTime(scuffVol, t + 0.01);
+    scuffGain.gain.exponentialRampToValueAtTime(0.001, t + scuffLen);
+    scuff.connect(scuffHp).connect(scuffBp).connect(scuffGain).connect(out);
+    scuff.start(t);
+    scuff.stop(t + scuffLen);
 
-    // ── Layer 2: Surface texture (filtered noise for grit/stone) ──
-    const surface = ctx.createBufferSource();
-    surface.buffer = this.noise(0.08, 0.25);
-    const surfBp = ctx.createBiquadFilter();
-    surfBp.type = 'bandpass';
-    surfBp.frequency.value = (sprinting ? 1000 : 700) * variation;
-    surfBp.Q.value = 0.8;
-    const surfGain = ctx.createGain();
-    const surfVol = sprinting ? baseVol * 1.0 : baseVol * 0.7;
-    surfGain.gain.setValueAtTime(surfVol, t);
-    surfGain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-    surface.connect(surfBp).connect(surfGain).connect(out);
-    surface.start(t);
-    surface.stop(t + 0.08);
+    // ── Layer 3: Subtle crunch — very gentle stone surface texture ──
+    const crunch = ctx.createBufferSource();
+    crunch.buffer = this.noise(0.025, 0.15);
+    crunch.playbackRate.value = (0.85 + Math.random() * 0.3) * footPitch;
+    const crunchBp = ctx.createBiquadFilter();
+    crunchBp.type = 'bandpass';
+    crunchBp.frequency.value = (sprinting ? 1200 : 900) * variation;
+    crunchBp.Q.value = 0.25;
+    const crunchGain = ctx.createGain();
+    crunchGain.gain.setValueAtTime(baseVol * 0.1, t);
+    crunchGain.gain.exponentialRampToValueAtTime(0.001, t + 0.025);
+    crunch.connect(crunchBp).connect(crunchGain).connect(out);
+    crunch.start(t);
+    crunch.stop(t + 0.025);
 
-    // ── Layer 3: High transient click for crispness ──
-    const transient = ctx.createBufferSource();
-    transient.buffer = this.noise(0.015, 0.1);
-    const tranHp = ctx.createBiquadFilter();
-    tranHp.type = 'bandpass';
-    tranHp.frequency.value = (sprinting ? 3500 : 2500) * variation;
-    tranHp.Q.value = 1.5;
-    const tranGain = ctx.createGain();
-    const tranVol = sprinting ? baseVol * 0.6 : baseVol * 0.3;
-    tranGain.gain.setValueAtTime(tranVol, t);
-    tranGain.gain.exponentialRampToValueAtTime(0.001, t + 0.015);
-    transient.connect(tranHp).connect(tranGain).connect(out);
-    transient.start(t);
-    transient.stop(t + 0.015);
-
-    // ── Sprint extra: Slightly longer tail with more mid energy ──
+    // ── Sprint extra: Second impact from toe push-off ──
     if (sprinting) {
-      const tail = ctx.createBufferSource();
-      tail.buffer = this.noise(0.06, 0.2);
-      const tailBp = ctx.createBiquadFilter();
-      tailBp.type = 'bandpass';
-      tailBp.frequency.value = 1800 * variation;
-      tailBp.Q.value = 0.6;
-      const tailGain = ctx.createGain();
-      tailGain.gain.setValueAtTime(0, t);
-      tailGain.gain.setValueAtTime(baseVol * 0.4, t + 0.01);
-      tailGain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
-      tail.connect(tailBp).connect(tailGain).connect(out);
-      tail.start(t + 0.01);
-      tail.stop(t + 0.07);
+      const toe = ctx.createBufferSource();
+      toe.buffer = this.noise(0.04, 0.4);
+      toe.playbackRate.value = footPitch * (1.05 + Math.random() * 0.1);
+      const toeLp = ctx.createBiquadFilter();
+      toeLp.type = 'lowpass';
+      toeLp.frequency.value = 450 * variation;
+      toeLp.Q.value = 0.4;
+      const toeGain = ctx.createGain();
+      toeGain.gain.setValueAtTime(0, t + 0.03);
+      toeGain.gain.linearRampToValueAtTime(baseVol * 0.25, t + 0.038);
+      toeGain.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+      toe.connect(toeLp).connect(toeGain).connect(out);
+      toe.start(t + 0.03);
+      toe.stop(t + 0.08);
     }
   }
 
@@ -1382,75 +1451,79 @@ export class AudioSystem {
     const busOptions: SpatialBusOptions = {
       gain: 1,
       minDistance: 1.7,
-      maxDistance: 95,
-      rolloff: 1.65,
+      maxDistance: 55,
+      rolloff: 2.0,
       coneInner: 360,
       coneOuter: 360,
       coneOuterGain: 1,
       occlusionStrength: 0.95,
-      baseLowpass: 9500,
-      reverbAmount: 0.06,
+      baseLowpass: 3500,
+      reverbAmount: 0.08,
     };
-    const { ctx, t, out } = this.resolveOutput(spatial, busOptions, 0.12);
-    const vol = 0.12 + intensity * 0.5;
+    const { ctx, t, out } = this.resolveOutput(spatial, busOptions, 0.15);
+    const vol = 0.03 + intensity * 0.07;
 
-    // ── Boot-slap transient: sharp initial contact ──
+    // ── Boot-slap transient: initial contact — gentle fade-in ──
     const slap = ctx.createBufferSource();
-    slap.buffer = this.noise(0.025, 0.08);
+    slap.buffer = this.noise(0.04, 0.18);
     const slapBp = ctx.createBiquadFilter();
     slapBp.type = 'bandpass';
-    slapBp.frequency.value = 1500 + intensity * 1000;
-    slapBp.Q.value = 1.2;
+    slapBp.frequency.value = 600 + intensity * 300;
+    slapBp.Q.value = 0.35;
     const slapGain = ctx.createGain();
-    slapGain.gain.setValueAtTime(vol * 0.8, t);
-    slapGain.gain.exponentialRampToValueAtTime(0.001, t + 0.025);
+    // Fade in over 2ms to avoid transient click
+    slapGain.gain.setValueAtTime(0, t);
+    slapGain.gain.linearRampToValueAtTime(vol * 0.4, t + 0.002);
+    slapGain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
     slap.connect(slapBp).connect(slapGain).connect(out);
     slap.start(t);
-    slap.stop(t + 0.025);
+    slap.stop(t + 0.04);
 
-    // ── Impact body: filtered noise thud ──
+    // ── Impact body: filtered noise thud — lower cutoff, softer ──
     const src = ctx.createBufferSource();
-    src.buffer = this.noise(0.15, 0.15);
+    src.buffer = this.noise(0.15, 0.25);
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 250 + intensity * 500;
+    lp.frequency.value = 180 + intensity * 220;
     const g = ctx.createGain();
-    g.gain.setValueAtTime(vol, t);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol * 0.7, t + 0.003);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
     src.connect(lp).connect(g).connect(out);
     src.start(t);
     src.stop(t + 0.15);
 
-    // ── Sub-bass thump: scales dramatically with intensity ──
+    // ── Sub-bass thump: much gentler, higher frequency floor ──
     const sub = ctx.createOscillator();
     sub.type = 'sine';
-    const subFreq = 30 + (1 - intensity) * 20; // heavier = lower
+    const subFreq = 55 + (1 - intensity) * 15;
     sub.frequency.setValueAtTime(subFreq, t);
-    sub.frequency.exponentialRampToValueAtTime(subFreq * 0.4, t + 0.12);
+    sub.frequency.exponentialRampToValueAtTime(subFreq * 0.6, t + 0.08);
     const sg = ctx.createGain();
-    const subVol = vol * (0.3 + intensity * 0.7); // dramatic scaling
-    sg.gain.setValueAtTime(subVol, t);
-    sg.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    const subVol = vol * (0.15 + intensity * 0.2);
+    sg.gain.setValueAtTime(0, t);
+    sg.gain.linearRampToValueAtTime(subVol, t + 0.003);
+    sg.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
     sub.connect(sg).connect(out);
     sub.start(t);
-    sub.stop(t + 0.12);
+    sub.stop(t + 0.08);
 
-    // ── Gear rattle for heavy landings: delayed high-frequency noise ──
-    if (intensity > 0.35) {
-      const rattleVol = (intensity - 0.35) * 0.12;
-      this.scheduleSpatialLayer(spatial, busOptions, 0.12, 0.05, (lateCtx, lateT, lateOut) => {
+    // ── Gear rattle for heavy landings: softer, narrower band ──
+    if (intensity > 0.55) {
+      const rattleVol = (intensity - 0.55) * 0.03;
+      this.scheduleSpatialLayer(spatial, busOptions, 0.15, 0.05, (lateCtx, lateT, lateOut) => {
         const rattle = lateCtx.createBufferSource();
-        rattle.buffer = this.noise(0.08, 0.15);
+        rattle.buffer = this.noise(0.06, 0.25);
         const rattleBp = lateCtx.createBiquadFilter();
         rattleBp.type = 'bandpass';
-        rattleBp.frequency.value = 3000 + Math.random() * 1500;
-        rattleBp.Q.value = 1.0;
+        rattleBp.frequency.value = 1200 + Math.random() * 500;
+        rattleBp.Q.value = 0.3;
         const rattleGain = lateCtx.createGain();
         rattleGain.gain.setValueAtTime(rattleVol, lateT);
-        rattleGain.gain.exponentialRampToValueAtTime(0.001, lateT + 0.08);
+        rattleGain.gain.exponentialRampToValueAtTime(0.001, lateT + 0.06);
         rattle.connect(rattleBp).connect(rattleGain).connect(lateOut);
         rattle.start(lateT);
-        rattle.stop(lateT + 0.08);
+        rattle.stop(lateT + 0.06);
       });
     }
   }
@@ -1619,14 +1692,14 @@ export class AudioSystem {
     osc.frequency.setValueAtTime(300, t);
     osc.frequency.setValueAtTime(200, t + 0.08);
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.08, t);
+    g.gain.setValueAtTime(0.06, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
     lp.frequency.value = 800;
     osc.connect(lp).connect(g).connect(this.master!);
     osc.start(t);
-    osc.stop(t + 0.15);
+    osc.stop(t + 0.16);
   }
 
   // ── UI: Type keystroke ──
@@ -1643,6 +1716,276 @@ export class AudioSystem {
     osc.connect(g).connect(this.master!);
     osc.start(t);
     osc.stop(t + 0.02);
+  }
+
+  // ── HELICOPTER: Persistent spatial rotor/engine/wind loop ──
+  //
+  // Layered procedural sound design:
+  //   Layer 1 — BLADE CHOP: White noise AM-modulated at blade-pass frequency
+  //             Creates the cinematic "whup-whup-whup" rhythm
+  //   Layer 2 — ENGINE DRONE: Detuned sine+triangle pair, warm sub-bass hum
+  //   Layer 3 — TAIL ROTOR: Subtle high-frequency sawtooth buzz
+  //   Layer 4 — WIND NOISE: Speed-proportional filtered noise for air rush
+  //
+  // All layers mix into a single output with HRTF spatial panning.
+  // Parameters modulate smoothly each frame based on rotor spin rate and speed.
+
+  private getOrCreateNoiseBuffer(): AudioBuffer {
+    if (this.helicopterNoiseBuffer) return this.helicopterNoiseBuffer;
+    const ctx = this.ensure();
+    const sr = ctx.sampleRate;
+    const len = sr * 2; // 2-second loop
+    const buf = ctx.createBuffer(1, len, sr);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    this.helicopterNoiseBuffer = buf;
+    return buf;
+  }
+
+  startHelicopterSound(id: number): void {
+    if (this.heliSounds.has(id)) return; // already running
+    const ctx = this.ensure();
+    const t = ctx.currentTime;
+    const noiseBuf = this.getOrCreateNoiseBuffer();
+    const allSources: (AudioBufferSourceNode | OscillatorNode)[] = [];
+
+    // ── Layer 1: Blade Chop ──
+    // White noise → bandpass(100Hz) → AM gain → output gain
+    const chopSrc = ctx.createBufferSource();
+    chopSrc.buffer = noiseBuf;
+    chopSrc.loop = true;
+    allSources.push(chopSrc);
+
+    const chopBp = ctx.createBiquadFilter();
+    chopBp.type = 'bandpass';
+    chopBp.frequency.value = 100;
+    chopBp.Q.value = 0.7;
+
+    // AM modulation: gain swings between 0 and ~0.7 at blade-pass frequency
+    const chopAmGain = ctx.createGain();
+    chopAmGain.gain.value = 0.35; // DC bias
+
+    const chopLfo = ctx.createOscillator();
+    chopLfo.type = 'sine';
+    chopLfo.frequency.value = 6; // initial blade-pass Hz (updated per frame)
+    allSources.push(chopLfo);
+
+    const chopLfoGain = ctx.createGain();
+    chopLfoGain.gain.value = 0.35; // AM depth matches DC bias → full 0-to-0.7 swing
+
+    chopLfo.connect(chopLfoGain).connect(chopAmGain.gain);
+
+    const chopOutput = ctx.createGain();
+    chopOutput.gain.value = 0.14;
+
+    chopSrc.connect(chopBp).connect(chopAmGain).connect(chopOutput);
+
+    // ── Layer 2: Engine Drone ──
+    // Detuned sine+triangle oscillators → lowpass → gain
+    const engineOsc1 = ctx.createOscillator();
+    engineOsc1.type = 'sine';
+    engineOsc1.frequency.value = 80;
+    allSources.push(engineOsc1);
+
+    const engineOsc2 = ctx.createOscillator();
+    engineOsc2.type = 'triangle';
+    engineOsc2.frequency.value = 82;
+    allSources.push(engineOsc2);
+
+    const engineLp = ctx.createBiquadFilter();
+    engineLp.type = 'lowpass';
+    engineLp.frequency.value = 220;
+
+    const engineGain = ctx.createGain();
+    engineGain.gain.value = 0.07;
+
+    // Merge both oscillators into the filter
+    const engineMerge = ctx.createGain();
+    engineMerge.gain.value = 0.5;
+    engineOsc1.connect(engineMerge);
+    engineOsc2.connect(engineMerge);
+    engineMerge.connect(engineLp).connect(engineGain);
+
+    // ── Layer 3: Tail Rotor ──
+    // Sawtooth → lowpass → very subtle gain
+    const tailOsc = ctx.createOscillator();
+    tailOsc.type = 'sawtooth';
+    tailOsc.frequency.value = 340;
+    allSources.push(tailOsc);
+
+    const tailLp = ctx.createBiquadFilter();
+    tailLp.type = 'lowpass';
+    tailLp.frequency.value = 800;
+
+    const tailGain = ctx.createGain();
+    tailGain.gain.value = 0.015;
+
+    tailOsc.connect(tailLp).connect(tailGain);
+
+    // ── Layer 4: Wind Noise ──
+    // Noise → bandpass(600Hz) → speed-proportional gain
+    const windSrc = ctx.createBufferSource();
+    windSrc.buffer = noiseBuf;
+    windSrc.loop = true;
+    allSources.push(windSrc);
+
+    const windBp = ctx.createBiquadFilter();
+    windBp.type = 'bandpass';
+    windBp.frequency.value = 600;
+    windBp.Q.value = 0.4;
+
+    const windGain = ctx.createGain();
+    windGain.gain.value = 0; // starts silent, scales with speed
+
+    windSrc.connect(windBp).connect(windGain);
+
+    // ── Output chain ──
+    // All layers → mixGain → outputLowpass → panner → master
+    const mixGain = ctx.createGain();
+    mixGain.gain.setValueAtTime(0, t);
+    mixGain.gain.linearRampToValueAtTime(0.13, t + 1.5); // cinematic fade-in
+
+    chopOutput.connect(mixGain);
+    engineGain.connect(mixGain);
+    tailGain.connect(mixGain);
+    windGain.connect(mixGain);
+
+    const outputFilter = ctx.createBiquadFilter();
+    outputFilter.type = 'lowpass';
+    outputFilter.frequency.value = 4500;
+
+    const panner = ctx.createPanner();
+    panner.panningModel = 'HRTF';
+    panner.distanceModel = 'inverse';
+    panner.refDistance = 18;
+    panner.maxDistance = 100;
+    panner.rolloffFactor = 1.8;
+    panner.coneInnerAngle = 360;
+    panner.coneOuterAngle = 360;
+
+    mixGain.connect(outputFilter).connect(panner).connect(this.master!);
+
+    // Start all sources
+    chopSrc.start(t);
+    chopLfo.start(t);
+    engineOsc1.start(t);
+    engineOsc2.start(t);
+    tailOsc.start(t);
+    windSrc.start(t);
+
+    this.heliSounds.set(id, {
+      chopLfo, chopOutput,
+      engineOsc1, engineOsc2, engineGain,
+      tailOsc, tailGain,
+      windFilter: windBp, windGain,
+      mixGain, outputFilter, panner,
+      allSources,
+      wasLocal: false,
+      stopping: false,
+      stopTimer: null,
+    });
+  }
+
+  updateHelicopterSound(
+    id: number,
+    position: Vec3Like,
+    spinRate: number,
+    speed: number,
+    isLocal: boolean,
+  ): void {
+    const nodes = this.heliSounds.get(id);
+    if (!nodes || nodes.stopping || !this.ctx) return;
+    const t = this.ctx.currentTime;
+
+    // ── Blade-pass frequency ──
+    // 4-blade rotor: bladePassHz = (spinRate / 2PI) * 4
+    const bladePassHz = (spinRate / (2 * Math.PI)) * 4;
+    nodes.chopLfo.frequency.setTargetAtTime(
+      Math.max(0.5, bladePassHz), t, 0.08,
+    );
+
+    // Chop intensity: louder when spinning faster
+    const chopVol = 0.08 + Math.min(spinRate / 18, 1) * 0.10;
+    nodes.chopOutput.gain.setTargetAtTime(chopVol, t, 0.15);
+
+    // ── Engine drone pitch ──
+    // Slight pitch rise with rotor speed for dynamism
+    const engineBase = 72 + spinRate * 0.8;
+    nodes.engineOsc1.frequency.setTargetAtTime(engineBase, t, 0.15);
+    nodes.engineOsc2.frequency.setTargetAtTime(engineBase * 1.025, t, 0.15);
+
+    // Engine volume: slightly louder when working harder
+    const engineVol = 0.05 + Math.min(spinRate / 18, 1) * 0.04;
+    nodes.engineGain.gain.setTargetAtTime(engineVol, t, 0.2);
+
+    // ── Tail rotor ──
+    const tailFreq = 240 + spinRate * 10;
+    nodes.tailOsc.frequency.setTargetAtTime(tailFreq, t, 0.1);
+    const tailVol = 0.010 + Math.min(spinRate / 18, 1) * 0.012;
+    nodes.tailGain.gain.setTargetAtTime(tailVol, t, 0.15);
+
+    // ── Wind noise ──
+    const windAmount = Math.min(1, speed / 30);
+    nodes.windGain.gain.setTargetAtTime(windAmount * 0.05, t, 0.25);
+    nodes.windFilter.frequency.setTargetAtTime(500 + windAmount * 900, t, 0.2);
+
+    // ── Local vs remote tonal adjustment ──
+    if (isLocal !== nodes.wasLocal) {
+      nodes.wasLocal = isLocal;
+      // Cockpit: muffled, slightly quieter. Open air: brighter, fuller.
+      const cutoff = isLocal ? 1800 : 4500;
+      const vol = isLocal ? 0.10 : 0.13;
+      nodes.outputFilter.frequency.setTargetAtTime(cutoff, t, 0.3);
+      nodes.mixGain.gain.setTargetAtTime(vol, t, 0.3);
+    }
+
+    // ── Panner position ──
+    this.setPannerPosition(nodes.panner, position, t);
+  }
+
+  stopHelicopterSound(id: number, destroyed = false): void {
+    const nodes = this.heliSounds.get(id);
+    if (!nodes || nodes.stopping) return;
+    nodes.stopping = true;
+    if (!this.ctx) {
+      // Context gone, just clean up references
+      this.heliSounds.delete(id);
+      return;
+    }
+    const t = this.ctx.currentTime;
+
+    if (destroyed) {
+      // Dramatic engine death: pitch bend down + fast fade
+      const fadeTime = 0.6;
+      nodes.chopLfo.frequency.setTargetAtTime(0.8, t, 0.12);
+      nodes.engineOsc1.frequency.setTargetAtTime(40, t, 0.15);
+      nodes.engineOsc2.frequency.setTargetAtTime(41, t, 0.15);
+      nodes.tailOsc.frequency.setTargetAtTime(120, t, 0.1);
+      nodes.mixGain.gain.setTargetAtTime(0, t, 0.15);
+      nodes.stopTimer = setTimeout(() => {
+        this.cleanupHeliSound(id);
+      }, fadeTime * 1000);
+    } else {
+      // Gentle fade out
+      const fadeTime = 0.8;
+      nodes.mixGain.gain.setTargetAtTime(0, t, 0.2);
+      nodes.stopTimer = setTimeout(() => {
+        this.cleanupHeliSound(id);
+      }, fadeTime * 1000);
+    }
+  }
+
+  private cleanupHeliSound(id: number): void {
+    const nodes = this.heliSounds.get(id);
+    if (!nodes) return;
+    for (const src of nodes.allSources) {
+      try { src.stop(); } catch { /* already stopped */ }
+      src.disconnect();
+    }
+    nodes.mixGain.disconnect();
+    nodes.outputFilter.disconnect();
+    nodes.panner.disconnect();
+    this.heliSounds.delete(id);
   }
 
   // ── AMBIENT: Menu background drone ──
@@ -1699,16 +2042,28 @@ export class AudioSystem {
   }
 
   setMasterVolume(volume: number): void {
-    if (this.master) {
-      this.master.gain.value = Math.max(0, Math.min(1, volume));
+    if (this.master && this.ctx) {
+      const v = Math.max(0, Math.min(1, volume));
+      // Smooth ramp avoids clicks from abrupt gain changes
+      this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.02);
     }
   }
 
   dispose(): void {
+    // Stop all helicopter sounds immediately
+    for (const id of Array.from(this.heliSounds.keys())) {
+      const nodes = this.heliSounds.get(id);
+      if (nodes?.stopTimer) clearTimeout(nodes.stopTimer);
+      this.cleanupHeliSound(id);
+    }
+    this.heliSounds.clear();
+    this.helicopterNoiseBuffer = null;
     if (this.ctx) {
       this.ctx.close();
       this.ctx = null;
       this.master = null;
+      this.compressor = null;
+      this.limiter = null;
     }
   }
 }

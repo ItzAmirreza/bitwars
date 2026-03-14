@@ -3351,6 +3351,7 @@ export class Engine {
     this.helicopters.set(entityId, mesh);
     this.helicopterBuffers.set(entityId, new InterpolationBuffer());
     this.ensureHelicopterLightRig(entityId, mesh);
+    this.audio.startHelicopterSound(entityId);
     return mesh;
   }
 
@@ -3378,21 +3379,22 @@ export class Engine {
     const now = performance.now();
     const last = this.recentHelicopterBreakups.get(entityId) ?? -Infinity;
     if (now - last < 1100) {
-      this.removeHelicopterMesh(entityId);
+      this.removeHelicopterMesh(entityId, true);
       return;
     }
     this.recentHelicopterBreakups.set(entityId, now);
-    this.removeHelicopterMesh(entityId);
+    this.removeHelicopterMesh(entityId, true);
     this.spawnHelicopterBreakup(pos, yaw, intensity);
   }
 
-  private removeHelicopterMesh(entityId: number): void {
+  private removeHelicopterMesh(entityId: number, destroyed = false): void {
     const timer = this.pendingHelicopterDestroyFallbacks.get(entityId);
     if (timer !== undefined) {
       window.clearTimeout(timer);
       this.pendingHelicopterDestroyFallbacks.delete(entityId);
     }
     this.removeHelicopterLightRig(entityId);
+    this.audio.stopHelicopterSound(entityId, destroyed);
     const mesh = this.helicopters.get(entityId);
     if (!mesh) return;
     this.scene.remove(mesh);
@@ -4321,21 +4323,27 @@ export class Engine {
         const t = this.elapsedTime;
 
         // Vertical bob — two overlapping waves
-        const bobY = (Math.sin(t * 1.1 + phase) * 0.045
-                    + Math.sin(t * 2.3 + phase * 0.6) * 0.025) * idleBlend;
+        const bobY = (Math.sin(t * 1.1 + phase) * 0.14
+                    + Math.sin(t * 2.3 + phase * 0.6) * 0.08
+                    + Math.sin(t * 3.7 + phase * 1.3) * 0.035) * idleBlend;
         // Lateral drift
-        const driftX = (Math.sin(t * 0.7 + phase + 1.0) * 0.03
-                      + Math.sin(t * 1.9 + phase * 0.8) * 0.015) * idleBlend;
-        const driftZ = (Math.sin(t * 0.9 + phase + 2.0) * 0.025
-                      + Math.sin(t * 1.5 + phase * 1.1) * 0.012) * idleBlend;
+        const driftX = (Math.sin(t * 0.7 + phase + 1.0) * 0.10
+                      + Math.sin(t * 1.9 + phase * 0.8) * 0.05
+                      + Math.sin(t * 2.6 + phase * 1.4) * 0.025) * idleBlend;
+        const driftZ = (Math.sin(t * 0.9 + phase + 2.0) * 0.08
+                      + Math.sin(t * 1.5 + phase * 1.1) * 0.04
+                      + Math.sin(t * 2.9 + phase * 0.5) * 0.02) * idleBlend;
 
-        // Rotation sway (radians) — very subtle
-        const swayPitch = (Math.sin(t * 0.8 + phase + 0.5) * 0.012
-                         + Math.sin(t * 1.7 + phase * 0.9) * 0.006) * idleBlend;
-        const swayRoll  = (Math.sin(t * 0.6 + phase + 3.0) * 0.014
-                         + Math.sin(t * 1.3 + phase * 0.7) * 0.007) * idleBlend;
-        const swayYaw   = (Math.sin(t * 0.5 + phase + 4.0) * 0.008
-                         + Math.sin(t * 1.1 + phase * 1.2) * 0.004) * idleBlend;
+        // Rotation sway (radians)
+        const swayPitch = (Math.sin(t * 0.8 + phase + 0.5) * 0.035
+                         + Math.sin(t * 1.7 + phase * 0.9) * 0.018
+                         + Math.sin(t * 2.8 + phase * 1.1) * 0.008) * idleBlend;
+        const swayRoll  = (Math.sin(t * 0.6 + phase + 3.0) * 0.04
+                         + Math.sin(t * 1.3 + phase * 0.7) * 0.02
+                         + Math.sin(t * 2.4 + phase * 0.3) * 0.01) * idleBlend;
+        const swayYaw   = (Math.sin(t * 0.5 + phase + 4.0) * 0.025
+                         + Math.sin(t * 1.1 + phase * 1.2) * 0.012
+                         + Math.sin(t * 2.1 + phase * 0.9) * 0.006) * idleBlend;
 
         // Apply to orient wrapper (additive to its fixed PI/2 yaw)
         orientWrapper.position.set(driftX, bobY, driftZ);
@@ -4435,6 +4443,14 @@ export class Engine {
           }
         });
       }
+
+      // ── HELICOPTER AUDIO UPDATE ──
+      // Feed position, spin rate, and speed to the spatial audio loop each frame
+      const heliSpeed = (mesh.userData.derivedHSpeed as number) ?? 0;
+      this.audio.updateHelicopterSound(
+        id, mesh.position, spinRate, heliSpeed,
+        id === this.mountedVehicleId,
+      );
 
       mesh.updateMatrixWorld();
       this.updateHelicopterLightRig(id, mesh);
