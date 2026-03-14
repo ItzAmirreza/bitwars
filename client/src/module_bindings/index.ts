@@ -62,9 +62,10 @@ import ExplosionEventRow from "./explosion_event_table";
 import GrenadeProjectileRow from "./grenade_projectile_table";
 import KillEventRow from "./kill_event_table";
 import PlayerRow from "./player_table";
+import PlayerAmmoRow from "./player_ammo_table";
+import PlayerFireStateRow from "./player_fire_state_table";
 import PlayerLoadoutRow from "./player_loadout_table";
 import PlayerMovementRow from "./player_movement_table";
-import PlayerWeaponStateRow from "./player_weapon_state_table";
 import ShotEventRow from "./shot_event_table";
 import VehicleRow from "./vehicle_table";
 import VehicleDestroyEventRow from "./vehicle_destroy_event_table";
@@ -153,6 +154,28 @@ const tablesSchema = __schema({
       { name: 'player_identity_key', constraint: 'unique', columns: ['identity'] },
     ],
   }, PlayerRow),
+  player_ammo: __table({
+    name: 'player_ammo',
+    indexes: [
+      { accessor: 'id', name: 'player_ammo_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'player_ammo_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, PlayerAmmoRow),
+  player_fire_state: __table({
+    name: 'player_fire_state',
+    indexes: [
+      { accessor: 'identity', name: 'player_fire_state_identity_idx_btree', algorithm: 'btree', columns: [
+        'identity',
+      ] },
+    ],
+    constraints: [
+      { name: 'player_fire_state_identity_key', constraint: 'unique', columns: ['identity'] },
+    ],
+  }, PlayerFireStateRow),
   player_loadout: __table({
     name: 'player_loadout',
     indexes: [
@@ -175,17 +198,6 @@ const tablesSchema = __schema({
       { name: 'player_movement_identity_key', constraint: 'unique', columns: ['identity'] },
     ],
   }, PlayerMovementRow),
-  player_weapon_state: __table({
-    name: 'player_weapon_state',
-    indexes: [
-      { accessor: 'identity', name: 'player_weapon_state_identity_idx_btree', algorithm: 'btree', columns: [
-        'identity',
-      ] },
-    ],
-    constraints: [
-      { name: 'player_weapon_state_identity_key', constraint: 'unique', columns: ['identity'] },
-    ],
-  }, PlayerWeaponStateRow),
   shot_event: __table({
     name: 'shot_event',
     indexes: [

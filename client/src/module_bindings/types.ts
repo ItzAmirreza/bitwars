@@ -173,6 +173,20 @@ export const Player = __t.object("Player", {
 });
 export type Player = __Infer<typeof Player>;
 
+export const PlayerAmmo = __t.object("PlayerAmmo", {
+  id: __t.u64(),
+  identity: __t.identity(),
+  weaponIndex: __t.u8(),
+  ammo: __t.i32(),
+});
+export type PlayerAmmo = __Infer<typeof PlayerAmmo>;
+
+export const PlayerFireState = __t.object("PlayerFireState", {
+  identity: __t.identity(),
+  lastFireTime: __t.timestamp(),
+});
+export type PlayerFireState = __Infer<typeof PlayerFireState>;
+
 export const PlayerLoadout = __t.object("PlayerLoadout", {
   username: __t.string(),
   slot1: __t.u8(),
@@ -191,17 +205,6 @@ export const PlayerMovementState = __t.object("PlayerMovementState", {
   violationCount: __t.u32(),
 });
 export type PlayerMovementState = __Infer<typeof PlayerMovementState>;
-
-export const PlayerWeaponState = __t.object("PlayerWeaponState", {
-  identity: __t.identity(),
-  ammoRifle: __t.i32(),
-  ammoShotgun: __t.i32(),
-  ammoRpg: __t.i32(),
-  ammoMachineGun: __t.i32(),
-  ammoGrenade: __t.i32(),
-  lastFireTime: __t.timestamp(),
-});
-export type PlayerWeaponState = __Infer<typeof PlayerWeaponState>;
 
 export const Rotation = __t.object("Rotation", {
   yaw: __t.f32(),

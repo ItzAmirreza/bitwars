@@ -2600,12 +2600,12 @@ export class Engine {
       });
     }
 
-    // Server-authoritative ammo sync
-    this.conn.db.player_weapon_state.onInsert((_ctx: unknown, state: any) => {
-      this.syncAmmoFromServer(state);
+    // Server-authoritative ammo sync (normalized: 1 row per player+weapon)
+    this.conn.db.player_ammo.onInsert((_ctx: unknown, row: any) => {
+      this.syncAmmoRow(row);
     });
-    this.conn.db.player_weapon_state.onUpdate((_ctx: unknown, _old: unknown, state: any) => {
-      this.syncAmmoFromServer(state);
+    this.conn.db.player_ammo.onUpdate((_ctx: unknown, _old: unknown, row: any) => {
+      this.syncAmmoRow(row);
     });
 
     // Persistent loadout sync
@@ -2710,18 +2710,14 @@ export class Engine {
     }
   }
 
-  /** Update local ammo from server weapon state */
-  private syncAmmoFromServer(state: any): void {
+  /** Update local ammo from a single PlayerAmmo row */
+  private syncAmmoRow(row: any): void {
     if (!this.conn) return;
-    // Only sync our own weapon state
-    if (!this.localIdentity || state.identity.toHexString() !== this.localIdentity) return;
-
-    // Update local weapon ammo from server state
-    WEAPONS[0].ammo = state.ammoRifle;
-    WEAPONS[1].ammo = state.ammoShotgun;
-    WEAPONS[2].ammo = state.ammoRpg;
-    WEAPONS[3].ammo = state.ammoMachineGun;
-    WEAPONS[4].ammo = state.ammoGrenade;
+    if (!this.localIdentity || row.identity.toHexString() !== this.localIdentity) return;
+    const idx = row.weaponIndex;
+    if (idx >= 0 && idx < WEAPONS.length) {
+      WEAPONS[idx].ammo = row.ammo;
+    }
   }
 
   private drawNametag(

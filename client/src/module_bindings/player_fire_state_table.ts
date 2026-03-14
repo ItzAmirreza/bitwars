@@ -12,10 +12,5 @@ import {
 
 export default __t.row({
   identity: __t.identity().primaryKey(),
-  ammoRifle: __t.i32().name("ammo_rifle"),
-  ammoShotgun: __t.i32().name("ammo_shotgun"),
-  ammoRpg: __t.i32().name("ammo_rpg"),
-  ammoMachineGun: __t.i32().name("ammo_machine_gun"),
-  ammoGrenade: __t.i32().name("ammo_grenade"),
   lastFireTime: __t.timestamp().name("last_fire_time"),
 });

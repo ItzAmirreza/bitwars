@@ -1,0 +1,181 @@
+// ── Vehicle Helpers ──
+// Hitbox calculations, ground height, dismount logic, vehicle damage.
+
+use spacetimedb::{Identity, ReducerContext, Table};
+
+use super::math::*;
+use crate::constants::*;
+use crate::tables::*;
+use crate::types::*;
+
+pub fn helicopter_hitbox_bounds(entity: &Entity) -> (Vec3, Vec3) {
+    let center = Vec3 {
+        x: entity.pos.x,
+        y: entity.pos.y + HELI_HITBOX_CENTER_Y,
+        z: entity.pos.z,
+    };
+    (
+        Vec3 {
+            x: center.x - HELI_HITBOX_HALF_X,
+            y: center.y - HELI_HITBOX_HALF_Y,
+            z: center.z - HELI_HITBOX_HALF_Z,
+        },
+        Vec3 {
+            x: center.x + HELI_HITBOX_HALF_X,
+            y: center.y + HELI_HITBOX_HALF_Y,
+            z: center.z + HELI_HITBOX_HALF_Z,
+        },
+    )
+}
+
+pub fn helicopter_ground_rest_height(ctx: &ReducerContext, x: f32, z: f32) -> f32 {
+    use crate::worldgen::{AIR, WORLD_SIZE_X, WORLD_SIZE_Y, WORLD_SIZE_Z};
+
+    let sx = x.floor() as i32;
+    let sz = z.floor() as i32;
+    if sx < 0 || sx >= WORLD_SIZE_X as i32 || sz < 0 || sz >= WORLD_SIZE_Z as i32 {
+        return 3.0;
+    }
+    for y in (0..WORLD_SIZE_Y as i32).rev() {
+        if matches!(get_block_type(ctx, sx, y, sz), Some(bt) if bt != AIR) {
+            return y as f32 + 2.0;
+        }
+    }
+    3.0
+}
+
+pub fn clamp_vehicle_axis(v: f32) -> f32 {
+    v.clamp(-1.0, 1.0)
+}
+
+pub fn dismount_player_internal(
+    ctx: &ReducerContext,
+    player: Player,
+    force_to_ground: bool,
+) -> Player {
+    let mut next = player;
+    if next.mounted_vehicle_id == 0 {
+        return next;
+    }
+
+    let mut dismount_pos = next.pos.clone();
+    if let Some(entity) = ctx.db.entity().id().find(&next.mounted_vehicle_id) {
+        if let Some(vehicle) = ctx.db.vehicle().entity_id().find(&next.mounted_vehicle_id) {
+            ctx.db.vehicle().entity_id().update(Vehicle {
+                pilot_identity: None,
+                input_forward: 0.0,
+                input_strafe: 0.0,
+                input_lift: 0.0,
+                input_yaw: 0.0,
+                boosting: false,
+                ..vehicle
+            });
+        }
+        let right_x = entity.rot.yaw.cos();
+        let right_z = -entity.rot.yaw.sin();
+        dismount_pos = Vec3 {
+            x: entity.pos.x + right_x * 3.4,
+            y: entity.pos.y,
+            z: entity.pos.z + right_z * 3.4,
+        };
+    }
+
+    if force_to_ground {
+        let gy =
+            helicopter_ground_rest_height(ctx, dismount_pos.x, dismount_pos.z) + PLAYER_EYE_HEIGHT;
+        dismount_pos.y = gy.max(0.0);
+    }
+
+    next.pos = clamp_pos(&dismount_pos);
+    next.vel = ZERO_VEL;
+    next.mounted_vehicle_id = 0;
+    next
+}
+
+pub fn apply_vehicle_damage(
+    ctx: &ReducerContext,
+    attacker: Identity,
+    vehicle_id: u64,
+    damage: i32,
+    hit_weapon: u8,
+    impact_pos: Vec3,
+) {
+    let Some(vehicle) = ctx.db.vehicle().entity_id().find(&vehicle_id) else {
+        return;
+    };
+    let Some(entity) = ctx.db.entity().id().find(&vehicle_id) else {
+        return;
+    };
+    if !entity.active || vehicle.health <= 0 {
+        return;
+    }
+
+    let heli_center = Vec3 {
+        x: entity.pos.x,
+        y: entity.pos.y + HELI_HITBOX_CENTER_Y,
+        z: entity.pos.z,
+    };
+
+    let next_health = (vehicle.health - damage).max(0);
+    if next_health > 0 {
+        ctx.db.vehicle().entity_id().update(Vehicle {
+            health: next_health,
+            ..vehicle
+        });
+        ctx.db.explosion_event().insert(ExplosionEvent {
+            id: 0,
+            origin: attacker,
+            pos: heli_center.clone(),
+            radius: 1.4,
+            weapon: hit_weapon,
+            destroyed_blocks: Vec::new(),
+            created_at: ctx.timestamp,
+        });
+        crate::grenades::push_grenades_from_explosion(ctx, &heli_center, 1.4, 0);
+        return;
+    }
+
+    let pilot = vehicle.pilot_identity;
+    ctx.db.vehicle().entity_id().update(Vehicle {
+        pilot_identity: None,
+        input_forward: 0.0,
+        input_strafe: 0.0,
+        input_lift: 0.0,
+        input_yaw: 0.0,
+        boosting: false,
+        health: 0,
+        ..vehicle
+    });
+
+    if let Some(pilot_id) = pilot {
+        if let Some(player) = ctx.db.player().identity().find(pilot_id) {
+            let dismounted = dismount_player_internal(ctx, player, true);
+            ctx.db.player().identity().update(dismounted.clone());
+            super::player_state::init_movement_state(ctx, dismounted.identity, &dismounted.pos);
+            super::entity_ops::sync_player_entity(ctx, &dismounted);
+        }
+    }
+
+    ctx.db.explosion_event().insert(ExplosionEvent {
+        id: 0,
+        origin: attacker,
+        pos: impact_pos.clone(),
+        radius: 6.0,
+        weapon: 4,
+        destroyed_blocks: Vec::new(),
+        created_at: ctx.timestamp,
+    });
+    crate::grenades::push_grenades_from_explosion(ctx, &impact_pos, 6.0, 0);
+
+    ctx.db.vehicle_destroy_event().insert(VehicleDestroyEvent {
+        id: 0,
+        entity_id: vehicle_id,
+        vehicle_type: vehicle.vehicle_type,
+        pos: entity.pos.clone(),
+        rot: entity.rot.clone(),
+        created_at: ctx.timestamp,
+    });
+
+    ctx.db.vehicle().entity_id().delete(&vehicle_id);
+    ctx.db.entity().id().delete(&vehicle_id);
+}
