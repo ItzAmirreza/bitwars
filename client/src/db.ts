@@ -54,6 +54,7 @@ export function connect(
             "SELECT * FROM entity",
             "SELECT * FROM vehicle",
             "SELECT * FROM grenade_projectile",
+            "SELECT * FROM kill_event",
           ]);
       })
       .onConnectError((_ctx: ErrorContext, err: Error) => {

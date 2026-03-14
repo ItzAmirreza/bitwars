@@ -18,6 +18,24 @@ interface KillNotification {
   type: 'kill' | 'death' | 'streak';
 }
 
+interface KillFeedEntry {
+  id: number;
+  killerName: string;
+  victimName: string;
+  weapon: number;
+  time: number;
+}
+
+const WEAPON_LABELS: Record<number, string> = {
+  0: 'Rifle',
+  1: 'Shotgun',
+  2: 'RPG',
+  3: 'Machine Gun',
+  4: 'Grenade',
+  100: 'Minigun',
+  101: 'Rocket',
+};
+
 const MAX_CHAT_MESSAGES = 80;
 
 function getMessageTimestamp(sentAt: { toMillis?: () => bigint } | null | undefined): number {
@@ -45,13 +63,6 @@ function mergeMessages(prev: DisplayMessage[], next: DisplayMessage[]): DisplayM
   return Array.from(merged.values())
     .sort((a, b) => (a.sentAt === b.sentAt ? a.id - b.id : a.sentAt - b.sentAt))
     .slice(-MAX_CHAT_MESSAGES);
-}
-
-function formatChatTime(sentAt: number): string {
-  const date = new Date(sentAt);
-  const hours = date.getHours().toString().padStart(2, '0');
-  const minutes = date.getMinutes().toString().padStart(2, '0');
-  return `${hours}:${minutes}`;
 }
 
 // Type-based coloring: hitscan = cyan, explosive = orange
@@ -495,6 +506,10 @@ export function GameScreen() {
     nearVehicle: false,
   });
 
+  // ── Kill feed from server ──
+  const [killFeed, setKillFeed] = useState<KillFeedEntry[]>([]);
+  const killFeedIdRef = useRef(0);
+
   // ── Kill/Death tracking ──
   const prevKillsRef = useRef(0);
   const prevDeathsRef = useRef(0);
@@ -663,6 +678,41 @@ export function GameScreen() {
       }
     };
   }, [connection]);
+
+  // Subscribe to kill events for the kill feed
+  useEffect(() => {
+    if (!connection) return;
+    const db = connection.db as any;
+    if (!db.kill_event) return;
+
+    const handleInsert = (_ctx: unknown, ev: any) => {
+      const entry: KillFeedEntry = {
+        id: ++killFeedIdRef.current,
+        killerName: String(ev.killerName ?? '???'),
+        victimName: String(ev.victimName ?? '???'),
+        weapon: Number(ev.weapon ?? 0),
+        time: Date.now(),
+      };
+      setKillFeed((prev) => [...prev, entry].slice(-8));
+    };
+
+    db.kill_event.onInsert(handleInsert);
+
+    return () => {
+      if (typeof db.kill_event.removeOnInsert === 'function') {
+        db.kill_event.removeOnInsert(handleInsert);
+      }
+    };
+  }, [connection]);
+
+  // Auto-remove kill feed entries after 6 seconds
+  useEffect(() => {
+    if (killFeed.length === 0) return;
+    const timer = setTimeout(() => {
+      setKillFeed((prev) => prev.filter((e) => Date.now() - e.time < 6000));
+    }, 6100);
+    return () => clearTimeout(timer);
+  }, [killFeed]);
 
   // Round timer countdown from WorldConfig
   useEffect(() => {
@@ -1373,16 +1423,49 @@ export function GameScreen() {
         </div>
       )}
 
-      {/* ═══ KILL NOTIFICATIONS (top-right, CS:GO style kill feed) ═══ */}
+      {/* ═══ KILL FEED (top-right, who killed who) ═══ */}
       <div className="absolute z-20 pointer-events-none" style={{
         top: '60px',
-        right: '16px',
+        right: '8px',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'flex-end',
-        gap: '4px',
-        maxWidth: '280px',
+        gap: '2px',
       }}>
+        {/* Server kill feed entries */}
+        {killFeed.map((entry) => {
+          const age = (Date.now() - entry.time) / 1000;
+          const opacity = age < 4 ? 1 : Math.max(0, 1 - (age - 4) / 2);
+          const weaponLabel = WEAPON_LABELS[entry.weapon] ?? `W${entry.weapon}`;
+          const isLocalKiller = entry.killerName === username;
+          const isLocalVictim = entry.victimName === username;
+          return (
+            <div
+              key={entry.id}
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: '11px',
+                lineHeight: '1.3',
+                padding: '2px 8px',
+                background: 'rgba(0,0,0,0.45)',
+                opacity,
+                textShadow: '1px 1px 2px rgba(0,0,0,0.9)',
+                transform: `translateX(${age < 0.2 ? (1 - age / 0.2) * 16 : 0}px)`,
+                transition: 'opacity 0.4s',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <span style={{ color: isLocalKiller ? '#55ff55' : '#ffffff', fontWeight: isLocalKiller ? 700 : 400 }}>
+                {entry.killerName}
+              </span>
+              <span style={{ color: '#888888', margin: '0 5px' }}>[{weaponLabel}]</span>
+              <span style={{ color: isLocalVictim ? '#ff5555' : '#ffffff', fontWeight: isLocalVictim ? 700 : 400 }}>
+                {entry.victimName}
+              </span>
+            </div>
+          );
+        })}
+        {/* Local kill/death/streak notifications */}
         {killNotifications.map((notif) => {
           const age = (Date.now() - notif.time) / 1000;
           const opacity = age < 2 ? 1 : Math.max(0, 1 - (age - 2));
@@ -1390,29 +1473,23 @@ export function GameScreen() {
           const isDeath = notif.type === 'death';
           return (
             <div
-              key={notif.id}
+              key={`notif-${notif.id}`}
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: isStreak ? '12px' : '11px',
-                fontWeight: isStreak ? 'bold' : '600',
-                color: isDeath ? 'var(--c-red)' : isStreak ? 'var(--c-amber)' : 'var(--c-green)',
-                background: isDeath
-                  ? 'rgba(255,0,51,0.12)'
-                  : isStreak
-                    ? 'rgba(255,152,0,0.12)'
-                    : 'rgba(0,255,65,0.1)',
-                border: `1px solid ${isDeath ? 'rgba(255,0,51,0.3)' : isStreak ? 'rgba(255,152,0,0.3)' : 'rgba(0,255,65,0.25)'}`,
-                padding: '4px 12px',
-                letterSpacing: '0.15em',
+                fontWeight: 'bold',
+                color: isDeath ? '#ff5555' : isStreak ? '#ffaa00' : '#55ff55',
+                padding: '2px 8px',
+                background: 'rgba(0,0,0,0.45)',
+                letterSpacing: '0.12em',
                 opacity,
-                transform: `translateX(${age < 0.3 ? (1 - age / 0.3) * 20 : 0}px)`,
-                transition: 'opacity 0.3s',
-                backdropFilter: 'blur(4px)',
                 textShadow: isDeath
-                  ? '0 0 10px rgba(255,0,51,0.6)'
+                  ? '0 0 8px rgba(255,85,85,0.6)'
                   : isStreak
-                    ? '0 0 10px rgba(255,152,0,0.6)'
-                    : '0 0 8px rgba(0,255,65,0.4)',
+                    ? '0 0 8px rgba(255,170,0,0.6)'
+                    : '0 0 6px rgba(85,255,85,0.4)',
+                transform: `translateX(${age < 0.2 ? (1 - age / 0.2) * 16 : 0}px)`,
+                transition: 'opacity 0.3s',
               }}
             >
               {notif.text}
@@ -1829,125 +1906,79 @@ export function GameScreen() {
         </div>
       )}
 
-      {/* ═══ CHAT OVERLAY ═══ */}
+      {/* ═══ CHAT OVERLAY — Minecraft-style ═══ */}
       <div
-        className="absolute z-10"
+        className="absolute z-20"
         style={{
-          bottom: '140px',
-          left: '16px',
-          width: 'min(420px, calc(100vw - 32px))',
-          pointerEvents: chatOpen ? 'auto' : 'none',
+          left: '2px',
+          bottom: '50%',
+          transform: 'translateY(50%)',
+          width: 'min(420px, 40vw)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'flex-end',
+          pointerEvents: 'none',
         }}
       >
-        {chatOpen && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '6px',
-              padding: '0 2px',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '10px',
-              letterSpacing: '0.12em',
-              color: 'var(--c-muted2)',
-            }}
-          >
-            <span style={{ color: 'var(--c-green)' }}>COMMS</span>
-            <span>/help for commands</span>
-          </div>
-        )}
-
-        {/* Message list */}
+        {/* Message list — stacks upward from bottom */}
         <div
           ref={chatListRef}
           style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: '6px',
-            maxHeight: chatOpen ? '260px' : '140px',
+            maxHeight: chatOpen ? '45vh' : '180px',
             overflowY: chatOpen ? 'auto' : 'hidden',
-            padding: chatOpen ? '10px' : '0',
-            background: chatOpen ? 'linear-gradient(180deg, rgba(6,8,16,0.9) 0%, rgba(6,8,16,0.72) 100%)' : 'transparent',
-            border: chatOpen ? '1px solid var(--c-border)' : 'none',
-            borderRadius: '6px',
-            boxShadow: chatOpen ? '0 20px 48px rgba(0,0,0,0.34)' : 'none',
-            backdropFilter: chatOpen ? 'blur(10px)' : 'none',
+            padding: '0 4px 2px 4px',
             overscrollBehavior: 'contain',
-            scrollbarGutter: 'stable',
+            pointerEvents: chatOpen ? 'auto' : 'none',
+            maskImage: chatOpen ? 'none' : 'linear-gradient(to bottom, transparent 0%, black 15%)',
+            WebkitMaskImage: chatOpen ? 'none' : 'linear-gradient(to bottom, transparent 0%, black 15%)',
           }}
         >
           {chatMessages
             .filter((m) => chatOpen || getMessageOpacity(m.sentAt) > 0.01)
-            .slice(chatOpen ? -40 : -8)
+            .slice(chatOpen ? -50 : -10)
             .map((msg) => {
               const isSystem = msg.senderName === '[SERVER]';
-              const opacity = getMessageOpacity(msg.sentAt);
+              const opacity = chatOpen ? 1 : getMessageOpacity(msg.sentAt);
               return (
                 <div
                   key={msg.id}
                   style={{
                     fontFamily: 'var(--font-mono)',
-                    fontSize: '11px',
-                    lineHeight: '1.45',
+                    fontSize: '12px',
+                    lineHeight: '1.3',
                     opacity,
-                    padding: chatOpen ? '7px 8px' : '2px 6px',
-                    background: isSystem ? 'rgba(255,184,0,0.08)' : 'rgba(6,8,16,0.52)',
-                    border: chatOpen ? `1px solid ${isSystem ? 'rgba(255,184,0,0.22)' : 'rgba(128,255,179,0.12)'}` : 'none',
-                    borderRadius: '4px',
-                    transition: 'opacity 0.5s',
+                    padding: '1px 4px',
+                    background: chatOpen ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.35)',
+                    transition: 'opacity 0.4s',
+                    textShadow: '1px 1px 2px rgba(0,0,0,0.9)',
                   }}
                 >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'baseline',
-                      gap: '8px',
-                      marginBottom: '2px',
-                    }}
-                  >
-                    <span
-                      style={{
-                        color: 'var(--c-muted2)',
-                        fontSize: '9px',
-                        letterSpacing: '0.08em',
-                        minWidth: '38px',
-                      }}
-                    >
-                      {formatChatTime(msg.sentAt)}
-                    </span>
-                    <span
-                      style={{
-                        color: isSystem ? 'var(--c-amber)' : 'var(--c-green)',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {msg.senderName}
-                    </span>
-                  </div>
-                  <span
-                    style={{
-                      color: isSystem ? 'var(--c-amber)' : 'var(--c-text)',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                    }}
-                  >
-                    {msg.text}
-                  </span>
+                  {isSystem ? (
+                    <span style={{ color: '#ffaa00' }}>{msg.text}</span>
+                  ) : (
+                    <>
+                      <span style={{ color: '#e0e0e0', fontWeight: 400 }}>{'<'}</span>
+                      <span style={{ color: '#55ff55', fontWeight: 400 }}>{msg.senderName}</span>
+                      <span style={{ color: '#e0e0e0', fontWeight: 400 }}>{'> '}</span>
+                      <span style={{ color: '#ffffff' }}>{msg.text}</span>
+                    </>
+                  )}
                 </div>
               );
             })}
         </div>
 
-        {/* Chat input */}
+        {/* Chat input — full-width bar at the very bottom */}
         {chatOpen && (
-          <div style={{ marginTop: '4px' }}>
+          <div style={{ pointerEvents: 'auto' }}>
             <input
               ref={chatInputRef}
               autoFocus
               maxLength={200}
               value={chatDraft}
-              placeholder="Message or command"
+              placeholder=""
               onChange={(e) => setChatDraft(e.currentTarget.value)}
               onKeyDown={(e) => {
                 e.stopPropagation();
@@ -1965,31 +1996,18 @@ export function GameScreen() {
               style={{
                 width: '100%',
                 fontFamily: 'var(--font-mono)',
-                fontSize: '11px',
-                background: 'rgba(6,8,16,0.85)',
-                border: '1px solid var(--c-border)',
-                color: 'var(--c-text)',
-                padding: '8px 10px',
+                fontSize: '12px',
+                background: 'rgba(0,0,0,0.5)',
+                border: 'none',
+                borderTop: '1px solid rgba(255,255,255,0.15)',
+                color: '#ffffff',
+                padding: '6px 4px',
                 outline: 'none',
-                borderRadius: '4px',
-                boxShadow: '0 10px 28px rgba(0,0,0,0.28)',
+                borderRadius: 0,
+                caretColor: '#55ff55',
+                textShadow: '1px 1px 2px rgba(0,0,0,0.9)',
               }}
             />
-          </div>
-        )}
-
-        {/* Chat hint when not open */}
-        {!chatOpen && !loadoutOpen && state.locked && (
-          <div
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '9px',
-              color: 'var(--c-muted2)',
-              marginTop: '4px',
-              letterSpacing: '0.1em',
-            }}
-          >
-            [F] VEHICLE  [T] CHAT  [E] LOADOUT  [/ ] COMMANDS
           </div>
         )}
       </div>

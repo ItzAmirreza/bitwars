@@ -153,6 +153,7 @@ When implementing ANY new feature:
 - Using `lerp(pos, 0.3)` instead of the interpolation buffer for remote players
 - Creating event tables without scheduled cleanup (rows accumulate forever)
 - Editing files in `client/src/module_bindings/` (they get overwritten by `spacetime generate`)
+- **Forgetting to add new tables to the subscription list in `client/src/db.ts`** — this project does NOT use `subscribeToAllTables()`. It uses an explicit whitelist of `SELECT * FROM <table>` queries. If you add a new server table and set up `onInsert`/`onUpdate`/`onDelete` handlers on the client, the callbacks will silently never fire unless the table is also added to the `.subscribe([...])` array in `db.ts`. Always trace the full data pipeline: server table → publish → regenerate bindings → **add to `db.ts` subscription list** → client `onInsert` handler.
 
 ---
 

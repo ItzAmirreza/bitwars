@@ -131,6 +131,15 @@ export const HealthRegenTick = __t.object("HealthRegenTick", {
 });
 export type HealthRegenTick = __Infer<typeof HealthRegenTick>;
 
+export const KillEvent = __t.object("KillEvent", {
+  id: __t.u64(),
+  killerName: __t.string(),
+  victimName: __t.string(),
+  weapon: __t.u8(),
+  createdAt: __t.timestamp(),
+});
+export type KillEvent = __Infer<typeof KillEvent>;
+
 export const MapResetTimer = __t.object("MapResetTimer", {
   scheduledId: __t.u64(),
   scheduledAt: __t.scheduleAt(),

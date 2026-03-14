@@ -60,6 +60,7 @@ import DetachEventRow from "./detach_event_table";
 import EntityRow from "./entity_table";
 import ExplosionEventRow from "./explosion_event_table";
 import GrenadeProjectileRow from "./grenade_projectile_table";
+import KillEventRow from "./kill_event_table";
 import PlayerRow from "./player_table";
 import PlayerLoadoutRow from "./player_loadout_table";
 import PlayerMovementRow from "./player_movement_table";
@@ -130,6 +131,17 @@ const tablesSchema = __schema({
       { name: 'grenade_projectile_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, GrenadeProjectileRow),
+  kill_event: __table({
+    name: 'kill_event',
+    indexes: [
+      { accessor: 'id', name: 'kill_event_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'kill_event_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, KillEventRow),
   player: __table({
     name: 'player',
     indexes: [

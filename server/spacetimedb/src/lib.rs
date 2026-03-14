@@ -335,6 +335,20 @@ pub struct ExplosionEvent {
     pub created_at: Timestamp,
 }
 
+/// Short-lived row: broadcast when a player kills another player.
+/// All clients use this to render the kill feed.
+#[table(accessor = kill_event, public)]
+pub struct KillEvent {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub killer_name: String,
+    pub victim_name: String,
+    /// Weapon index (0=Rifle, 1=Shotgun, 2=RPG, 3=MachineGun, 4=Grenade, 100=VehicleMinigun, 101=VehicleRocket)
+    pub weapon: u8,
+    pub created_at: Timestamp,
+}
+
 /// Short-lived row: helicopter destroyed, clients spawn breakup VFX.
 #[table(accessor = vehicle_destroy_event, public)]
 pub struct VehicleDestroyEvent {
@@ -520,6 +534,31 @@ fn timestamp_micros(ts: Timestamp) -> u64 {
     ts.to_duration_since_unix_epoch()
         .unwrap_or_default()
         .as_micros() as u64
+}
+
+/// Insert a KillEvent row so all clients can show the kill feed.
+fn emit_kill_event(ctx: &ReducerContext, killer: Identity, victim: Identity, weapon: u8) {
+    let killer_name = ctx
+        .db
+        .player()
+        .identity()
+        .find(killer)
+        .map(|p| p.username.clone())
+        .unwrap_or_else(|| "???".to_string());
+    let victim_name = ctx
+        .db
+        .player()
+        .identity()
+        .find(victim)
+        .map(|p| p.username.clone())
+        .unwrap_or_else(|| "???".to_string());
+    ctx.db.kill_event().insert(KillEvent {
+        id: 0,
+        killer_name,
+        victim_name,
+        weapon,
+        created_at: ctx.timestamp,
+    });
 }
 
 fn dist_sq(a: &Vec3, b: &Vec3) -> f32 {
@@ -2194,6 +2233,7 @@ pub fn fire_vehicle_weapon(
                         ..dead
                     });
                 }
+                emit_kill_event(ctx, sender, *target_id, 100); // 100 = vehicle minigun
                 log::info!("{:?} killed {:?} with vehicle minigun", sender, target_id);
             }
         }
@@ -2413,6 +2453,7 @@ pub fn vehicle_projectile_impact(
                         ..dead
                     });
                 }
+                emit_kill_event(ctx, sender, *target_id, 101); // 101 = vehicle rocket
                 log::info!("{:?} killed {:?} with vehicle rocket", sender, target_id);
             }
         }
@@ -2693,6 +2734,7 @@ pub fn fire_weapon(
                         ..dead
                     });
                 }
+                emit_kill_event(ctx, sender, *target_id, weapon);
                 log::info!("{:?} killed {:?}", sender, target_id);
             }
         }
@@ -3629,6 +3671,22 @@ pub fn cleanup_shots_scheduled(ctx: &ReducerContext, _job: ShotCleanup) {
         ctx.db.grenade_projectile().id().delete(&id);
     }
 
+    // Clean stale kill events (older than 10 seconds)
+    let stale_kills: Vec<u64> = ctx
+        .db
+        .kill_event()
+        .iter()
+        .filter(|e| {
+            let ev_micros = timestamp_micros(e.created_at);
+            now_micros.saturating_sub(ev_micros) > 10_000_000
+        })
+        .map(|e| e.id)
+        .collect();
+
+    for id in stale_kills {
+        ctx.db.kill_event().id().delete(&id);
+    }
+
     // Reschedule next cleanup in 3 seconds
     ctx.db.shot_cleanup().insert(ShotCleanup {
         scheduled_id: 0,
@@ -3950,6 +4008,7 @@ fn explode_grenade(ctx: &ReducerContext, grenade: &GrenadeProjectile) {
                     ..dead
                 });
             }
+            emit_kill_event(ctx, owner, target_id, GRENADE_WEAPON_INDEX);
             log::info!("{:?} killed {:?} with grenade", owner, target_id);
         }
     }
@@ -4670,6 +4729,7 @@ pub fn projectile_impact(
                         ..dead
                     });
                 }
+                emit_kill_event(ctx, sender, *target_id, weapon);
                 log::info!("{:?} killed {:?} with projectile", sender, target_id);
             }
         }
