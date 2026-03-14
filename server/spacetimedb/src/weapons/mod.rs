@@ -1,10 +1,6 @@
 // ── Weapon Registry ──
-// To add a new weapon:
-//   1. Create a new file (e.g. weapons/flamethrower.rs)
-//   2. Define `pub const DEF: WeaponDef = WeaponDef { ... }`
-//   3. Add `pub mod flamethrower;` here
-//   4. Add it to WEAPON_REGISTRY
-//   That's it. Ammo storage is normalized — no schema changes needed.
+// Weapon stats are sourced from shared/game-constants.json at compile time.
+// Per-weapon .rs files are kept for any weapon-specific logic (special behaviors).
 
 pub mod grenade_launcher;
 pub mod machinegun;
@@ -56,22 +52,6 @@ impl WeaponDef {
     }
 }
 
-// ── Weapon Registry ──
-
-pub const NUM_WEAPONS: u8 = 5;
-
-pub const WEAPON_REGISTRY: [&WeaponDef; 5] = [
-    &rifle::DEF,
-    &shotgun::DEF,
-    &rpg::DEF,
-    &machinegun::DEF,
-    &grenade_launcher::DEF,
-];
-
-pub fn get_weapon(index: u8) -> &'static WeaponDef {
-    WEAPON_REGISTRY[index as usize]
-}
-
 // ── Vehicle Weapon Definition ──
 
 pub struct VehicleWeaponDef {
@@ -93,13 +73,79 @@ impl VehicleWeaponDef {
     }
 }
 
-pub const NUM_VEHICLE_WEAPONS: u8 = 2;
+// ── Registry (runtime-initialized from shared JSON) ──
 
-pub const VEHICLE_WEAPON_REGISTRY: [&VehicleWeaponDef; 2] =
-    [&vehicle_minigun::DEF, &vehicle_rockets::DEF];
+use std::sync::OnceLock;
+
+fn parse_delivery(s: &str) -> DeliveryMethod {
+    match s {
+        "hitscan" => DeliveryMethod::Hitscan,
+        "projectile" => DeliveryMethod::Projectile,
+        "server_projectile" => DeliveryMethod::ServerProjectile,
+        other => panic!("Unknown delivery method in game-constants.json: {}", other),
+    }
+}
+
+static WEAPONS: OnceLock<Vec<WeaponDef>> = OnceLock::new();
+static VEHICLE_WEAPONS: OnceLock<Vec<VehicleWeaponDef>> = OnceLock::new();
+
+fn weapons_registry() -> &'static [WeaponDef] {
+    WEAPONS.get_or_init(|| {
+        let cfg = crate::shared_config::config();
+        cfg.weapons
+            .iter()
+            .map(|w| WeaponDef {
+                name: Box::leak(w.name.clone().into_boxed_str()),
+                index: w.index,
+                damage: w.damage,
+                radius: w.radius,
+                fire_rate: w.fire_rate,
+                max_ammo: w.max_ammo,
+                max_range: w.max_range,
+                projectile_speed: w.projectile_speed,
+                delivery: parse_delivery(&w.delivery),
+            })
+            .collect()
+    })
+}
+
+fn vehicle_weapons_registry() -> &'static [VehicleWeaponDef] {
+    VEHICLE_WEAPONS.get_or_init(|| {
+        let cfg = crate::shared_config::config();
+        cfg.vehicle_weapons
+            .iter()
+            .map(|w| VehicleWeaponDef {
+                name: Box::leak(w.name.clone().into_boxed_str()),
+                index: w.index,
+                damage: w.damage,
+                radius: w.radius,
+                fire_rate: w.fire_rate,
+                max_ammo: w.max_ammo,
+                max_range: w.max_range,
+                projectile_speed: w.projectile_speed,
+                gravity: w.gravity,
+                delivery: parse_delivery(&w.delivery),
+            })
+            .collect()
+    })
+}
+
+/// Number of infantry weapons. Sourced from shared/game-constants.json.
+pub fn num_weapons() -> u8 {
+    weapons_registry().len() as u8
+}
+
+/// Number of vehicle weapons. Sourced from shared/game-constants.json.
+pub fn num_vehicle_weapons() -> u8 {
+    vehicle_weapons_registry().len() as u8
+}
+
+pub fn get_weapon(index: u8) -> &'static WeaponDef {
+    &weapons_registry()[index as usize]
+}
 
 pub fn get_vehicle_weapon(index: u8) -> &'static VehicleWeaponDef {
-    VEHICLE_WEAPON_REGISTRY[index as usize]
+    &vehicle_weapons_registry()[index as usize]
 }
 
 // ── Normalized Ammo Accessors ──
@@ -176,7 +222,7 @@ pub fn init_all_ammo(ctx: &ReducerContext, identity: Identity) {
     }
 
     // Create ammo rows for any weapons that don't have one yet
-    for def in WEAPON_REGISTRY {
+    for def in weapons_registry() {
         let has_row = ctx
             .db
             .player_ammo()
@@ -195,14 +241,14 @@ pub fn init_all_ammo(ctx: &ReducerContext, identity: Identity) {
 
 /// Reset all ammo to max for a player (respawn / reload all).
 pub fn reset_all_ammo(ctx: &ReducerContext, identity: Identity) {
-    for def in WEAPON_REGISTRY {
+    for def in weapons_registry() {
         set_ammo(ctx, identity, def.index, def.max_ammo);
     }
 }
 
 /// Set all ammo to a specific value (admin /ammo).
 pub fn set_all_ammo_value(ctx: &ReducerContext, identity: Identity, value: i32) {
-    for def in WEAPON_REGISTRY {
+    for def in weapons_registry() {
         set_ammo(ctx, identity, def.index, value);
     }
 }
@@ -210,7 +256,6 @@ pub fn set_all_ammo_value(ctx: &ReducerContext, identity: Identity, value: i32) 
 // ── Shared Fire Validation ──
 // Extracted from fire_weapon and fire_vehicle_weapon to eliminate duplication.
 
-use crate::constants::FIRE_RATE_TOLERANCE_US;
 use crate::helpers::timestamp_micros;
 
 /// Check fire rate cooldown. Returns Err if firing too fast.
@@ -219,10 +264,11 @@ pub fn check_fire_rate(
     last_fire: Timestamp,
     fire_rate: f32,
 ) -> Result<(), String> {
+    let fire_rate_tolerance_us = crate::constants::fire_rate_tolerance_us();
     let now_us = timestamp_micros(ctx.timestamp);
     let last_us = timestamp_micros(last_fire);
     let cooldown_us = (1_000_000.0 / fire_rate) as u64;
-    if now_us.saturating_sub(last_us) < cooldown_us.saturating_sub(FIRE_RATE_TOLERANCE_US) {
+    if now_us.saturating_sub(last_us) < cooldown_us.saturating_sub(fire_rate_tolerance_us) {
         return Err("Firing too fast".to_string());
     }
     Ok(())

@@ -1,17 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
-import type { KillNotification, KillFeedEntry } from '../hud/weaponData';
 import type { DbConnection } from '../../module_bindings';
+
+export interface KillFeedEntry {
+  id: number;
+  killerName: string;
+  victimName: string;
+  weapon: number;
+  time: number;
+}
+
+export interface KillNotification {
+  id: number;
+  text: string;
+  time: number;
+  type: 'kill' | 'death' | 'streak';
+}
 
 export function useKillTracking(
   kills: number,
   deaths: number,
   health: number,
   connection: DbConnection | null,
-  _username: string,
 ) {
+  // ── Kill feed from server ──
   const [killFeed, setKillFeed] = useState<KillFeedEntry[]>([]);
   const killFeedIdRef = useRef(0);
 
+  // ── Kill/Death tracking ──
   const prevKillsRef = useRef(0);
   const prevDeathsRef = useRef(0);
   const prevHealthRef = useRef(100);

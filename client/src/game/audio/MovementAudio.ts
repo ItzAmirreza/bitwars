@@ -1,9 +1,12 @@
 /**
- * Movement audio: playStep, playJump, playLanding, playSlideStart
+ * MovementAudio — footsteps, jump, landing, and slide sounds.
  */
-import type { AudioCore, SpatialBusOptions, SpatialSoundOptions } from '../AudioCore';
 
-// ── FOOTSTEP: Layered boot-on-stone with impact, surface texture, and transient ──
+import type { AudioCore, SpatialSoundOptions, SpatialBusOptions } from './AudioCore';
+
+/** Tracks left/right foot alternation across calls. */
+let stepIndex = 0;
+
 export function playStep(core: AudioCore, sprinting = false, spatial?: SpatialSoundOptions): void {
   const { ctx, t, out } = core.resolveOutput(
     spatial,
@@ -22,12 +25,12 @@ export function playStep(core: AudioCore, sprinting = false, spatial?: SpatialSo
     0.12,
   );
 
-  core.stepIndex++;
-  const footPitch = core.stepIndex % 2 === 0 ? 1.04 : 0.96;
+  stepIndex++;
+  const footPitch = stepIndex % 2 === 0 ? 1.04 : 0.96;
   const variation = 0.92 + Math.random() * 0.16;
   const baseVol = sprinting ? 0.04 : 0.025;
 
-  // ── Layer 1: Heel strike — soft thud, gentle attack ──
+  // ── Layer 1: Heel strike ──
   const heel = ctx.createBufferSource();
   const heelLen = sprinting ? 0.07 : 0.08;
   heel.buffer = core.noise(heelLen, 0.45);
@@ -37,7 +40,6 @@ export function playStep(core: AudioCore, sprinting = false, spatial?: SpatialSo
   heelLp.frequency.value = (sprinting ? 350 : 280) * variation;
   heelLp.Q.value = 0.5;
   const heelGain = ctx.createGain();
-  // Gentle fade-in to avoid harsh transient click
   heelGain.gain.setValueAtTime(0, t);
   heelGain.gain.linearRampToValueAtTime(baseVol * 0.8, t + 0.005);
   heelGain.gain.linearRampToValueAtTime(baseVol * 0.35, t + 0.025);
@@ -46,7 +48,7 @@ export function playStep(core: AudioCore, sprinting = false, spatial?: SpatialSo
   heel.start(t);
   heel.stop(t + heelLen);
 
-  // ── Layer 2: Scuff / sole scrape — subdued mid-frequency texture ──
+  // ── Layer 2: Scuff / sole scrape ──
   const scuff = ctx.createBufferSource();
   const scuffLen = sprinting ? 0.05 : 0.06;
   scuff.buffer = core.noise(scuffLen, 0.5);
@@ -68,7 +70,7 @@ export function playStep(core: AudioCore, sprinting = false, spatial?: SpatialSo
   scuff.start(t);
   scuff.stop(t + scuffLen);
 
-  // ── Layer 3: Subtle crunch — very gentle stone surface texture ──
+  // ── Layer 3: Subtle crunch ──
   const crunch = ctx.createBufferSource();
   crunch.buffer = core.noise(0.025, 0.15);
   crunch.playbackRate.value = (0.85 + Math.random() * 0.3) * footPitch;
@@ -102,7 +104,6 @@ export function playStep(core: AudioCore, sprinting = false, spatial?: SpatialSo
   }
 }
 
-// ── JUMP: Ascending whoosh + subtle gear rustle ──
 export function playJump(core: AudioCore, spatial?: SpatialSoundOptions): void {
   const { ctx, t, out } = core.resolveOutput(
     spatial,
@@ -121,7 +122,7 @@ export function playJump(core: AudioCore, spatial?: SpatialSoundOptions): void {
     0.1,
   );
 
-  // ── Ascending frequency sweep (quick whoosh) ──
+  // ── Ascending frequency sweep ──
   const sweep = ctx.createOscillator();
   sweep.type = 'sawtooth';
   sweep.frequency.setValueAtTime(80, t);
@@ -137,7 +138,7 @@ export function playJump(core: AudioCore, spatial?: SpatialSoundOptions): void {
   sweep.start(t);
   sweep.stop(t + 0.1);
 
-  // ── Noise whoosh layer for air movement ──
+  // ── Noise whoosh layer ──
   const whoosh = ctx.createBufferSource();
   whoosh.buffer = core.noise(0.1, 0.2);
   const whooshBp = ctx.createBiquadFilter();
@@ -152,7 +153,7 @@ export function playJump(core: AudioCore, spatial?: SpatialSoundOptions): void {
   whoosh.start(t);
   whoosh.stop(t + 0.1);
 
-  // ── Subtle gear/fabric rustle (brief filtered noise) ──
+  // ── Subtle gear/fabric rustle ──
   const rustle = ctx.createBufferSource();
   rustle.buffer = core.noise(0.06, 0.12);
   const rustleBp = ctx.createBiquadFilter();
@@ -167,7 +168,6 @@ export function playJump(core: AudioCore, spatial?: SpatialSoundOptions): void {
   rustle.stop(t + 0.06);
 }
 
-// ── LANDING: Layered boot-slap impact with sub-bass and gear rattle ──
 export function playLanding(core: AudioCore, intensity: number, spatial?: SpatialSoundOptions): void {
   const busOptions: SpatialBusOptions = {
     gain: 1,
@@ -184,7 +184,7 @@ export function playLanding(core: AudioCore, intensity: number, spatial?: Spatia
   const { ctx, t, out } = core.resolveOutput(spatial, busOptions, 0.15);
   const vol = 0.03 + intensity * 0.07;
 
-  // ── Boot-slap transient: initial contact — gentle fade-in ──
+  // ── Boot-slap transient ──
   const slap = ctx.createBufferSource();
   slap.buffer = core.noise(0.04, 0.18);
   const slapBp = ctx.createBiquadFilter();
@@ -192,7 +192,6 @@ export function playLanding(core: AudioCore, intensity: number, spatial?: Spatia
   slapBp.frequency.value = 600 + intensity * 300;
   slapBp.Q.value = 0.35;
   const slapGain = ctx.createGain();
-  // Fade in over 2ms to avoid transient click
   slapGain.gain.setValueAtTime(0, t);
   slapGain.gain.linearRampToValueAtTime(vol * 0.4, t + 0.002);
   slapGain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
@@ -200,7 +199,7 @@ export function playLanding(core: AudioCore, intensity: number, spatial?: Spatia
   slap.start(t);
   slap.stop(t + 0.04);
 
-  // ── Impact body: filtered noise thud — lower cutoff, softer ──
+  // ── Impact body ──
   const src = ctx.createBufferSource();
   src.buffer = core.noise(0.15, 0.25);
   const lp = ctx.createBiquadFilter();
@@ -214,7 +213,7 @@ export function playLanding(core: AudioCore, intensity: number, spatial?: Spatia
   src.start(t);
   src.stop(t + 0.15);
 
-  // ── Sub-bass thump: much gentler, higher frequency floor ──
+  // ── Sub-bass thump ──
   const sub = ctx.createOscillator();
   sub.type = 'sine';
   const subFreq = 55 + (1 - intensity) * 15;
@@ -229,7 +228,7 @@ export function playLanding(core: AudioCore, intensity: number, spatial?: Spatia
   sub.start(t);
   sub.stop(t + 0.08);
 
-  // ── Gear rattle for heavy landings: softer, narrower band ──
+  // ── Gear rattle for heavy landings ──
   if (intensity > 0.55) {
     const rattleVol = (intensity - 0.55) * 0.03;
     core.scheduleSpatialLayer(spatial, busOptions, 0.15, 0.05, (lateCtx, lateT, lateOut) => {
@@ -249,7 +248,6 @@ export function playLanding(core: AudioCore, intensity: number, spatial?: Spatia
   }
 }
 
-// ── SLIDE: Skid transient + low rumble + fabric scrape ──
 export function playSlideStart(core: AudioCore, spatial?: SpatialSoundOptions): void {
   const { ctx, t, out } = core.resolveOutput(
     spatial,
@@ -268,7 +266,7 @@ export function playSlideStart(core: AudioCore, spatial?: SpatialSoundOptions): 
     0.12,
   );
 
-  // ── Initial skid transient: quick burst like boots catching surface ──
+  // ── Initial skid transient ──
   const skid = ctx.createBufferSource();
   skid.buffer = core.noise(0.04, 0.1);
   const skidBp = ctx.createBiquadFilter();
@@ -282,7 +280,7 @@ export function playSlideStart(core: AudioCore, spatial?: SpatialSoundOptions): 
   skid.start(t);
   skid.stop(t + 0.04);
 
-  // ── Low-frequency rumble: decays over ~300ms ──
+  // ── Low-frequency rumble ──
   const rumble = ctx.createBufferSource();
   rumble.buffer = core.noise(0.35, 0.25);
   const rumbleLp = ctx.createBiquadFilter();
@@ -296,7 +294,7 @@ export function playSlideStart(core: AudioCore, spatial?: SpatialSoundOptions): 
   rumble.start(t);
   rumble.stop(t + 0.35);
 
-  // ── Sub oscillator for weight ──
+  // ── Sub oscillator ──
   const sub = ctx.createOscillator();
   sub.type = 'sine';
   sub.frequency.setValueAtTime(60, t);
@@ -308,7 +306,7 @@ export function playSlideStart(core: AudioCore, spatial?: SpatialSoundOptions): 
   sub.start(t);
   sub.stop(t + 0.25);
 
-  // ── Fabric scraping: high bandpass noise for clothing/gear texture ──
+  // ── Fabric scraping ──
   const fabric = ctx.createBufferSource();
   fabric.buffer = core.noise(0.3, 0.35);
   const fabricBp = ctx.createBiquadFilter();

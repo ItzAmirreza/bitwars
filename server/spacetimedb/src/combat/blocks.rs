@@ -19,12 +19,12 @@ pub fn destroy_blocks_physics(ctx: &ReducerContext, blocks: Vec<Vec3>) -> Result
         .find(sender)
         .ok_or("Not registered")?;
 
-    if blocks.len() > MAX_BLOCK_DESTROY_PER_CALL {
+    if blocks.len() > max_block_destroy_per_call() {
         return Err("Too many blocks in one call".to_string());
     }
 
     // Range check: blocks must be near the player
-    let max_range_sq = MAX_BLOCK_DESTROY_RANGE * MAX_BLOCK_DESTROY_RANGE;
+    let max_range_sq = max_block_destroy_range() * max_block_destroy_range();
     let block_coords: Vec<(i32, i32, i32)> = blocks
         .iter()
         .filter(|b| {
@@ -64,7 +64,7 @@ pub fn sync_entity_transform(
     }
 
     if let Some(entity) = ctx.db.entity().id().find(&entity_id) {
-        if entity.kind != ENTITY_KIND_PLAYER {
+        if entity.kind != entity_kind_player() {
             return Err("Not a player entity".to_string());
         }
         ctx.db.entity().id().update(Entity {

@@ -7,8 +7,8 @@
 
 pub mod helicopter;
 pub mod interaction;
-pub mod weapons;
 pub mod spawning;
+pub mod weapons;
 
 // Re-export for convenience
 pub use helicopter::tick_helicopter;
@@ -46,14 +46,10 @@ pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
         }
 
         // Dispatch to per-vehicle-type physics
-        match vehicle.vehicle_type {
-            VEHICLE_TYPE_HELICOPTER => {
-                tick_helicopter(ctx, vehicle, entity, &mut mounted_updates);
-            }
-            // Future: VEHICLE_TYPE_TANK => tick_tank(ctx, vehicle, entity, &mut mounted_updates),
-            // Future: VEHICLE_TYPE_BOAT => tick_boat(ctx, vehicle, entity, &mut mounted_updates),
-            _ => {}
+        if vehicle.vehicle_type == vehicle_type_helicopter() {
+            tick_helicopter(ctx, vehicle, entity, &mut mounted_updates);
         }
+        // Future: else if vehicle.vehicle_type == vehicle_type_tank() { ... }
     }
 
     // Apply mounted player position updates

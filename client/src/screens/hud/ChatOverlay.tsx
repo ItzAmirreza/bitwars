@@ -1,14 +1,19 @@
-import type { RefObject } from 'react';
-import type { DisplayMessage } from './weaponData';
+import { useRef, useEffect, useCallback, useState } from 'react';
+
+interface DisplayMessage {
+  id: number;
+  senderName: string;
+  text: string;
+  sentAt: number;
+}
+
+export type { DisplayMessage };
 
 export interface ChatOverlayProps {
   chatOpen: boolean;
   chatMessages: DisplayMessage[];
   chatDraft: string;
-  chatListRef: RefObject<HTMLDivElement | null>;
-  chatInputRef: RefObject<HTMLInputElement | null>;
-  getMessageOpacity: (sentAt: number) => number;
-  setChatDraft: (draft: string) => void;
+  setChatDraft: (v: string) => void;
   sendChatMessage: (text: string) => Promise<void>;
   closeChat: () => void;
 }
@@ -17,13 +22,61 @@ export function ChatOverlay({
   chatOpen,
   chatMessages,
   chatDraft,
-  chatListRef,
-  chatInputRef,
-  getMessageOpacity,
   setChatDraft,
   sendChatMessage,
   closeChat,
 }: ChatOverlayProps) {
+  const chatInputRef = useRef<HTMLInputElement>(null);
+  const chatListRef = useRef<HTMLDivElement>(null);
+  const [, chatTick] = useState(0);
+
+  const getMessageOpacity = useCallback(
+    (sentAt: number): number => {
+      if (chatOpen) return 1;
+      const age = (Date.now() - sentAt) / 1000;
+      if (age < 6) return 0.9;
+      if (age < 10) return 0.9 * (1 - (age - 6) / 4);
+      return 0;
+    },
+    [chatOpen],
+  );
+
+  // Periodic tick for message fading (when chat is closed)
+  useEffect(() => {
+    if (chatOpen) return;
+    const interval = setInterval(() => chatTick((n) => n + 1), 1000);
+    return () => clearInterval(interval);
+  }, [chatOpen]);
+
+  // Focus chat input when opened
+  useEffect(() => {
+    if (chatOpen) {
+      const timer = window.setTimeout(() => {
+        const input = chatInputRef.current;
+        if (!input) return;
+
+        input.focus();
+        const end = input.value.length;
+        input.setSelectionRange(end, end);
+      }, 0);
+
+      return () => window.clearTimeout(timer);
+    }
+  }, [chatOpen]);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    if (!chatOpen) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const list = chatListRef.current;
+      if (!list) return;
+      list.scrollTop = list.scrollHeight;
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [chatMessages, chatOpen]);
+
   return (
     <div
       className="absolute z-20"

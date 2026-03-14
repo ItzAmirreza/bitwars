@@ -101,8 +101,8 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
             let p = dismount_player_internal(ctx, p, true);
             let reset = Player {
                 entity_id,
-                health: MAX_HEALTH,
-                max_health: MAX_HEALTH,
+                health: max_health(),
+                max_health: max_health(),
                 pos: SPAWN_POS,
                 vel: ZERO_VEL,
                 kills: 0,
@@ -127,7 +127,7 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
         .db
         .entity()
         .iter()
-        .filter(|e| e.kind == ENTITY_KIND_VEHICLE)
+        .filter(|e| e.kind == entity_kind_vehicle())
         .map(|e| e.id)
         .collect();
     for id in entity_ids {

@@ -18,12 +18,12 @@ use crate::worldgen::{WORLD_SIZE_X, WORLD_SIZE_Z};
 pub fn spawn_helicopter(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
     let entity = ctx.db.entity().insert(Entity {
         id: 0,
-        kind: ENTITY_KIND_VEHICLE,
-        subtype: VEHICLE_TYPE_HELICOPTER,
+        kind: entity_kind_vehicle(),
+        subtype: vehicle_type_helicopter(),
         pos,
         vel: ZERO_VEL,
         rot: Rotation { yaw, pitch: 0.0 },
-        scale: HELI_SCALE,
+        scale: heli_scale(),
         active: true,
         created_at: ctx.timestamp,
         updated_at: ctx.timestamp,
@@ -34,7 +34,7 @@ pub fn spawn_helicopter(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
 
     ctx.db.vehicle().insert(Vehicle {
         entity_id: entity.id,
-        vehicle_type: VEHICLE_TYPE_HELICOPTER,
+        vehicle_type: vehicle_type_helicopter(),
         pilot_identity: None,
         seat_count: 4,
         input_forward: 0.0,
@@ -43,7 +43,7 @@ pub fn spawn_helicopter(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
         input_yaw: 0.0,
         boosting: false,
         rotor_spin: 0.0,
-        health: HELI_HEALTH_MAX,
+        health: heli_health_max(),
         weapon_type: 0,
         weapon_ammo_primary: minigun.max_ammo,
         weapon_ammo_secondary: rockets.max_ammo,

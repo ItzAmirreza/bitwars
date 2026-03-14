@@ -1,9 +1,9 @@
 /**
- * Weapon audio: playRifle, playShotgun, playRPGLaunch, playMachineGun, playGrenadeLaunch
+ * WeaponAudio — weapon firing, reload, empty click, and switch sounds.
  */
-import type { AudioCore, SpatialBusOptions, SpatialSoundOptions } from '../AudioCore';
 
-// ── RIFLE: Sharp crack with metallic ring + punch ──
+import type { AudioCore, SpatialSoundOptions, SpatialBusOptions } from './AudioCore';
+
 export function playRifle(core: AudioCore, spatial?: SpatialSoundOptions): void {
   const busOptions: SpatialBusOptions = {
     gain: 1,
@@ -20,7 +20,7 @@ export function playRifle(core: AudioCore, spatial?: SpatialSoundOptions): void 
   const { ctx, t, out, delay } = core.resolveOutput(spatial, busOptions, 0.22);
   const t0 = t + delay;
 
-  // Initial transient crack — wider bandwidth
+  // Initial transient crack
   const src = ctx.createBufferSource();
   src.buffer = core.noise(0.1, 0.12);
 
@@ -37,7 +37,7 @@ export function playRifle(core: AudioCore, spatial?: SpatialSoundOptions): void 
   src.start(t0);
   src.stop(t0 + 0.11);
 
-  // Low-end punch for body
+  // Low-end punch
   const punch = ctx.createOscillator();
   punch.type = 'sine';
   punch.frequency.setValueAtTime(180, t0);
@@ -49,7 +49,7 @@ export function playRifle(core: AudioCore, spatial?: SpatialSoundOptions): void 
   punch.start(t0);
   punch.stop(t0 + 0.06);
 
-  // Metallic ping — brighter
+  // Metallic ping
   const osc = ctx.createOscillator();
   osc.type = 'sine';
   osc.frequency.setValueAtTime(4500, t0);
@@ -77,7 +77,6 @@ export function playRifle(core: AudioCore, spatial?: SpatialSoundOptions): void 
   });
 }
 
-// ── SHOTGUN: Massive boom with pump-action feel ──
 export function playShotgun(core: AudioCore, spatial?: SpatialSoundOptions): void {
   const busOptions: SpatialBusOptions = {
     gain: 1,
@@ -94,7 +93,7 @@ export function playShotgun(core: AudioCore, spatial?: SpatialSoundOptions): voi
   const { ctx, t, out, delay } = core.resolveOutput(spatial, busOptions, 0.24);
   const t0 = t + delay;
 
-  // Heavy noise burst — wider bandwidth
+  // Heavy noise burst
   const src = ctx.createBufferSource();
   src.buffer = core.noise(0.28, 0.1);
 
@@ -111,7 +110,7 @@ export function playShotgun(core: AudioCore, spatial?: SpatialSoundOptions): voi
   src.start(t0);
   src.stop(t0 + 0.29);
 
-  // Sub thump — deeper and wider
+  // Sub thump
   const sub = ctx.createOscillator();
   sub.type = 'sine';
   sub.frequency.setValueAtTime(100, t0);
@@ -171,7 +170,6 @@ export function playShotgun(core: AudioCore, spatial?: SpatialSoundOptions): voi
   });
 }
 
-// ── RPG: Whoosh launch + delayed boom ──
 export function playRPGLaunch(core: AudioCore, spatial?: SpatialSoundOptions): void {
   const { ctx, t, out, delay } = core.resolveOutput(
     spatial,
@@ -220,7 +218,6 @@ export function playRPGLaunch(core: AudioCore, spatial?: SpatialSoundOptions): v
   src.stop(t0 + 0.31);
 }
 
-// ── MACHINE GUN: Tight, bright chatter ──
 export function playMachineGun(core: AudioCore, spatial?: SpatialSoundOptions): void {
   const { ctx, t, out, delay } = core.resolveOutput(
     spatial,
@@ -268,7 +265,6 @@ export function playMachineGun(core: AudioCore, spatial?: SpatialSoundOptions): 
   crack.stop(t0 + 0.04);
 }
 
-// ── GRENADE LAUNCHER: Heavy thunk + pressurized pop ──
 export function playGrenadeLaunch(core: AudioCore, spatial?: SpatialSoundOptions): void {
   const { ctx, t, out, delay } = core.resolveOutput(
     spatial,
@@ -311,4 +307,101 @@ export function playGrenadeLaunch(core: AudioCore, spatial?: SpatialSoundOptions
   hiss.connect(hp).connect(hg).connect(out);
   hiss.start(t0);
   hiss.stop(t0 + 0.19);
+}
+
+export function playReload(core: AudioCore, spatial?: SpatialSoundOptions): void {
+  const busOptions: SpatialBusOptions = {
+    gain: 1,
+    minDistance: 1.4,
+    maxDistance: 65,
+    rolloff: 1.8,
+    coneInner: 120,
+    coneOuter: 260,
+    coneOuterGain: 0.22,
+    occlusionStrength: 0.75,
+    baseLowpass: 11000,
+    reverbAmount: 0.04,
+  };
+
+  const emitClick = (offsetSec: number, freq: number, dur: number): void => {
+    const trigger = () => {
+      const { ctx, t, out, delay } = core.resolveOutput(spatial, busOptions, 0.08);
+      core.click(ctx, out, t + delay, freq, dur);
+    };
+    if (offsetSec <= 0) {
+      trigger();
+    } else {
+      window.setTimeout(trigger, offsetSec * 1000);
+    }
+  };
+
+  emitClick(0, 1100, 0.035);   // mag release
+  emitClick(0.25, 800, 0.04);  // mag out
+  emitClick(0.45, 1400, 0.05); // mag in
+  emitClick(0.6, 2200, 0.03);  // chamber rack
+}
+
+export function playEmpty(core: AudioCore, spatial?: SpatialSoundOptions): void {
+  const { ctx, t, out } = core.resolveOutput(
+    spatial,
+    {
+      gain: 1,
+      minDistance: 1.2,
+      maxDistance: 45,
+      rolloff: 2.2,
+      coneInner: 110,
+      coneOuter: 260,
+      coneOuterGain: 0.2,
+      occlusionStrength: 0.65,
+      baseLowpass: 8500,
+      reverbAmount: 0.02,
+    },
+    0.05,
+  );
+
+  const osc = ctx.createOscillator();
+  osc.type = 'triangle';
+  osc.frequency.value = 350;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.1, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+  osc.connect(g).connect(out);
+  osc.start(t);
+  osc.stop(t + 0.04);
+}
+
+export function playSwitch(core: AudioCore, spatial?: SpatialSoundOptions): void {
+  const { ctx, t, out } = core.resolveOutput(
+    spatial,
+    {
+      gain: 1,
+      minDistance: 1.1,
+      maxDistance: 50,
+      rolloff: 2,
+      coneInner: 120,
+      coneOuter: 260,
+      coneOuterGain: 0.25,
+      occlusionStrength: 0.7,
+      baseLowpass: 10000,
+      reverbAmount: 0.03,
+    },
+    0.06,
+  );
+
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(600, t);
+  osc.frequency.exponentialRampToValueAtTime(1200, t + 0.06);
+
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.06, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 2000;
+
+  osc.connect(lp).connect(g).connect(out);
+  osc.start(t);
+  osc.stop(t + 0.08);
 }

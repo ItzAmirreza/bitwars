@@ -1,5 +1,29 @@
-import type { KillFeedEntry, KillNotification } from './weaponData';
-import { WEAPON_LABELS } from './weaponData';
+interface KillFeedEntry {
+  id: number;
+  killerName: string;
+  victimName: string;
+  weapon: number;
+  time: number;
+}
+
+interface KillNotification {
+  id: number;
+  text: string;
+  time: number;
+  type: 'kill' | 'death' | 'streak';
+}
+
+const WEAPON_LABELS: Record<number, string> = {
+  0: 'Rifle',
+  1: 'Shotgun',
+  2: 'RPG',
+  3: 'Machine Gun',
+  4: 'Grenade',
+  100: 'Minigun',
+  101: 'Rocket',
+};
+
+export type { KillFeedEntry, KillNotification };
 
 export interface KillFeedProps {
   killFeed: KillFeedEntry[];

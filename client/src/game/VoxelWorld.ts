@@ -1,29 +1,31 @@
 import * as THREE from 'three';
+import { WORLD as WORLD_CONFIG, BLOCK_TYPES } from '../shared-config';
 
-// ── Constants ──
+// ── Constants (sourced from shared config) ──
 
-export const CHUNK = 16;
-export const WORLD_X = 250;
-export const WORLD_Y = 48;
-export const WORLD_Z = 250;
+export const CHUNK = WORLD_CONFIG.chunkSize;
+export const WORLD_X = WORLD_CONFIG.sizeX;
+export const WORLD_Y = WORLD_CONFIG.sizeY;
+export const WORLD_Z = WORLD_CONFIG.sizeZ;
 
-export const BlockType = {
-  Air: 0,
-  Concrete: 1,
-  DarkConcrete: 2,
-  Asphalt: 3,
-  Rebar: 4,
-  Brick: 5,
-  Metal: 6,
-  Rubble: 7,
-  Dirt: 8,
-  Sand: 9,
-  Grass: 10,
-  Wood: 11,
-  Stone: 12,
-  Snow: 13,
-  Lantern: 14,
-} as const;
+// BlockType object — sourced from shared config, kept for backward compatibility
+export const BlockType = BLOCK_TYPES as {
+  readonly Air: 0;
+  readonly Concrete: 1;
+  readonly DarkConcrete: 2;
+  readonly Asphalt: 3;
+  readonly Rebar: 4;
+  readonly Brick: 5;
+  readonly Metal: 6;
+  readonly Rubble: 7;
+  readonly Dirt: 8;
+  readonly Sand: 9;
+  readonly Grass: 10;
+  readonly Wood: 11;
+  readonly Stone: 12;
+  readonly Snow: 13;
+  readonly Lantern: 14;
+};
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
 
 export const BLOCK_COLORS: Record<number, number> = {

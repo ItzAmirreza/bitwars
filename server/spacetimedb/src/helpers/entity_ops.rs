@@ -10,7 +10,7 @@ use crate::types::*;
 pub fn create_player_entity(ctx: &ReducerContext, pos: &Vec3, vel: &Vec3, rot: &Rotation) -> u64 {
     let row = ctx.db.entity().insert(Entity {
         id: 0,
-        kind: ENTITY_KIND_PLAYER,
+        kind: entity_kind_player(),
         subtype: 0,
         pos: pos.clone(),
         vel: vel.clone(),

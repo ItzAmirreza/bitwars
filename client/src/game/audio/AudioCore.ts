@@ -1,13 +1,56 @@
 /**
- * AudioCore — base class with all audio infrastructure.
- * Provides AudioContext management, spatial audio bus creation,
- * occlusion computation, and utility methods.
- *
- * Sub-modules receive the core instance and call its public/protected methods.
+ * AudioCore — base infrastructure for the procedural audio system.
+ * Provides AudioContext management, spatial bus creation, occlusion,
+ * listener pose, and shared helper utilities used by all sub-modules.
  */
+
+// ── Shared types ──
 
 export type Vec3Like = { x: number; y: number; z: number };
 export type OcclusionSampler = (x: number, y: number, z: number) => boolean;
+
+export interface SpatialSoundOptions {
+  position?: Vec3Like;
+  direction?: Vec3Like;
+  getPosition?: () => Vec3Like;
+  getDirection?: () => Vec3Like;
+}
+
+export interface SpatialBusOptions {
+  gain: number;
+  minDistance: number;
+  maxDistance: number;
+  rolloff: number;
+  directional?: Vec3Like;
+  coneInner?: number;
+  coneOuter?: number;
+  coneOuterGain?: number;
+  occlusionStrength?: number;
+  baseLowpass?: number;
+  reverbAmount?: number;
+}
+
+/** Persistent audio state for a single helicopter's looping sound. */
+export interface HeliSoundNodes {
+  chopLfo: OscillatorNode;
+  chopOutput: GainNode;
+  engineOsc1: OscillatorNode;
+  engineOsc2: OscillatorNode;
+  engineGain: GainNode;
+  tailOsc: OscillatorNode;
+  tailGain: GainNode;
+  windFilter: BiquadFilterNode;
+  windGain: GainNode;
+  mixGain: GainNode;
+  outputFilter: BiquadFilterNode;
+  panner: PannerNode;
+  allSources: (AudioBufferSourceNode | OscillatorNode)[];
+  wasLocal: boolean;
+  stopping: boolean;
+  stopTimer: ReturnType<typeof setTimeout> | null;
+}
+
+// ── Legacy type helpers (Web Audio API compat) ──
 
 type LegacyAudioListener = {
   positionX?: AudioParam;
@@ -41,75 +84,17 @@ type LegacyPanner = {
   setOrientation?: (x: number, y: number, z: number) => void;
 };
 
-export interface SpatialBusOptions {
-  gain: number;
-  minDistance: number;
-  maxDistance: number;
-  rolloff: number;
-  directional?: Vec3Like;
-  coneInner?: number;
-  coneOuter?: number;
-  coneOuterGain?: number;
-  occlusionStrength?: number;
-  baseLowpass?: number;
-  reverbAmount?: number;
-}
-
-export interface SpatialSoundOptions {
-  position?: Vec3Like;
-  direction?: Vec3Like;
-  getPosition?: () => Vec3Like;
-  getDirection?: () => Vec3Like;
-}
-
-/** Persistent audio state for a single helicopter's looping sound. */
-export interface HeliSoundNodes {
-  // Nodes that need per-frame parameter updates
-  chopLfo: OscillatorNode;        // frequency = blade-pass rate
-  chopOutput: GainNode;           // layer volume
-  engineOsc1: OscillatorNode;     // engine fundamental
-  engineOsc2: OscillatorNode;     // engine detuned harmonic
-  engineGain: GainNode;           // layer volume
-  tailOsc: OscillatorNode;        // tail rotor frequency
-  tailGain: GainNode;             // layer volume
-  windFilter: BiquadFilterNode;   // wind band center shifts with speed
-  windGain: GainNode;             // wind layer volume (speed-dependent)
-  mixGain: GainNode;              // overall mix volume
-  outputFilter: BiquadFilterNode; // lowpass cutoff (cockpit muffling vs open air)
-  panner: PannerNode;             // spatial position
-  // Cleanup
-  allSources: (AudioBufferSourceNode | OscillatorNode)[];
-  // State tracking
-  wasLocal: boolean;
-  stopping: boolean;
-  stopTimer: ReturnType<typeof setTimeout> | null;
-}
+// ── Core class ──
 
 export class AudioCore {
-  /** @internal — exposed for sub-module access */
   ctx: AudioContext | null = null;
-  /** @internal — exposed for sub-module access */
   master: GainNode | null = null;
-  protected compressor: DynamicsCompressorNode | null = null;
-  protected limiter: DynamicsCompressorNode | null = null;
-  /** @internal — exposed for sub-module access */
-  stepIndex = 0; // alternates left/right foot
-  protected occlusionSampler: OcclusionSampler | null = null;
-  listenerPos: Vec3Like = { x: 0, y: 0, z: 0 };
-  protected listenerForward: Vec3Like = { x: 0, y: 0, z: -1 };
-  protected listenerUp: Vec3Like = { x: 0, y: 1, z: 0 };
-  /** @internal — exposed for sub-module access */
-  helicopterNoiseBuffer: AudioBuffer | null = null;
-  /** @internal — exposed for sub-module access */
-  heliSounds = new Map<number, HeliSoundNodes>();
-
-  // Ambient state
-  /** @internal — exposed for sub-module access */
-  ambientOsc: OscillatorNode | null = null;
-  /** @internal — exposed for sub-module access */
-  ambientGain: GainNode | null = null;
-  /** @internal — exposed for sub-module access */
-  ambientLfo: OscillatorNode | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
+  private limiter: DynamicsCompressorNode | null = null;
+  private occlusionSampler: OcclusionSampler | null = null;
+  private listenerPos: Vec3Like = { x: 0, y: 0, z: 0 };
+  private listenerForward: Vec3Like = { x: 0, y: 0, z: -1 };
+  private listenerUp: Vec3Like = { x: 0, y: 1, z: 0 };
 
   ensure(): AudioContext {
     if (!this.ctx) {
@@ -118,17 +103,14 @@ export class AudioCore {
       this.master.gain.value = 0.35;
 
       // ── Dynamics processing chain ──
-      // Compressor: tames overlapping sounds (gunfire + explosion + heli)
-      // so they don't stack into hard clipping.
       this.compressor = this.ctx.createDynamicsCompressor();
-      this.compressor.threshold.value = -12;  // start compressing at -12 dB
-      this.compressor.knee.value = 10;        // soft onset for transparency
-      this.compressor.ratio.value = 6;        // moderate squeeze
-      this.compressor.attack.value = 0.003;   // 3 ms — catches transients
-      this.compressor.release.value = 0.15;   // 150 ms — smooth recovery
+      this.compressor.threshold.value = -12;
+      this.compressor.knee.value = 10;
+      this.compressor.ratio.value = 6;
+      this.compressor.attack.value = 0.003;
+      this.compressor.release.value = 0.15;
 
-      // Brick-wall limiter: absolute safety net at -1 dB.
-      // Catches anything the compressor missed so the DAC never clips.
+      // Brick-wall limiter
       this.limiter = this.ctx.createDynamicsCompressor();
       this.limiter.threshold.value = -1;
       this.limiter.knee.value = 0;
@@ -146,7 +128,7 @@ export class AudioCore {
     return this.ctx;
   }
 
-  protected applyListenerToContext(ctx: AudioContext): void {
+  private applyListenerToContext(ctx: AudioContext): void {
     const listener = ctx.listener;
     const l = listener as unknown as LegacyAudioListener;
     const t = ctx.currentTime;
@@ -217,7 +199,7 @@ export class AudioCore {
     p.setPosition?.(pos.x, pos.y, pos.z);
   }
 
-  setPannerOrientation(panner: PannerNode, dir: Vec3Like, t: number): void {
+  private setPannerOrientation(panner: PannerNode, dir: Vec3Like, t: number): void {
     const p = panner as unknown as LegacyPanner;
     const d = this.normalize(dir);
     if (p.orientationX && p.orientationY && p.orientationZ) {
@@ -398,23 +380,29 @@ export class AudioCore {
     return buf;
   }
 
+  click(ctx: AudioContext, out: AudioNode, time: number, freq: number, dur: number): void {
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = Math.min(freq * 3, 8000);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.08, time);
+    g.gain.exponentialRampToValueAtTime(0.001, time + dur);
+    osc.connect(lp).connect(g).connect(out);
+    osc.start(time);
+    osc.stop(time + dur + 0.005);
+  }
+
   setMasterVolume(volume: number): void {
     if (this.master && this.ctx) {
       const v = Math.max(0, Math.min(1, volume));
-      // Smooth ramp avoids clicks from abrupt gain changes
       this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.02);
     }
   }
 
   dispose(): void {
-    // Stop all helicopter sounds immediately
-    for (const id of Array.from(this.heliSounds.keys())) {
-      const nodes = this.heliSounds.get(id);
-      if (nodes?.stopTimer) clearTimeout(nodes.stopTimer);
-      this.cleanupHeliSound(id);
-    }
-    this.heliSounds.clear();
-    this.helicopterNoiseBuffer = null;
     if (this.ctx) {
       this.ctx.close();
       this.ctx = null;
@@ -422,18 +410,5 @@ export class AudioCore {
       this.compressor = null;
       this.limiter = null;
     }
-  }
-
-  cleanupHeliSound(id: number): void {
-    const nodes = this.heliSounds.get(id);
-    if (!nodes) return;
-    for (const src of nodes.allSources) {
-      try { src.stop(); } catch { /* already stopped */ }
-      src.disconnect();
-    }
-    nodes.mixGain.disconnect();
-    nodes.outputFilter.disconnect();
-    nodes.panner.disconnect();
-    this.heliSounds.delete(id);
   }
 }

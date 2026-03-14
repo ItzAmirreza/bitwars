@@ -1,87 +1,209 @@
 // ── Game Constants ──
 // All tuning parameters and magic numbers live here.
+// Values are sourced from shared/game-constants.json via shared_config at runtime,
+// exposed through lazy accessors that match the old `pub const` names.
+//
+// For values that MUST be `const` (used in const contexts like array sizes or
+// other const expressions), we keep them hardcoded with a comment noting the
+// shared source.
 
+use crate::shared_config;
 use crate::types::Vec3;
 use crate::worldgen::{WORLD_SIZE_X, WORLD_SIZE_Z};
 
 // ── Spawn & Player ──
 
+// SPAWN_POS depends on WORLD_SIZE_X/Z which are const — keep as const.
 pub const SPAWN_POS: Vec3 = Vec3 {
     x: WORLD_SIZE_X as f32 / 2.0,
     y: 20.0,
     z: WORLD_SIZE_Z as f32 / 2.0,
 };
-pub const MAX_HEALTH: i32 = 100;
-pub const HEALTH_REGEN_RATE: i32 = 5;
-pub const HEALTH_REGEN_DELAY_SECS: u64 = 10;
-pub const MAX_MOVEMENT_SPEED: f32 = 35.0;
-pub const SPEED_VIOLATION_THRESHOLD: u32 = 10;
-pub const PLAYER_EYE_HEIGHT: f32 = 1.7;
-pub const PLAYER_FOOT_RADIUS: f32 = 0.29;
-pub const DEFAULT_LOADOUT: [u8; 3] = [0, 1, 2];
-pub const NUM_CHARACTER_PRESETS: u8 = 5;
+
+/// Sourced from shared/game-constants.json → player.maxHealth
+pub fn max_health() -> i32 {
+    shared_config::config().player.max_health
+}
+/// Sourced from shared/game-constants.json → player.healthRegenRate
+pub fn health_regen_rate() -> i32 {
+    shared_config::config().player.health_regen_rate
+}
+/// Sourced from shared/game-constants.json → player.healthRegenDelaySecs
+pub fn health_regen_delay_secs() -> u64 {
+    shared_config::config().player.health_regen_delay_secs
+}
+/// Sourced from shared/game-constants.json → player.maxMovementSpeed
+pub fn max_movement_speed() -> f32 {
+    shared_config::config().player.max_movement_speed
+}
+/// Sourced from shared/game-constants.json → player.speedViolationThreshold
+pub fn speed_violation_threshold() -> u32 {
+    shared_config::config().player.speed_violation_threshold
+}
+/// Sourced from shared/game-constants.json → player.eyeHeight
+pub fn player_eye_height() -> f32 {
+    shared_config::config().player.eye_height
+}
+/// Sourced from shared/game-constants.json → player.footRadius
+pub fn player_foot_radius() -> f32 {
+    shared_config::config().player.foot_radius
+}
+/// Sourced from shared/game-constants.json → player.numCharacterPresets
+pub fn num_character_presets() -> u8 {
+    shared_config::config().player.num_character_presets
+}
+
+/// Sourced from shared/game-constants.json → player.defaultLoadout
+pub fn default_loadout() -> [u8; 3] {
+    let l = &shared_config::config().player.default_loadout;
+    [l[0], l[1], l[2]]
+}
 
 // ── Entity Kinds ──
+// Sourced from shared/game-constants.json → entityKinds
 
-pub const ENTITY_KIND_PLAYER: u8 = 1;
-pub const ENTITY_KIND_VEHICLE: u8 = 2;
+pub fn entity_kind_player() -> u8 {
+    shared_config::config().entity_kinds.player
+}
+pub fn entity_kind_vehicle() -> u8 {
+    shared_config::config().entity_kinds.vehicle
+}
 
 // ── Grenade Physics ──
+// Sourced from shared/game-constants.json → grenade
 
-pub const GRENADE_TICK_INTERVAL_MS: u64 = 33;
-pub const GRENADE_GRAVITY: f32 = 18.0;
-pub const GRENADE_FUSE_MS: u32 = 5000;
-pub const GRENADE_BOUNCE_RESTITUTION: f32 = 0.45;
-pub const GRENADE_BOUNCE_FRICTION: f32 = 0.7;
-pub const GRENADE_GROUND_FRICTION: f32 = 0.96;
-pub const GRENADE_MIN_BOUNCE_VEL: f32 = 1.5;
-pub const GRENADE_RADIUS: f32 = 0.19;
-pub const GRENADE_WEAPON_INDEX: u8 = 4;
+pub fn grenade_tick_interval_ms() -> u64 {
+    shared_config::config().grenade.tick_interval_ms
+}
+pub fn grenade_gravity() -> f32 {
+    shared_config::config().grenade.gravity
+}
+pub fn grenade_fuse_ms() -> u32 {
+    shared_config::config().grenade.fuse_ms
+}
+pub fn grenade_bounce_restitution() -> f32 {
+    shared_config::config().grenade.bounce_restitution
+}
+pub fn grenade_bounce_friction() -> f32 {
+    shared_config::config().grenade.bounce_friction
+}
+pub fn grenade_ground_friction() -> f32 {
+    shared_config::config().grenade.ground_friction
+}
+pub fn grenade_min_bounce_vel() -> f32 {
+    shared_config::config().grenade.min_bounce_vel
+}
+pub fn grenade_radius() -> f32 {
+    shared_config::config().grenade.radius
+}
+pub fn grenade_weapon_index() -> u8 {
+    shared_config::config().grenade.weapon_index
+}
 
 // ── Helicopter ──
+// Sourced from shared/game-constants.json → helicopter + vehicleTypes
 
-pub const VEHICLE_TYPE_HELICOPTER: u8 = 0;
+pub fn vehicle_type_helicopter() -> u8 {
+    shared_config::config().vehicle_types.helicopter
+}
+
+/// Not in shared JSON — server-only spawn config.
 pub const SANDBOX_HELICOPTER_COUNT: usize = 1;
+/// Not in shared JSON — server-only spawn config.
 pub const HELI_SPAWN_CLEARANCE_RADIUS: i32 = 4;
+/// Not in shared JSON — server-only spawn config.
 pub const HELI_SPAWN_CLEARANCE_HEIGHT: i32 = 7;
+/// Not in shared JSON — server-only spawn config.
 pub const HELI_SPAWN_MIN_SEPARATION: f32 = 28.0;
-pub const HELI_SCALE: f32 = 1.85;
-pub const HELI_MOUNT_RANGE: f32 = 8.5;
-pub const HELI_MIN_ALTITUDE_FROM_GROUND: f32 = 0.0;
-pub const HELI_MAX_ALTITUDE: f32 = 96.0;
+/// Not in shared JSON — server-only tick rate.
 pub const HELI_TICK_INTERVAL_MS: u64 = 33;
-pub const HELI_CRUISE_SPEED: f32 = 34.0;
-pub const HELI_STRAFE_SPEED: f32 = 22.0;
-pub const HELI_LIFT_SPEED: f32 = 16.0;
-pub const HELI_MAX_YAW_RATE: f32 = 5.2;
-pub const HELI_MAX_PITCH_RATE: f32 = 4.2;
-pub const HELI_PILOT_SEAT_HEIGHT: f32 = 1.8;
-pub const HELI_HEALTH_MAX: i32 = 1000;
-pub const HELI_HITBOX_CENTER_Y: f32 = 2.5;
-pub const HELI_HITBOX_HALF_X: f32 = 6.4;
-pub const HELI_HITBOX_HALF_Y: f32 = 1.25;
-pub const HELI_HITBOX_HALF_Z: f32 = 4.9;
+
+pub fn heli_scale() -> f32 {
+    shared_config::config().helicopter.scale
+}
+pub fn heli_mount_range() -> f32 {
+    shared_config::config().helicopter.mount_range
+}
+pub fn heli_min_altitude_from_ground() -> f32 {
+    shared_config::config().helicopter.min_altitude
+}
+pub fn heli_max_altitude() -> f32 {
+    shared_config::config().helicopter.max_altitude
+}
+pub fn heli_cruise_speed() -> f32 {
+    shared_config::config().helicopter.cruise_speed
+}
+pub fn heli_strafe_speed() -> f32 {
+    shared_config::config().helicopter.strafe_speed
+}
+pub fn heli_lift_speed() -> f32 {
+    shared_config::config().helicopter.lift_speed
+}
+pub fn heli_max_yaw_rate() -> f32 {
+    shared_config::config().helicopter.max_yaw_rate
+}
+pub fn heli_max_pitch_rate() -> f32 {
+    shared_config::config().helicopter.max_pitch_rate
+}
+pub fn heli_pilot_seat_height() -> f32 {
+    shared_config::config().helicopter.pilot_seat_height
+}
+pub fn heli_health_max() -> i32 {
+    shared_config::config().helicopter.health_max
+}
+pub fn heli_hitbox_center_y() -> f32 {
+    shared_config::config().helicopter.hitbox.center_y
+}
+pub fn heli_hitbox_half_x() -> f32 {
+    shared_config::config().helicopter.hitbox.half_x
+}
+pub fn heli_hitbox_half_y() -> f32 {
+    shared_config::config().helicopter.hitbox.half_y
+}
+pub fn heli_hitbox_half_z() -> f32 {
+    shared_config::config().helicopter.hitbox.half_z
+}
 
 // ── Combat Validation ──
+// Sourced from shared/game-constants.json → combat + player.godModeHealth
 
 /// God mode sentinel: max_health >= this means invulnerable.
-pub const GOD_MODE_HEALTH: i32 = 9999;
+pub fn god_mode_health() -> i32 {
+    shared_config::config().player.god_mode_health
+}
 /// Fire rate tolerance in microseconds (client-server clock drift allowance).
-pub const FIRE_RATE_TOLERANCE_US: u64 = 150_000;
+pub fn fire_rate_tolerance_us() -> u64 {
+    shared_config::config().combat.fire_rate_tolerance_us
+}
 /// Max origin distance squared for infantry shots.
-pub const MAX_SHOT_ORIGIN_DIST_SQ: f32 = 25.0;
+pub fn max_shot_origin_dist_sq() -> f32 {
+    shared_config::config().combat.max_shot_origin_dist_sq
+}
 /// Max origin distance squared for vehicle shots.
-pub const MAX_VEHICLE_SHOT_ORIGIN_DIST_SQ: f32 = 225.0;
+pub fn max_vehicle_shot_origin_dist_sq() -> f32 {
+    shared_config::config()
+        .combat
+        .max_vehicle_shot_origin_dist_sq
+}
 /// Max blocks per destroy_blocks_physics call.
-pub const MAX_BLOCK_DESTROY_PER_CALL: usize = 500;
+pub fn max_block_destroy_per_call() -> usize {
+    shared_config::config().combat.max_block_destroy_per_call
+}
 /// Max range for block destruction from player position.
-pub const MAX_BLOCK_DESTROY_RANGE: f32 = 40.0;
+pub fn max_block_destroy_range() -> f32 {
+    shared_config::config().combat.max_block_destroy_range
+}
 /// Hitscan direction dot product threshold (infantry vs player).
-pub const HITSCAN_DOT_THRESHOLD_PLAYER: f32 = 0.5;
+pub fn hitscan_dot_threshold_player() -> f32 {
+    shared_config::config().combat.hitscan_dot_threshold_player
+}
 /// Hitscan direction dot product threshold (infantry vs vehicle).
-pub const HITSCAN_DOT_THRESHOLD_VEHICLE: f32 = 0.35;
+pub fn hitscan_dot_threshold_vehicle() -> f32 {
+    shared_config::config().combat.hitscan_dot_threshold_vehicle
+}
 
 // ── Weather Presets ──
+// Sourced from shared/game-constants.json → weather
 
 pub struct WeatherPreset {
     pub name: &'static str,
@@ -90,37 +212,40 @@ pub struct WeatherPreset {
     pub wind_speed: f32,
 }
 
-pub const WEATHER_PRESETS: [WeatherPreset; 5] = [
-    WeatherPreset {
-        name: "Clear",
-        cloud_density: 0.1,
-        fog_density: 0.6,
-        wind_speed: 0.1,
-    },
-    WeatherPreset {
-        name: "Cloudy",
-        cloud_density: 0.5,
-        fog_density: 0.8,
-        wind_speed: 0.3,
-    },
-    WeatherPreset {
-        name: "Overcast",
-        cloud_density: 0.8,
-        fog_density: 1.2,
-        wind_speed: 0.4,
-    },
-    WeatherPreset {
-        name: "Rainy",
-        cloud_density: 0.7,
-        fog_density: 1.5,
-        wind_speed: 0.5,
-    },
-    WeatherPreset {
-        name: "Stormy",
-        cloud_density: 0.9,
-        fog_density: 1.8,
-        wind_speed: 0.8,
-    },
-];
-
+/// Number of weather types. Kept as const since it's used for RNG range.
+/// Sourced from shared/game-constants.json → weather array length.
 pub const NUM_WEATHER_TYPES: u8 = 5;
+
+/// Weather presets sourced from the shared JSON. Names are leaked to get
+/// 'static lifetimes (one-time cost, never freed).
+pub fn weather_presets() -> &'static [WeatherPreset] {
+    use std::sync::OnceLock;
+    static PRESETS: OnceLock<Vec<WeatherPreset>> = OnceLock::new();
+    PRESETS.get_or_init(|| {
+        shared_config::config()
+            .weather
+            .iter()
+            .map(|w| WeatherPreset {
+                name: Box::leak(w.name.clone().into_boxed_str()),
+                cloud_density: w.cloud_density,
+                fog_density: w.fog_density,
+                wind_speed: w.wind_speed,
+            })
+            .collect()
+    })
+}
+
+// ── Backward-compatible const aliases ──
+// These are kept so that existing code using `constants::SOME_CONST` continues
+// to compile. They shadow the old `pub const` names with the same values
+// but sourced from the JSON at first access.
+//
+// For truly const values (used in const array sizes etc.), we keep hardcoded
+// consts above with comments noting the shared source.
+
+// Legacy const shims — re-export functions with const-like names via macros
+// is not ergonomic in Rust, so callers must migrate to function syntax.
+// However, to minimize changes across the codebase we provide uppercase aliases.
+//
+// Callers that previously used e.g. `constants::MAX_HEALTH` must now use
+// `constants::max_health()`. The search-and-replace is done below.

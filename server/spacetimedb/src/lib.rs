@@ -41,20 +41,21 @@
 //   cleanup     - Scheduled event cleanup, health regeneration
 //   map         - Map reset, chunk requests
 
-pub mod types;
-pub mod constants;
-pub mod tables;
-pub mod worldgen;
-pub mod weapons;
-pub mod helpers;
-pub mod chunks;
-pub mod combat;
-pub mod vehicles;
-pub mod grenades;
-pub mod player;
 pub mod admin;
 pub mod chat;
-pub mod lifecycle;
-pub mod environment;
+pub mod chunks;
 pub mod cleanup;
+pub mod combat;
+pub mod constants;
+pub mod environment;
+pub mod grenades;
+pub mod helpers;
+pub mod lifecycle;
 pub mod map;
+pub mod player;
+pub mod shared_config;
+pub mod tables;
+pub mod types;
+pub mod vehicles;
+pub mod weapons;
+pub mod worldgen;

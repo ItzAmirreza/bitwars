@@ -84,7 +84,7 @@ pub fn tick_environment(ctx: &ReducerContext, _job: EnvironmentTick) {
 
                 if new_weather != env.weather {
                     weather_changed = true;
-                    let preset = &crate::constants::WEATHER_PRESETS[new_weather as usize];
+                    let preset = &crate::constants::weather_presets()[new_weather as usize];
                     new_wind = preset.wind_speed + ((seed % 20) as f32) / 100.0;
                     new_cloud = preset.cloud_density + ((seed % 20) as f32) / 100.0;
                     new_fog = preset.fog_density;

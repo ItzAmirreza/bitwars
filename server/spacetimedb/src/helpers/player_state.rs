@@ -35,9 +35,9 @@ pub fn init_movement_state(ctx: &ReducerContext, identity: Identity, pos: &Vec3)
 }
 
 pub fn loadout_slots_valid(slot1: u8, slot2: u8, slot3: u8) -> bool {
-    slot1 < weapons::NUM_WEAPONS
-        && slot2 < weapons::NUM_WEAPONS
-        && slot3 < weapons::NUM_WEAPONS
+    slot1 < weapons::num_weapons()
+        && slot2 < weapons::num_weapons()
+        && slot3 < weapons::num_weapons()
         && slot1 != slot2
         && slot1 != slot3
         && slot2 != slot3
@@ -48,7 +48,7 @@ pub fn weapon_in_loadout(loadout: &PlayerLoadout, weapon: u8) -> bool {
 }
 
 pub fn normalize_character_preset(preset: u8) -> u8 {
-    if preset < NUM_CHARACTER_PRESETS {
+    if preset < num_character_presets() {
         preset
     } else {
         0
@@ -63,24 +63,24 @@ pub fn normalize_or_create_player_loadout(ctx: &ReducerContext, username: &str) 
         }
         ctx.db.player_loadout().username().update(PlayerLoadout {
             username: key.clone(),
-            slot1: DEFAULT_LOADOUT[0],
-            slot2: DEFAULT_LOADOUT[1],
-            slot3: DEFAULT_LOADOUT[2],
+            slot1: default_loadout()[0],
+            slot2: default_loadout()[1],
+            slot3: default_loadout()[2],
             updated_at: ctx.timestamp,
         });
         return PlayerLoadout {
             username: key,
-            slot1: DEFAULT_LOADOUT[0],
-            slot2: DEFAULT_LOADOUT[1],
-            slot3: DEFAULT_LOADOUT[2],
+            slot1: default_loadout()[0],
+            slot2: default_loadout()[1],
+            slot3: default_loadout()[2],
             updated_at: ctx.timestamp,
         };
     }
     ctx.db.player_loadout().insert(PlayerLoadout {
         username: key,
-        slot1: DEFAULT_LOADOUT[0],
-        slot2: DEFAULT_LOADOUT[1],
-        slot3: DEFAULT_LOADOUT[2],
+        slot1: default_loadout()[0],
+        slot2: default_loadout()[1],
+        slot3: default_loadout()[2],
         updated_at: ctx.timestamp,
     })
 }

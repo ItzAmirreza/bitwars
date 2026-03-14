@@ -139,17 +139,18 @@ pub fn get_block_type(ctx: &spacetimedb::ReducerContext, x: i32, y: i32, z: i32)
 }
 
 pub fn is_grounded(ctx: &spacetimedb::ReducerContext, pos: &Vec3) -> bool {
-    use crate::constants::{PLAYER_EYE_HEIGHT, PLAYER_FOOT_RADIUS};
+    use crate::constants::{player_eye_height, player_foot_radius};
     use crate::worldgen::AIR;
 
-    let foot_y = pos.y - PLAYER_EYE_HEIGHT;
+    let foot_y = pos.y - player_eye_height();
     let probe_y = (foot_y - 0.05).floor() as i32;
+    let foot_r = player_foot_radius();
     let probes = [
         (pos.x, pos.z),
-        (pos.x - PLAYER_FOOT_RADIUS, pos.z - PLAYER_FOOT_RADIUS),
-        (pos.x + PLAYER_FOOT_RADIUS, pos.z - PLAYER_FOOT_RADIUS),
-        (pos.x - PLAYER_FOOT_RADIUS, pos.z + PLAYER_FOOT_RADIUS),
-        (pos.x + PLAYER_FOOT_RADIUS, pos.z + PLAYER_FOOT_RADIUS),
+        (pos.x - foot_r, pos.z - foot_r),
+        (pos.x + foot_r, pos.z - foot_r),
+        (pos.x - foot_r, pos.z + foot_r),
+        (pos.x + foot_r, pos.z + foot_r),
     ];
     probes.iter().any(|(px, pz)| {
         let bx = px.floor() as i32;

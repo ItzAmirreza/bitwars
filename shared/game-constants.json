@@ -1,0 +1,205 @@
+{
+  "world": {
+    "sizeX": 250,
+    "sizeY": 48,
+    "sizeZ": 250,
+    "chunkSize": 16
+  },
+
+  "blockTypes": {
+    "Air": 0,
+    "Concrete": 1,
+    "DarkConcrete": 2,
+    "Asphalt": 3,
+    "Rebar": 4,
+    "Brick": 5,
+    "Metal": 6,
+    "Rubble": 7,
+    "Dirt": 8,
+    "Sand": 9,
+    "Grass": 10,
+    "Wood": 11,
+    "Stone": 12,
+    "Snow": 13,
+    "Lantern": 14
+  },
+
+  "entityKinds": {
+    "Player": 1,
+    "Vehicle": 2
+  },
+
+  "vehicleTypes": {
+    "Helicopter": 0
+  },
+
+  "player": {
+    "maxHealth": 100,
+    "eyeHeight": 1.7,
+    "footRadius": 0.29,
+    "hitboxHalfWidth": 0.4,
+    "hitboxHeight": 1.9,
+    "godModeHealth": 9999,
+    "maxMovementSpeed": 35.0,
+    "speedViolationThreshold": 10,
+    "healthRegenRate": 5,
+    "healthRegenDelaySecs": 10,
+    "numCharacterPresets": 5,
+    "defaultLoadout": [0, 1, 2]
+  },
+
+  "weapons": [
+    {
+      "index": 0,
+      "name": "Rifle",
+      "damage": 25,
+      "radius": 0,
+      "fireRate": 5.0,
+      "maxAmmo": 90,
+      "maxRange": 80.0,
+      "projectileSpeed": 0,
+      "delivery": "hitscan",
+      "color": "#4488ff",
+      "recoil": 0.02
+    },
+    {
+      "index": 1,
+      "name": "Shotgun",
+      "damage": 12,
+      "radius": 1.5,
+      "fireRate": 1.0,
+      "maxAmmo": 24,
+      "maxRange": 30.0,
+      "projectileSpeed": 0,
+      "delivery": "hitscan",
+      "color": "#ff8844",
+      "recoil": 0.06
+    },
+    {
+      "index": 2,
+      "name": "RPG",
+      "damage": 80,
+      "radius": 3.5,
+      "fireRate": 1.0,
+      "maxAmmo": 12,
+      "maxRange": 80.0,
+      "projectileSpeed": 120.0,
+      "delivery": "projectile",
+      "color": "#ff4444",
+      "recoil": 0.1
+    },
+    {
+      "index": 3,
+      "name": "Machine Gun",
+      "damage": 14,
+      "radius": 0,
+      "fireRate": 13.0,
+      "maxAmmo": 180,
+      "maxRange": 90.0,
+      "projectileSpeed": 0,
+      "delivery": "hitscan",
+      "color": "#66e0ff",
+      "recoil": 0.016
+    },
+    {
+      "index": 4,
+      "name": "Grenade Launcher",
+      "damage": 95,
+      "radius": 4.8,
+      "fireRate": 1.4,
+      "maxAmmo": 14,
+      "maxRange": 85.0,
+      "projectileSpeed": 48.0,
+      "delivery": "server_projectile",
+      "color": "#6bff6b",
+      "recoil": 0.11
+    }
+  ],
+
+  "vehicleWeapons": [
+    {
+      "index": 0,
+      "name": "MINIGUN",
+      "damage": 8,
+      "radius": 0,
+      "fireRate": 15.0,
+      "maxAmmo": 300,
+      "maxRange": 100.0,
+      "projectileSpeed": 0,
+      "gravity": 0,
+      "delivery": "hitscan",
+      "color": "#ffaa00",
+      "reloadTime": 3.0
+    },
+    {
+      "index": 1,
+      "name": "ROCKETS",
+      "damage": 45,
+      "radius": 6.0,
+      "fireRate": 2.5,
+      "maxAmmo": 16,
+      "maxRange": 120.0,
+      "projectileSpeed": 80.0,
+      "gravity": 3.0,
+      "delivery": "projectile",
+      "color": "#ff4400",
+      "reloadTime": 2.5
+    }
+  ],
+
+  "helicopter": {
+    "healthMax": 1000,
+    "scale": 1.85,
+    "mountRange": 8.5,
+    "minAltitude": 0.0,
+    "maxAltitude": 96.0,
+    "cruiseSpeed": 34.0,
+    "strafeSpeed": 22.0,
+    "liftSpeed": 16.0,
+    "maxYawRate": 5.2,
+    "maxPitchRate": 4.2,
+    "pilotSeatHeight": 1.8,
+    "hitbox": {
+      "centerY": 2.5,
+      "halfX": 6.4,
+      "halfY": 1.25,
+      "halfZ": 4.9
+    },
+    "camera": {
+      "distance": 14,
+      "height": 5.2,
+      "pitchMin": -0.62,
+      "pitchMax": 0.42
+    }
+  },
+
+  "grenade": {
+    "tickIntervalMs": 33,
+    "gravity": 18.0,
+    "fuseMs": 5000,
+    "bounceRestitution": 0.45,
+    "bounceFriction": 0.7,
+    "groundFriction": 0.96,
+    "minBounceVel": 1.5,
+    "radius": 0.19,
+    "weaponIndex": 4
+  },
+
+  "combat": {
+    "fireRateToleranceUs": 150000,
+    "maxShotOriginDistSq": 25.0,
+    "maxVehicleShotOriginDistSq": 225.0,
+    "maxBlockDestroyPerCall": 500,
+    "maxBlockDestroyRange": 40.0,
+    "hitscanDotThresholdPlayer": 0.5,
+    "hitscanDotThresholdVehicle": 0.35
+  },
+
+  "weather": [
+    { "name": "Clear",    "cloudDensity": 0.1, "fogDensity": 0.6, "windSpeed": 0.1 },
+    { "name": "Cloudy",   "cloudDensity": 0.5, "fogDensity": 0.8, "windSpeed": 0.3 },
+    { "name": "Overcast", "cloudDensity": 0.8, "fogDensity": 1.2, "windSpeed": 0.4 },
+    { "name": "Rainy",    "cloudDensity": 0.7, "fogDensity": 1.5, "windSpeed": 0.5 },
+    { "name": "Stormy",   "cloudDensity": 0.9, "fogDensity": 1.8, "windSpeed": 0.8 }
+  ]
+}

@@ -1,24 +1,15 @@
 import * as THREE from 'three';
 import { VoxelWorld } from './VoxelWorld';
+import { WEAPON_DEFINITIONS, NUM_WEAPONS } from './WeaponRegistry';
+import type { ProjectileConfig } from './WeaponRegistry';
 
-export interface ProjectileConfig {
-  speed: number;           // units/sec (Infinity = hitscan)
-  gravity: number;         // downward acceleration (0 = no drop)
-  size: number;            // visual radius of projectile mesh
-  trailLength: number;     // trail particle spacing (0 = no trail)
-  trailColor: number;      // trail color hex
-  lightIntensity: number;  // point light intensity (0 = none)
-  lightColor: number;      // point light color hex
-  lightRange: number;      // point light range
-  lifetime: number;        // max seconds before despawn
-}
+export type { ProjectileConfig };
 
 export interface Weapon {
   name: string;
   damage: number;
   radius: number;
   fireRate: number;
-  ammo: number;
   maxAmmo: number;
   range: number;
   color: string;
@@ -27,33 +18,20 @@ export interface Weapon {
 }
 
 // Client-side weapon stats (used for prediction/VFX only — server is authority for damage/ammo)
-export const WEAPONS: Weapon[] = [
-  {
-    name: 'Rifle', damage: 25, radius: 0, fireRate: 5, ammo: 90, maxAmmo: 90, range: 80,
-    color: '#4488ff', recoil: 0.02,
-    projectile: { speed: Infinity, gravity: 0, size: 0, trailLength: 0, trailColor: 0, lightIntensity: 0, lightColor: 0, lightRange: 0, lifetime: 0 },
-  },
-  {
-    name: 'Shotgun', damage: 12, radius: 1.5, fireRate: 1, ammo: 24, maxAmmo: 24, range: 30,
-    color: '#ff8844', recoil: 0.06,
-    projectile: { speed: Infinity, gravity: 0, size: 0, trailLength: 0, trailColor: 0, lightIntensity: 0, lightColor: 0, lightRange: 0, lifetime: 0 },
-  },
-  {
-    name: 'RPG', damage: 80, radius: 3.5, fireRate: 1.0, ammo: 12, maxAmmo: 12, range: 80,
-    color: '#ff4444', recoil: 0.1,
-    projectile: { speed: 120, gravity: 2, size: 0.15, trailLength: 0.5, trailColor: 0xff6600, lightIntensity: 3, lightColor: 0xff4400, lightRange: 8, lifetime: 5 },
-  },
-  {
-    name: 'Machine Gun', damage: 14, radius: 0, fireRate: 13, ammo: 180, maxAmmo: 180, range: 90,
-    color: '#66e0ff', recoil: 0.016,
-    projectile: { speed: Infinity, gravity: 0, size: 0, trailLength: 0, trailColor: 0, lightIntensity: 0, lightColor: 0, lightRange: 0, lifetime: 0 },
-  },
-  {
-    name: 'Grenade Launcher', damage: 95, radius: 4.8, fireRate: 1.4, ammo: 14, maxAmmo: 14, range: 85,
-    color: '#6bff6b', recoil: 0.11,
-    projectile: { speed: 48, gravity: 8, size: 0.19, trailLength: 0.35, trailColor: 0x8dff66, lightIntensity: 2.8, lightColor: 0x9dff44, lightRange: 10, lifetime: 5 },
-  },
-];
+// Sourced from WeaponRegistry (shared JSON + client-only projectile configs)
+export const WEAPONS: readonly Weapon[] = WEAPON_DEFINITIONS.map((def) => ({
+  name: def.name,
+  damage: def.damage,
+  radius: def.radius,
+  fireRate: def.fireRate,
+  maxAmmo: def.maxAmmo,
+  range: def.maxRange,
+  color: def.color,
+  recoil: def.recoil,
+  projectile: def.projectile,
+}));
+
+export { NUM_WEAPONS };
 
 /** Result of a weapon fire — used by Engine to trigger VFX/audio and server sync */
 export interface FireResult {
@@ -86,10 +64,12 @@ export class WeaponSystem {
   private otherPlayers: Map<string, THREE.Group> = new Map();
   private vehicles: Map<number, THREE.Group> = new Map();
   private pendingBlockDestructions: Map<string, number> = new Map();
+  private ammoState: number[];
 
   constructor(camera: THREE.PerspectiveCamera, world: VoxelWorld) {
     this.camera = camera;
     this.world = world;
+    this.ammoState = WEAPONS.map((w) => w.maxAmmo);
 
     document.addEventListener('wheel', (e) => {
       if (!this.inputEnabled) return;
@@ -169,9 +149,29 @@ export class WeaponSystem {
     return this.currentWeapon;
   }
 
-  /** Update ammo from server state */
-  setAmmo(ammo: number): void {
-    this.weapon.ammo = ammo;
+  /** Get current ammo for a weapon (or current weapon if no index given) */
+  getAmmo(weaponIndex?: number): number {
+    const idx = weaponIndex ?? this.currentWeapon;
+    return this.ammoState[idx] ?? 0;
+  }
+
+  /** Update ammo from server state for a specific weapon */
+  setAmmo(weaponIndex: number, ammo: number): void {
+    if (weaponIndex >= 0 && weaponIndex < this.ammoState.length) {
+      this.ammoState[weaponIndex] = ammo;
+    }
+  }
+
+  /** Deduct one ammo from the current weapon (client prediction) */
+  deductAmmo(): void {
+    this.ammoState[this.currentWeapon]--;
+  }
+
+  /** Restore one ammo for a specific weapon (e.g. when fire is rolled back) */
+  restoreAmmo(weaponIndex: number): void {
+    if (weaponIndex >= 0 && weaponIndex < this.ammoState.length) {
+      this.ammoState[weaponIndex]++;
+    }
   }
 
   /**
@@ -184,10 +184,10 @@ export class WeaponSystem {
     const now = performance.now();
     const cooldown = 1000 / this.weapon.fireRate;
     if (now - this.lastFireTime < cooldown) return null;
-    if (this.weapon.ammo <= 0) return null;
+    if (this.ammoState[this.currentWeapon] <= 0) return null;
 
     this.lastFireTime = now;
-    this.weapon.ammo--; // Client prediction — server is authority
+    this.ammoState[this.currentWeapon]--; // Client prediction — server is authority
 
     // Raycast from camera center
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
@@ -295,7 +295,7 @@ export class WeaponSystem {
 
   reload(): void {
     // Client-side prediction only; actual reload goes through server
-    this.weapon.ammo = this.weapon.maxAmmo;
+    this.ammoState[this.currentWeapon] = this.weapon.maxAmmo;
   }
 
   /** Raycast against other players' AABB hitboxes, return hit player IDs */

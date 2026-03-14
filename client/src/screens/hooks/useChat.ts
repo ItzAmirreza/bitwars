@@ -1,19 +1,45 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { DisplayMessage } from '../hud/weaponData';
-import { toDisplayMessage, mergeMessages } from '../hud/weaponData';
 import type { DbConnection } from '../../module_bindings';
-import type { Engine } from '../../game/Engine';
 
-export function useChat(
-  connection: DbConnection | null,
-  engineRef: React.RefObject<Engine | null>,
-) {
-  const [chatOpen, setChatOpen] = useState(false);
+interface DisplayMessage {
+  id: number;
+  senderName: string;
+  text: string;
+  sentAt: number;
+}
+
+const MAX_CHAT_MESSAGES = 80;
+
+function getMessageTimestamp(sentAt: { toMillis?: () => bigint } | null | undefined): number {
+  if (sentAt && typeof sentAt.toMillis === 'function') {
+    return Number(sentAt.toMillis());
+  }
+  return Date.now();
+}
+
+function toDisplayMessage(msg: any): DisplayMessage {
+  return {
+    id: Number(msg.id),
+    senderName: String(msg.senderName),
+    text: String(msg.text),
+    sentAt: getMessageTimestamp(msg.sentAt),
+  };
+}
+
+function mergeMessages(prev: DisplayMessage[], next: DisplayMessage[]): DisplayMessage[] {
+  const merged = new Map<number, DisplayMessage>();
+
+  for (const message of prev) merged.set(message.id, message);
+  for (const message of next) merged.set(message.id, message);
+
+  return Array.from(merged.values())
+    .sort((a, b) => (a.sentAt === b.sentAt ? a.id - b.id : a.sentAt - b.sentAt))
+    .slice(-MAX_CHAT_MESSAGES);
+}
+
+export function useChat(connection: DbConnection | null) {
   const [chatMessages, setChatMessages] = useState<DisplayMessage[]>([]);
   const [chatDraft, setChatDraft] = useState('');
-  const [, chatTick] = useState(0);
-  const chatInputRef = useRef<HTMLInputElement>(null);
-  const chatListRef = useRef<HTMLDivElement>(null);
   const localChatIdRef = useRef(-1);
 
   const pushLocalSystemMessage = useCallback((text: string) => {
@@ -31,6 +57,20 @@ export function useChat(
       ]),
     );
   }, []);
+
+  const sendChatMessage = useCallback(
+    async (text: string) => {
+      if (!connection || !text.trim()) return;
+      const trimmed = text.trim();
+
+      try {
+        await connection.reducers.sendChat({ text: trimmed });
+      } catch (error) {
+        pushLocalSystemMessage(error instanceof Error ? error.message : 'Failed to send chat message');
+      }
+    },
+    [connection, pushLocalSystemMessage],
+  );
 
   // Load chat messages from DB + subscribe to new ones
   useEffect(() => {
@@ -54,93 +94,11 @@ export function useChat(
     };
   }, [connection]);
 
-  // Periodic tick for message fading (when chat is closed)
-  useEffect(() => {
-    if (chatOpen) return;
-    const interval = setInterval(() => chatTick((n) => n + 1), 1000);
-    return () => clearInterval(interval);
-  }, [chatOpen]);
-
-  // Focus chat input when opened
-  useEffect(() => {
-    if (chatOpen) {
-      const timer = window.setTimeout(() => {
-        const input = chatInputRef.current;
-        if (!input) return;
-
-        input.focus();
-        const end = input.value.length;
-        input.setSelectionRange(end, end);
-      }, 0);
-
-      return () => window.clearTimeout(timer);
-    }
-  }, [chatOpen]);
-
-  useEffect(() => {
-    if (!chatOpen) return;
-
-    const frame = window.requestAnimationFrame(() => {
-      const list = chatListRef.current;
-      if (!list) return;
-      list.scrollTop = list.scrollHeight;
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [chatMessages, chatOpen]);
-
-  const openChat = useCallback((initialText = '') => {
-    setChatDraft(initialText);
-    setChatOpen(true);
-    engineRef.current?.setChatOpen(true);
-  }, [engineRef]);
-
-  const closeChat = useCallback(() => {
-    setChatOpen(false);
-    setChatDraft('');
-    engineRef.current?.setChatOpen(false);
-  }, [engineRef]);
-
-  const sendChatMessage = useCallback(
-    async (text: string) => {
-      if (!connection || !text.trim()) return;
-      const trimmed = text.trim();
-
-      try {
-        await connection.reducers.sendChat({ text: trimmed });
-        if (trimmed.toLowerCase() === '/fly') {
-          engineRef.current?.toggleFly();
-        }
-      } catch (error) {
-        pushLocalSystemMessage(error instanceof Error ? error.message : 'Failed to send chat message');
-      }
-    },
-    [connection, pushLocalSystemMessage, engineRef],
-  );
-
-  const getMessageOpacity = useCallback(
-    (sentAt: number): number => {
-      if (chatOpen) return 1;
-      const age = (Date.now() - sentAt) / 1000;
-      if (age < 6) return 0.9;
-      if (age < 10) return 0.9 * (1 - (age - 6) / 4);
-      return 0;
-    },
-    [chatOpen],
-  );
-
   return {
-    chatOpen,
-    setChatOpen,
     chatMessages,
     chatDraft,
     setChatDraft,
-    chatInputRef,
-    chatListRef,
-    openChat,
-    closeChat,
     sendChatMessage,
-    getMessageOpacity,
     pushLocalSystemMessage,
   };
 }

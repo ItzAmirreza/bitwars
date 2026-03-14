@@ -72,20 +72,20 @@ pub fn tick_helicopter(
     };
 
     // ── Rotation ──
-    let yaw_step = yaw_input * HELI_MAX_YAW_RATE * dt;
+    let yaw_step = yaw_input * heli_max_yaw_rate() * dt;
     let target_pitch = if has_pilot {
         -forward_input * 0.25
     } else {
         0.0
     };
     let pitch_step = (target_pitch - entity.rot.pitch)
-        .clamp(-HELI_MAX_PITCH_RATE * dt, HELI_MAX_PITCH_RATE * dt);
+        .clamp(-heli_max_pitch_rate() * dt, heli_max_pitch_rate() * dt);
     entity.rot.pitch += pitch_step;
 
     // ── Velocity ──
-    let forward_speed = forward_input * HELI_CRUISE_SPEED;
-    let strafe_speed = strafe_input * HELI_STRAFE_SPEED;
-    let lift_speed = lift_input * HELI_LIFT_SPEED;
+    let forward_speed = forward_input * heli_cruise_speed();
+    let strafe_speed = strafe_input * heli_strafe_speed();
+    let lift_speed = lift_input * heli_lift_speed();
 
     let fx = -entity.rot.yaw.sin();
     let fz = -entity.rot.yaw.cos();
@@ -150,7 +150,7 @@ pub fn tick_helicopter(
 
     // ── Ground collision ──
     let ground = helicopter_ground_rest_height(ctx, next_pos.x, next_pos.z);
-    let min_alt = ground + HELI_MIN_ALTITUDE_FROM_GROUND;
+    let min_alt = ground + heli_min_altitude_from_ground();
     if next_pos.y < min_alt {
         next_pos.y = min_alt;
         if entity.vel.y < 0.0 {
@@ -162,8 +162,8 @@ pub fn tick_helicopter(
             entity.vel.z *= 0.93;
         }
     }
-    if next_pos.y > HELI_MAX_ALTITUDE {
-        next_pos.y = HELI_MAX_ALTITUDE;
+    if next_pos.y > heli_max_altitude() {
+        next_pos.y = heli_max_altitude();
         if entity.vel.y > 0.0 {
             entity.vel.y *= 0.15;
         }
@@ -190,7 +190,7 @@ pub fn tick_helicopter(
             mounted_updates.push(Player {
                 pos: Vec3 {
                     x: entity.pos.x,
-                    y: entity.pos.y + HELI_PILOT_SEAT_HEIGHT,
+                    y: entity.pos.y + heli_pilot_seat_height(),
                     z: entity.pos.z,
                 },
                 vel: entity.vel.clone(),

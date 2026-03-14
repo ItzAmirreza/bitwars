@@ -30,7 +30,7 @@ pub fn fire_weapon(
         .find(sender)
         .ok_or("Not registered")?;
 
-    if weapon >= weapons::NUM_WEAPONS {
+    if weapon >= weapons::num_weapons() {
         return Err("Invalid weapon".to_string());
     }
     let loadout = normalize_or_create_player_loadout(ctx, &player.username);
@@ -58,7 +58,7 @@ pub fn fire_weapon(
         return Err("No ammo".to_string());
     }
 
-    if dist_sq(&origin, &player.pos) > MAX_SHOT_ORIGIN_DIST_SQ {
+    if dist_sq(&origin, &player.pos) > max_shot_origin_dist_sq() {
         return Err("Shot origin too far from player".to_string());
     }
 
@@ -88,7 +88,7 @@ pub fn fire_weapon(
                     y: final_dir.y * def.projectile_speed,
                     z: final_dir.z * def.projectile_speed,
                 },
-                fuse_remaining_ms: GRENADE_FUSE_MS,
+                fuse_remaining_ms: grenade_fuse_ms(),
                 created_at: ctx.timestamp,
             });
         }
@@ -132,18 +132,18 @@ pub fn fire_weapon(
             continue;
         };
         if !entity.active
-            || entity.kind != ENTITY_KIND_VEHICLE
-            || entity.subtype != VEHICLE_TYPE_HELICOPTER
+            || entity.kind != entity_kind_vehicle()
+            || entity.subtype != vehicle_type_helicopter()
         {
             continue;
         }
 
         let center = Vec3 {
             x: entity.pos.x,
-            y: entity.pos.y + HELI_HITBOX_CENTER_Y,
+            y: entity.pos.y + heli_hitbox_center_y(),
             z: entity.pos.z,
         };
-        let max_vehicle_range = def.max_range + HELI_HITBOX_HALF_X + 3.0;
+        let max_vehicle_range = def.max_range + heli_hitbox_half_x() + 3.0;
         if dist_sq(&origin, &center) > max_vehicle_range * max_vehicle_range {
             continue;
         }
@@ -157,7 +157,7 @@ pub fn fire_weapon(
         }
         let dot =
             (to_x * direction.x + to_y * direction.y + to_z * direction.z) / (to_len * dir_len);
-        if dot < HITSCAN_DOT_THRESHOLD_VEHICLE {
+        if dot < hitscan_dot_threshold_vehicle() {
             continue;
         }
 
@@ -226,7 +226,7 @@ pub fn reload_weapon(ctx: &ReducerContext) -> Result<(), String> {
         .find(sender)
         .ok_or("Not registered")?;
     let weapon = player.current_weapon;
-    if weapon >= weapons::NUM_WEAPONS {
+    if weapon >= weapons::num_weapons() {
         return Err("Invalid weapon".to_string());
     }
     let def = weapons::get_weapon(weapon);

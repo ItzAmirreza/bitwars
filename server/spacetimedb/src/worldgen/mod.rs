@@ -6,15 +6,15 @@
 // To add a structure:  structures.rs → add placement fn + wire in generate_chunk
 // To add a block type: add constant here + match client BlockType
 
-pub mod noise;
 pub mod biomes;
+pub mod noise;
 pub mod roads;
-pub mod structures;
 pub mod structural;
+pub mod structures;
 
 // Re-export everything for backward compat
-pub use noise::*;
 pub use biomes::*;
+pub use noise::*;
 pub use structural::{check_structural_integrity_sparse, StructuralCollapsePlan};
 
 // ── World Constants ──
@@ -70,7 +70,9 @@ pub fn rle_decode(data: &[u8], output: &mut [u8]) {
         let val = data[i];
         let run = data[i + 1] as usize;
         for _ in 0..run {
-            if out_idx >= output.len() { break; }
+            if out_idx >= output.len() {
+                break;
+            }
             output[out_idx] = val;
             out_idx += 1;
         }
@@ -85,7 +87,11 @@ pub fn pack_chunk_id(cx: u8, cy: u8, cz: u8) -> u32 {
 }
 
 pub fn unpack_chunk_id(id: u32) -> (u8, u8, u8) {
-    ((id & 0xFF) as u8, ((id >> 8) & 0xFF) as u8, ((id >> 16) & 0xFF) as u8)
+    (
+        (id & 0xFF) as u8,
+        ((id >> 8) & 0xFF) as u8,
+        ((id >> 16) & 0xFF) as u8,
+    )
 }
 
 pub fn inject_chunk(blocks: &mut [u8], cx: usize, cy: usize, cz: usize, chunk_data: &[u8]) {
@@ -105,23 +111,57 @@ pub fn inject_chunk(blocks: &mut [u8], cx: usize, cy: usize, cz: usize, chunk_da
 
 // ── Chunk Block Helpers (used by structures) ──
 
-pub fn set_chunk_block(cb: &mut [u8; 4096], cx: i32, cy: i32, cz: i32, wx: i32, wy: i32, wz: i32, bt: u8) {
+pub fn set_chunk_block(
+    cb: &mut [u8; 4096],
+    cx: i32,
+    cy: i32,
+    cz: i32,
+    wx: i32,
+    wy: i32,
+    wz: i32,
+    bt: u8,
+) {
     let lx = wx - cx;
     let ly = wy - cy;
     let lz = wz - cz;
-    if lx >= 0 && lx < CHUNK_SIZE as i32 && ly >= 0 && ly < CHUNK_SIZE as i32 && lz >= 0 && lz < CHUNK_SIZE as i32 {
+    if lx >= 0
+        && lx < CHUNK_SIZE as i32
+        && ly >= 0
+        && ly < CHUNK_SIZE as i32
+        && lz >= 0
+        && lz < CHUNK_SIZE as i32
+    {
         let idx = lx as usize + ly as usize * CHUNK_SIZE + lz as usize * CHUNK_SIZE * CHUNK_SIZE;
-        if cb[idx] == AIR || bt != AIR { cb[idx] = bt; }
+        if cb[idx] == AIR || bt != AIR {
+            cb[idx] = bt;
+        }
     }
 }
 
-pub fn set_chunk_block_if_air(cb: &mut [u8; 4096], cx: i32, cy: i32, cz: i32, wx: i32, wy: i32, wz: i32, bt: u8) {
+pub fn set_chunk_block_if_air(
+    cb: &mut [u8; 4096],
+    cx: i32,
+    cy: i32,
+    cz: i32,
+    wx: i32,
+    wy: i32,
+    wz: i32,
+    bt: u8,
+) {
     let lx = wx - cx;
     let ly = wy - cy;
     let lz = wz - cz;
-    if lx >= 0 && lx < CHUNK_SIZE as i32 && ly >= 0 && ly < CHUNK_SIZE as i32 && lz >= 0 && lz < CHUNK_SIZE as i32 {
+    if lx >= 0
+        && lx < CHUNK_SIZE as i32
+        && ly >= 0
+        && ly < CHUNK_SIZE as i32
+        && lz >= 0
+        && lz < CHUNK_SIZE as i32
+    {
         let idx = lx as usize + ly as usize * CHUNK_SIZE + lz as usize * CHUNK_SIZE * CHUNK_SIZE;
-        if cb[idx] == AIR { cb[idx] = bt; }
+        if cb[idx] == AIR {
+            cb[idx] = bt;
+        }
     }
 }
 
@@ -138,7 +178,9 @@ pub fn generate_chunk(cx: usize, cy: usize, cz: usize, seed: u64) -> Vec<u8> {
         for lz in 0..CHUNK_SIZE {
             let wx = chunk_wx + lx as i32;
             let wz = chunk_wz + lz as i32;
-            if wx < 0 || wx >= WORLD_SIZE_X as i32 || wz < 0 || wz >= WORLD_SIZE_Z as i32 { continue; }
+            if wx < 0 || wx >= WORLD_SIZE_X as i32 || wz < 0 || wz >= WORLD_SIZE_Z as i32 {
+                continue;
+            }
 
             let biome = biomes::get_biome(wx, wz, seed);
             let h = biomes::biome_height(biome, wx, wz, seed);
@@ -148,8 +190,16 @@ pub fn generate_chunk(cx: usize, cy: usize, cz: usize, seed: u64) -> Vec<u8> {
 
             for ly in 0..CHUNK_SIZE {
                 let wy = chunk_wy + ly as i32;
-                if wy > h { break; }
-                let bt = if wy == h { surface } else if wy >= h - 2 { subsurface } else { deep };
+                if wy > h {
+                    break;
+                }
+                let bt = if wy == h {
+                    surface
+                } else if wy >= h - 2 {
+                    subsurface
+                } else {
+                    deep
+                };
                 chunk_blocks[lx + ly * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE] = bt;
             }
 
@@ -157,25 +207,45 @@ pub fn generate_chunk(cx: usize, cy: usize, cz: usize, seed: u64) -> Vec<u8> {
             if let Some(road_bt) = roads::is_road(wx, wz, seed) {
                 let ly = h - chunk_wy;
                 if ly >= 0 && ly < CHUNK_SIZE as i32 {
-                    chunk_blocks[lx + ly as usize * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE] = road_bt;
+                    chunk_blocks[lx + ly as usize * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE] =
+                        road_bt;
                 }
             }
 
             // Road lanterns
             if roads::should_place_road_lantern(wx, wz, biome, seed) {
-                roads::place_lantern_post(&mut chunk_blocks, chunk_wx, chunk_wy, chunk_wz, wx, h, wz);
+                roads::place_lantern_post(
+                    &mut chunk_blocks,
+                    chunk_wx,
+                    chunk_wy,
+                    chunk_wz,
+                    wx,
+                    h,
+                    wz,
+                );
             }
 
             // Snow cap
             if biome == Biome::Mountains && h > 18 {
                 let ly = h - chunk_wy;
                 if ly >= 0 && ly < CHUNK_SIZE as i32 {
-                    chunk_blocks[lx + ly as usize * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE] = SNOW;
+                    chunk_blocks[lx + ly as usize * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE] =
+                        SNOW;
                 }
             }
 
             // Vegetation
-            structures::scatter_vegetation(&mut chunk_blocks, chunk_wx, chunk_wy, chunk_wz, wx, wz, h, biome, seed);
+            structures::scatter_vegetation(
+                &mut chunk_blocks,
+                chunk_wx,
+                chunk_wy,
+                chunk_wz,
+                wx,
+                wz,
+                h,
+                biome,
+                seed,
+            );
         }
     }
 

@@ -11,19 +11,19 @@ use crate::types::*;
 pub fn helicopter_hitbox_bounds(entity: &Entity) -> (Vec3, Vec3) {
     let center = Vec3 {
         x: entity.pos.x,
-        y: entity.pos.y + HELI_HITBOX_CENTER_Y,
+        y: entity.pos.y + heli_hitbox_center_y(),
         z: entity.pos.z,
     };
     (
         Vec3 {
-            x: center.x - HELI_HITBOX_HALF_X,
-            y: center.y - HELI_HITBOX_HALF_Y,
-            z: center.z - HELI_HITBOX_HALF_Z,
+            x: center.x - heli_hitbox_half_x(),
+            y: center.y - heli_hitbox_half_y(),
+            z: center.z - heli_hitbox_half_z(),
         },
         Vec3 {
-            x: center.x + HELI_HITBOX_HALF_X,
-            y: center.y + HELI_HITBOX_HALF_Y,
-            z: center.z + HELI_HITBOX_HALF_Z,
+            x: center.x + heli_hitbox_half_x(),
+            y: center.y + heli_hitbox_half_y(),
+            z: center.z + heli_hitbox_half_z(),
         },
     )
 }
@@ -81,8 +81,8 @@ pub fn dismount_player_internal(
     }
 
     if force_to_ground {
-        let gy =
-            helicopter_ground_rest_height(ctx, dismount_pos.x, dismount_pos.z) + PLAYER_EYE_HEIGHT;
+        let gy = helicopter_ground_rest_height(ctx, dismount_pos.x, dismount_pos.z)
+            + player_eye_height();
         dismount_pos.y = gy.max(0.0);
     }
 
@@ -112,7 +112,7 @@ pub fn apply_vehicle_damage(
 
     let heli_center = Vec3 {
         x: entity.pos.x,
-        y: entity.pos.y + HELI_HITBOX_CENTER_Y,
+        y: entity.pos.y + heli_hitbox_center_y(),
         z: entity.pos.z,
     };
 

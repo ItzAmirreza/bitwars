@@ -8,7 +8,7 @@ use crate::constants::*;
 use crate::helpers::*;
 use crate::tables::*;
 use crate::types::*;
-use crate::weapons::{self, NUM_VEHICLE_WEAPONS};
+use crate::weapons;
 
 #[reducer]
 pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(), String> {
@@ -22,7 +22,7 @@ pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(
     if player.mounted_vehicle_id == 0 {
         return Err("Not in a vehicle".to_string());
     }
-    if weapon_index >= NUM_VEHICLE_WEAPONS {
+    if weapon_index >= weapons::num_vehicle_weapons() {
         return Err("Invalid vehicle weapon index".to_string());
     }
     let vehicle = ctx
@@ -78,7 +78,7 @@ pub fn fire_vehicle_weapon(
     }
 
     let weapon_idx = vehicle.weapon_type;
-    if weapon_idx >= NUM_VEHICLE_WEAPONS {
+    if weapon_idx >= weapons::num_vehicle_weapons() {
         return Err("Invalid vehicle weapon".to_string());
     }
     let def = weapons::get_vehicle_weapon(weapon_idx);
@@ -103,7 +103,7 @@ pub fn fire_vehicle_weapon(
         .id()
         .find(&player.mounted_vehicle_id)
         .ok_or("Vehicle entity not found")?;
-    if dist_sq(&origin, &entity.pos) > MAX_VEHICLE_SHOT_ORIGIN_DIST_SQ {
+    if dist_sq(&origin, &entity.pos) > max_vehicle_shot_origin_dist_sq() {
         return Err("Shot origin too far from vehicle".to_string());
     }
 
@@ -213,7 +213,7 @@ pub fn vehicle_projectile_impact(
         .identity()
         .find(sender)
         .ok_or("Not registered")?;
-    if vehicle_weapon >= NUM_VEHICLE_WEAPONS {
+    if vehicle_weapon >= weapons::num_vehicle_weapons() {
         return Err("Invalid vehicle weapon".to_string());
     }
 
@@ -297,7 +297,7 @@ pub fn reload_vehicle_weapon(ctx: &ReducerContext) -> Result<(), String> {
     }
 
     let weapon_idx = vehicle.weapon_type;
-    if weapon_idx >= NUM_VEHICLE_WEAPONS {
+    if weapon_idx >= weapons::num_vehicle_weapons() {
         return Err("Invalid vehicle weapon".to_string());
     }
     let def = weapons::get_vehicle_weapon(weapon_idx);

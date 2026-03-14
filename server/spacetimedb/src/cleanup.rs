@@ -102,7 +102,7 @@ pub fn cleanup_detach_events(ctx: &ReducerContext, _job: DetachCleanup) {
 #[reducer]
 pub fn tick_health_regen(ctx: &ReducerContext, _job: HealthRegenTick) {
     let now_us = timestamp_micros(ctx.timestamp);
-    let regen_delay_us = HEALTH_REGEN_DELAY_SECS * 1_000_000;
+    let regen_delay_us = health_regen_delay_secs() * 1_000_000;
 
     let eligible: Vec<spacetimedb::Identity> = ctx
         .db
@@ -112,7 +112,7 @@ pub fn tick_health_regen(ctx: &ReducerContext, _job: HealthRegenTick) {
             p.online
                 && p.health > 0
                 && p.health < p.max_health
-                && p.max_health < GOD_MODE_HEALTH
+                && p.max_health < god_mode_health()
                 && now_us.saturating_sub(timestamp_micros(p.last_damage_time)) > regen_delay_us
         })
         .map(|p| p.identity)
@@ -120,7 +120,7 @@ pub fn tick_health_regen(ctx: &ReducerContext, _job: HealthRegenTick) {
 
     for id in eligible {
         if let Some(p) = ctx.db.player().identity().find(id) {
-            let new_health = (p.health + HEALTH_REGEN_RATE).min(p.max_health);
+            let new_health = (p.health + health_regen_rate()).min(p.max_health);
             let healed = Player {
                 health: new_health,
                 ..p

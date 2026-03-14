@@ -51,7 +51,7 @@ pub fn push_grenades_from_explosion(
 
 /// Explode a single grenade: damage, blocks, VFX.
 fn explode_grenade(ctx: &ReducerContext, grenade: &GrenadeProjectile) {
-    let def = weapons::get_weapon(GRENADE_WEAPON_INDEX);
+    let def = weapons::get_weapon(grenade_weapon_index());
     let pos = &grenade.pos;
     let owner = grenade.owner;
 
@@ -60,7 +60,7 @@ fn explode_grenade(ctx: &ReducerContext, grenade: &GrenadeProjectile) {
     let player_ids: Vec<Identity> = players
         .iter()
         .filter(|p| {
-            p.health > 0 && p.online && !p.spawn_protected && p.max_health < GOD_MODE_HEALTH
+            p.health > 0 && p.online && !p.spawn_protected && p.max_health < god_mode_health()
         })
         .filter(|p| dist_sq(pos, &p.pos) <= (def.radius + 2.0).powi(2))
         .map(|p| p.identity)
@@ -72,7 +72,7 @@ fn explode_grenade(ctx: &ReducerContext, grenade: &GrenadeProjectile) {
         &player_ids,
         def.damage,
         def.radius,
-        GRENADE_WEAPON_INDEX,
+        grenade_weapon_index(),
     );
 
     // Damage vehicles
@@ -85,7 +85,7 @@ fn explode_grenade(ctx: &ReducerContext, grenade: &GrenadeProjectile) {
         0,
         def.damage,
         def.radius,
-        GRENADE_WEAPON_INDEX,
+        grenade_weapon_index(),
     );
 
     // Destroy blocks
@@ -117,7 +117,7 @@ fn explode_grenade(ctx: &ReducerContext, grenade: &GrenadeProjectile) {
         origin: owner,
         pos: pos.clone(),
         radius: def.radius,
-        weapon: GRENADE_WEAPON_INDEX,
+        weapon: grenade_weapon_index(),
         destroyed_blocks: actually_destroyed
             .iter()
             .map(|&(x, y, z, bt)| DestroyedBlock {
@@ -136,8 +136,8 @@ fn explode_grenade(ctx: &ReducerContext, grenade: &GrenadeProjectile) {
 /// Scheduled grenade physics tick.
 #[reducer]
 pub fn tick_grenades(ctx: &ReducerContext, _job: GrenadeTick) {
-    let dt = GRENADE_TICK_INTERVAL_MS as f32 / 1000.0;
-    let tick_ms = GRENADE_TICK_INTERVAL_MS as u32;
+    let dt = grenade_tick_interval_ms() as f32 / 1000.0;
+    let tick_ms = grenade_tick_interval_ms() as u32;
 
     let grenades: Vec<GrenadeProjectile> = ctx.db.grenade_projectile().iter().collect();
 
@@ -150,7 +150,7 @@ pub fn tick_grenades(ctx: &ReducerContext, _job: GrenadeTick) {
         g.fuse_remaining_ms -= tick_ms;
 
         // Gravity
-        g.vel.y -= GRENADE_GRAVITY * dt;
+        g.vel.y -= grenade_gravity() * dt;
 
         let mut new_pos = Vec3 {
             x: g.pos.x + g.vel.x * dt,
@@ -162,45 +162,46 @@ pub fn tick_grenades(ctx: &ReducerContext, _job: GrenadeTick) {
         let bz = new_pos.z.floor() as i32;
 
         // Y collision
-        let block_below = get_block_type(ctx, bx, (new_pos.y - GRENADE_RADIUS).floor() as i32, bz);
-        let block_above = get_block_type(ctx, bx, (new_pos.y + GRENADE_RADIUS).ceil() as i32, bz);
+        let block_below =
+            get_block_type(ctx, bx, (new_pos.y - grenade_radius()).floor() as i32, bz);
+        let block_above = get_block_type(ctx, bx, (new_pos.y + grenade_radius()).ceil() as i32, bz);
         if matches!(block_below, Some(bt) if bt != AIR) && g.vel.y < 0.0 {
-            new_pos.y = (new_pos.y - GRENADE_RADIUS).floor() as f32 + 1.0 + GRENADE_RADIUS;
-            if g.vel.y.abs() < GRENADE_MIN_BOUNCE_VEL {
+            new_pos.y = (new_pos.y - grenade_radius()).floor() as f32 + 1.0 + grenade_radius();
+            if g.vel.y.abs() < grenade_min_bounce_vel() {
                 g.vel.y = 0.0;
-                g.vel.x *= GRENADE_GROUND_FRICTION;
-                g.vel.z *= GRENADE_GROUND_FRICTION;
+                g.vel.x *= grenade_ground_friction();
+                g.vel.z *= grenade_ground_friction();
             } else {
-                g.vel.y = -g.vel.y * GRENADE_BOUNCE_RESTITUTION;
-                g.vel.x *= GRENADE_BOUNCE_FRICTION;
-                g.vel.z *= GRENADE_BOUNCE_FRICTION;
+                g.vel.y = -g.vel.y * grenade_bounce_restitution();
+                g.vel.x *= grenade_bounce_friction();
+                g.vel.z *= grenade_bounce_friction();
             }
         } else if matches!(block_above, Some(bt) if bt != AIR) && g.vel.y > 0.0 {
-            new_pos.y = (new_pos.y + GRENADE_RADIUS).ceil() as f32 - GRENADE_RADIUS;
-            g.vel.y = -g.vel.y * GRENADE_BOUNCE_RESTITUTION;
+            new_pos.y = (new_pos.y + grenade_radius()).ceil() as f32 - grenade_radius();
+            g.vel.y = -g.vel.y * grenade_bounce_restitution();
         }
 
         // X collision
         let check_x_neg = get_block_type(
             ctx,
-            (new_pos.x - GRENADE_RADIUS).floor() as i32,
+            (new_pos.x - grenade_radius()).floor() as i32,
             new_pos.y.floor() as i32,
             bz,
         );
         let check_x_pos = get_block_type(
             ctx,
-            (new_pos.x + GRENADE_RADIUS).ceil() as i32,
+            (new_pos.x + grenade_radius()).ceil() as i32,
             new_pos.y.floor() as i32,
             bz,
         );
         if matches!(check_x_neg, Some(bt) if bt != AIR) && g.vel.x < 0.0 {
-            new_pos.x = (new_pos.x - GRENADE_RADIUS).floor() as f32 + 1.0 + GRENADE_RADIUS;
-            g.vel.x = -g.vel.x * GRENADE_BOUNCE_RESTITUTION;
-            g.vel.z *= GRENADE_BOUNCE_FRICTION;
+            new_pos.x = (new_pos.x - grenade_radius()).floor() as f32 + 1.0 + grenade_radius();
+            g.vel.x = -g.vel.x * grenade_bounce_restitution();
+            g.vel.z *= grenade_bounce_friction();
         } else if matches!(check_x_pos, Some(bt) if bt != AIR) && g.vel.x > 0.0 {
-            new_pos.x = (new_pos.x + GRENADE_RADIUS).ceil() as f32 - GRENADE_RADIUS;
-            g.vel.x = -g.vel.x * GRENADE_BOUNCE_RESTITUTION;
-            g.vel.z *= GRENADE_BOUNCE_FRICTION;
+            new_pos.x = (new_pos.x + grenade_radius()).ceil() as f32 - grenade_radius();
+            g.vel.x = -g.vel.x * grenade_bounce_restitution();
+            g.vel.z *= grenade_bounce_friction();
         }
 
         // Z collision
@@ -208,22 +209,22 @@ pub fn tick_grenades(ctx: &ReducerContext, _job: GrenadeTick) {
             ctx,
             bx,
             new_pos.y.floor() as i32,
-            (new_pos.z - GRENADE_RADIUS).floor() as i32,
+            (new_pos.z - grenade_radius()).floor() as i32,
         );
         let check_z_pos = get_block_type(
             ctx,
             bx,
             new_pos.y.floor() as i32,
-            (new_pos.z + GRENADE_RADIUS).ceil() as i32,
+            (new_pos.z + grenade_radius()).ceil() as i32,
         );
         if matches!(check_z_neg, Some(bt) if bt != AIR) && g.vel.z < 0.0 {
-            new_pos.z = (new_pos.z - GRENADE_RADIUS).floor() as f32 + 1.0 + GRENADE_RADIUS;
-            g.vel.z = -g.vel.z * GRENADE_BOUNCE_RESTITUTION;
-            g.vel.x *= GRENADE_BOUNCE_FRICTION;
+            new_pos.z = (new_pos.z - grenade_radius()).floor() as f32 + 1.0 + grenade_radius();
+            g.vel.z = -g.vel.z * grenade_bounce_restitution();
+            g.vel.x *= grenade_bounce_friction();
         } else if matches!(check_z_pos, Some(bt) if bt != AIR) && g.vel.z > 0.0 {
-            new_pos.z = (new_pos.z + GRENADE_RADIUS).ceil() as f32 - GRENADE_RADIUS;
-            g.vel.z = -g.vel.z * GRENADE_BOUNCE_RESTITUTION;
-            g.vel.x *= GRENADE_BOUNCE_FRICTION;
+            new_pos.z = (new_pos.z + grenade_radius()).ceil() as f32 - grenade_radius();
+            g.vel.z = -g.vel.z * grenade_bounce_restitution();
+            g.vel.x *= grenade_bounce_friction();
         }
 
         // World bounds
@@ -239,7 +240,7 @@ pub fn tick_grenades(ctx: &ReducerContext, _job: GrenadeTick) {
         if new_pos.y > WORLD_SIZE_Y as f32 + 20.0 {
             new_pos.y = WORLD_SIZE_Y as f32 + 20.0;
             if g.vel.y > 0.0 {
-                g.vel.y = -g.vel.y * GRENADE_BOUNCE_RESTITUTION;
+                g.vel.y = -g.vel.y * grenade_bounce_restitution();
             }
         }
 
@@ -256,7 +257,7 @@ pub fn tick_grenades(ctx: &ReducerContext, _job: GrenadeTick) {
     ctx.db.grenade_tick().insert(GrenadeTick {
         scheduled_id: 0,
         scheduled_at: ScheduleAt::Time(
-            ctx.timestamp + Duration::from_millis(GRENADE_TICK_INTERVAL_MS),
+            ctx.timestamp + Duration::from_millis(grenade_tick_interval_ms()),
         ),
     });
 }

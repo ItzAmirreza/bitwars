@@ -30,7 +30,7 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
     // Find nearest mountable vehicle
     let mut best_vehicle: Option<(u64, Vec3, f32)> = None;
     for v in ctx.db.vehicle().iter() {
-        if v.vehicle_type != VEHICLE_TYPE_HELICOPTER {
+        if v.vehicle_type != vehicle_type_helicopter() {
             continue;
         }
         if v.pilot_identity.is_some() {
@@ -44,7 +44,7 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
         }
 
         let d2 = dist_sq(&player.pos, &entity.pos);
-        if d2 > HELI_MOUNT_RANGE * HELI_MOUNT_RANGE {
+        if d2 > heli_mount_range() * heli_mount_range() {
             continue;
         }
 
@@ -74,7 +74,7 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
         spawn_protected: false,
         pos: Vec3 {
             x: vehicle_pos.x,
-            y: vehicle_pos.y + HELI_PILOT_SEAT_HEIGHT,
+            y: vehicle_pos.y + heli_pilot_seat_height(),
             z: vehicle_pos.z,
         },
         vel: ZERO_VEL,

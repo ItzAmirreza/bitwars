@@ -31,7 +31,7 @@ pub fn apply_hitscan_player_damage(
             if target.health <= 0 || !target.online || target.spawn_protected {
                 continue;
             }
-            if target.max_health >= GOD_MODE_HEALTH {
+            if target.max_health >= god_mode_health() {
                 continue;
             }
 
@@ -48,7 +48,7 @@ pub fn apply_hitscan_player_damage(
                 if to_len > 0.1 {
                     let dot = (to_x * direction.x + to_y * direction.y + to_z * direction.z)
                         / (to_len * dir_len);
-                    if dot < HITSCAN_DOT_THRESHOLD_PLAYER {
+                    if dot < hitscan_dot_threshold_player() {
                         continue;
                     }
                 }
@@ -88,7 +88,7 @@ pub fn apply_splash_player_damage(
             if target.health <= 0 || !target.online || target.spawn_protected {
                 continue;
             }
-            if target.max_health >= GOD_MODE_HEALTH {
+            if target.max_health >= god_mode_health() {
                 continue;
             }
             if dist_sq(impact_pos, &target.pos) > hit_range_sq {
@@ -135,18 +135,18 @@ pub fn apply_hitscan_vehicle_damage(
             continue;
         };
         if !entity.active
-            || entity.kind != ENTITY_KIND_VEHICLE
-            || entity.subtype != VEHICLE_TYPE_HELICOPTER
+            || entity.kind != entity_kind_vehicle()
+            || entity.subtype != vehicle_type_helicopter()
         {
             continue;
         }
 
         let center = Vec3 {
             x: entity.pos.x,
-            y: entity.pos.y + HELI_HITBOX_CENTER_Y,
+            y: entity.pos.y + heli_hitbox_center_y(),
             z: entity.pos.z,
         };
-        let max_vehicle_range = max_range + HELI_HITBOX_HALF_X + 3.0;
+        let max_vehicle_range = max_range + heli_hitbox_half_x() + 3.0;
         if dist_sq(origin, &center) > max_vehicle_range * max_vehicle_range {
             continue;
         }
@@ -180,7 +180,7 @@ pub fn apply_splash_vehicle_damage(
     weapon: u8,
 ) {
     let mut seen = HashSet::new();
-    let explosion_range_sq = (radius + HELI_HITBOX_HALF_X + 2.0).powi(2);
+    let explosion_range_sq = (radius + heli_hitbox_half_x() + 2.0).powi(2);
 
     for &target_vehicle_id in hit_vehicles {
         if target_vehicle_id == self_vehicle_id {
@@ -194,15 +194,15 @@ pub fn apply_splash_vehicle_damage(
             continue;
         };
         if !entity.active
-            || entity.kind != ENTITY_KIND_VEHICLE
-            || entity.subtype != VEHICLE_TYPE_HELICOPTER
+            || entity.kind != entity_kind_vehicle()
+            || entity.subtype != vehicle_type_helicopter()
         {
             continue;
         }
 
         let center = Vec3 {
             x: entity.pos.x,
-            y: entity.pos.y + HELI_HITBOX_CENTER_Y,
+            y: entity.pos.y + heli_hitbox_center_y(),
             z: entity.pos.z,
         };
         if dist_sq(impact_pos, &center) > explosion_range_sq {

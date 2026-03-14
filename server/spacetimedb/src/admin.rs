@@ -170,7 +170,7 @@ pub fn process_admin_command(
                     .find(sender)
                     .ok_or("Not registered")?;
                 let healed = Player {
-                    health: MAX_HEALTH,
+                    health: max_health(),
                     ..player
                 };
                 ctx.db.player().identity().update(healed.clone());
@@ -201,11 +201,11 @@ pub fn process_admin_command(
                 .identity()
                 .find(sender)
                 .ok_or("Not registered")?;
-            let is_god = player.max_health >= GOD_MODE_HEALTH;
+            let is_god = player.max_health >= god_mode_health();
             if is_god {
                 let toggled = Player {
-                    health: MAX_HEALTH,
-                    max_health: MAX_HEALTH,
+                    health: max_health(),
+                    max_health: max_health(),
                     ..player
                 };
                 ctx.db.player().identity().update(toggled.clone());
@@ -213,8 +213,8 @@ pub fn process_admin_command(
                 insert_system_message(ctx, "God mode OFF");
             } else {
                 let toggled = Player {
-                    health: GOD_MODE_HEALTH,
-                    max_health: GOD_MODE_HEALTH,
+                    health: god_mode_health(),
+                    max_health: god_mode_health(),
                     ..player
                 };
                 ctx.db.player().identity().update(toggled.clone());
@@ -245,7 +245,7 @@ pub fn process_admin_command(
                 return Err(format!("Weather must be 0-{}", NUM_WEATHER_TYPES - 1));
             }
             if let Some(env) = ctx.db.world_environment().id().find(1) {
-                let preset = &WEATHER_PRESETS[w as usize];
+                let preset = &weather_presets()[w as usize];
                 ctx.db.world_environment().id().update(WorldEnvironment {
                     weather: w,
                     cloud_density: preset.cloud_density,
@@ -329,7 +329,7 @@ pub fn process_admin_command(
                 if let Some(target) = ctx.db.player().identity().find(id) {
                     let target = dismount_player_internal(ctx, target, true);
                     let respawned = Player {
-                        health: MAX_HEALTH,
+                        health: max_health(),
                         pos: SPAWN_POS,
                         vel: ZERO_VEL,
                         spawn_protected: true,

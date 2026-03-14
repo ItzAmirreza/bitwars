@@ -1,9 +1,9 @@
 /**
- * UI audio: playUIHover, playUIClick, playUIDeploy, playUINavigate, playUIError, playUIType
+ * UIAudio — hover, click, deploy, navigate, error, and type sounds.
  */
-import type { AudioCore } from '../AudioCore';
 
-// ── UI: Hover tick ──
+import type { AudioCore } from './AudioCore';
+
 export function playUIHover(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
@@ -19,7 +19,6 @@ export function playUIHover(core: AudioCore): void {
   osc.stop(t + 0.03);
 }
 
-// ── UI: Click / select ──
 export function playUIClick(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
@@ -36,7 +35,6 @@ export function playUIClick(core: AudioCore): void {
   osc.stop(t + 0.06);
 }
 
-// ── UI: Deploy / confirm action ──
 export function playUIDeploy(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
@@ -66,7 +64,6 @@ export function playUIDeploy(core: AudioCore): void {
   osc2.stop(t + 0.25);
 }
 
-// ── UI: Navigate / screen transition ──
 export function playUINavigate(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
@@ -83,7 +80,6 @@ export function playUINavigate(core: AudioCore): void {
   osc.stop(t + 0.1);
 }
 
-// ── UI: Error / denied ──
 export function playUIError(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
@@ -103,7 +99,6 @@ export function playUIError(core: AudioCore): void {
   osc.stop(t + 0.16);
 }
 
-// ── UI: Type keystroke ──
 export function playUIType(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;

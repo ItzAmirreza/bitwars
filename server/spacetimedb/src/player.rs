@@ -60,8 +60,8 @@ pub fn set_username(
             pos: SPAWN_POS,
             vel: ZERO_VEL,
             rot: base_rot,
-            health: MAX_HEALTH,
-            max_health: MAX_HEALTH,
+            health: max_health(),
+            max_health: max_health(),
             current_weapon: loadout.slot1,
             kills: 0,
             deaths: 0,
@@ -129,7 +129,7 @@ pub fn update_position(
             let mounted = Player {
                 pos: Vec3 {
                     x: vehicle_entity.pos.x,
-                    y: vehicle_entity.pos.y + HELI_PILOT_SEAT_HEIGHT,
+                    y: vehicle_entity.pos.y + heli_pilot_seat_height(),
                     z: vehicle_entity.pos.z,
                 },
                 vel: vehicle_entity.vel.clone(),
@@ -187,9 +187,9 @@ pub fn update_position(
                 let dist = d_sq.sqrt();
                 let speed = dist / dt as f32;
 
-                if speed > MAX_MOVEMENT_SPEED {
+                if speed > max_movement_speed() {
                     let new_violations = mv_state.violation_count + 1;
-                    if new_violations > SPEED_VIOLATION_THRESHOLD {
+                    if new_violations > speed_violation_threshold() {
                         let corrected = Player {
                             pos: mv_state.last_pos.clone(),
                             rot,
@@ -328,7 +328,7 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
     let player = dismount_player_internal(ctx, player, true);
 
     let respawned = Player {
-        health: MAX_HEALTH,
+        health: max_health(),
         pos: SPAWN_POS,
         vel: ZERO_VEL,
         spawn_protected: true,

@@ -76,7 +76,7 @@ pub fn init(ctx: &ReducerContext) {
     // Initialize world environment
     let initial_time = ((seed % 2400) as f32) / 100.0;
     let initial_weather = ((seed / 2400) % NUM_WEATHER_TYPES as u64) as u8;
-    let preset = &WEATHER_PRESETS[initial_weather as usize];
+    let preset = &weather_presets()[initial_weather as usize];
     let wind = preset.wind_speed + ((seed % 20) as f32) / 100.0;
     let cloud = preset.cloud_density + ((seed % 20) as f32) / 100.0;
     let fog = preset.fog_density;
@@ -108,7 +108,7 @@ pub fn init(ctx: &ReducerContext) {
     ctx.db.grenade_tick().insert(GrenadeTick {
         scheduled_id: 0,
         scheduled_at: ScheduleAt::Time(
-            ctx.timestamp + Duration::from_millis(GRENADE_TICK_INTERVAL_MS),
+            ctx.timestamp + Duration::from_millis(grenade_tick_interval_ms()),
         ),
     });
 
@@ -138,7 +138,7 @@ pub fn client_connected(ctx: &ReducerContext) {
             online: true,
             pos: SPAWN_POS,
             vel: ZERO_VEL,
-            health: MAX_HEALTH,
+            health: max_health(),
             spawn_protected: true,
             current_weapon,
             character_preset,

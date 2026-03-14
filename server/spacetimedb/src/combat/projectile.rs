@@ -29,7 +29,7 @@ pub fn projectile_impact(
         .find(sender)
         .ok_or("Not registered")?;
 
-    if weapon >= weapons::NUM_WEAPONS {
+    if weapon >= weapons::num_weapons() {
         return Err("Invalid weapon".to_string());
     }
     let def = weapons::get_weapon(weapon);
