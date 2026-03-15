@@ -957,14 +957,27 @@ export class Engine {
           this.lastWeaponIndex = serverWeapon;
         }
 
-        // Detect server-side teleportation (large position jump)
+        // Server reconciliation: smooth for small drifts, hard teleport for large
+        // jumps (respawn, admin teleport, anti-teleport clamp).
+        // The server is authoritative only for teleport-level corrections;
+        // normal movement is client-authoritative so the echoed-back position
+        // is always slightly behind due to RTT — we intentionally ignore that.
         const sp = player.pos;
         const cp = this.camera.position;
         const tdx = sp.x - cp.x, tdy = sp.y - cp.y, tdz = sp.z - cp.z;
-        if (tdx * tdx + tdy * tdy + tdz * tdz > 100) {
+        const distSq = tdx * tdx + tdy * tdy + tdz * tdz;
+        if (distSq > 400) {
+          // > 20 units: hard teleport (respawn, admin command)
           this.camera.position.set(sp.x, sp.y, sp.z);
           this.controls.resetVelocity();
+        } else if (distSq > 9) {
+          // 3-20 units: smooth correction (anti-teleport clamp edge case)
+          const blend = Math.min(0.25, Math.sqrt(distSq) * 0.03);
+          this.camera.position.x += tdx * blend;
+          this.camera.position.y += tdy * blend;
+          this.camera.position.z += tdz * blend;
         }
+        // < 3 units: ignore (normal RTT echo delay)
 
         const oldHealth = this.health;
         this.health = player.health;

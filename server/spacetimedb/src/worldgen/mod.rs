@@ -19,9 +19,9 @@ pub use structural::{check_structural_integrity_sparse, StructuralCollapsePlan};
 
 // ── World Constants ──
 
-pub const WORLD_SIZE_X: usize = 750;
+pub const WORLD_SIZE_X: usize = 448;
 pub const WORLD_SIZE_Y: usize = 48;
-pub const WORLD_SIZE_Z: usize = 750;
+pub const WORLD_SIZE_Z: usize = 448;
 pub const CHUNK_SIZE: usize = 16;
 pub const NUM_CHUNKS_X: usize = (WORLD_SIZE_X + CHUNK_SIZE - 1) / CHUNK_SIZE;
 pub const NUM_CHUNKS_Y: usize = (WORLD_SIZE_Y + CHUNK_SIZE - 1) / CHUNK_SIZE;

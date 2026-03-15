@@ -3,8 +3,8 @@ import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, unpackChunkI
 import type { DbConnection } from '../module_bindings';
 
 // ── Chunk streaming config ──
-const VIEW_DISTANCE = 18; // chunks (288 blocks)
-const UNLOAD_BUFFER = 3; // extra chunks before unloading
+const VIEW_DISTANCE = 24; // chunks (384 blocks)
+const UNLOAD_BUFFER = 4; // extra chunks before unloading
 const CHUNKS_PER_REQUEST = 16; // keep network saturated without violating server cap
 const MAX_QUEUE_PROCESS_PER_TICK = 64; // hard cap to avoid long frame stalls
 export const ACTIVE_CHUNK_RADIUS = VIEW_DISTANCE + UNLOAD_BUFFER;
@@ -325,21 +325,14 @@ export class ChunkStreamer {
   private hydrateChunkFromSubscription(id: number): boolean {
     if (!this.ctx.conn) return false;
 
+    // Use the primary-key accessor for O(1) lookup.
+    // Never fall back to a full table scan — that's O(n) per call and
+    // called up to 64x per frame, which would tank performance.
     const table = this.ctx.conn.db.world_chunk as any;
-    const accessor = table?.chunk_id ?? table?.chunkId;
-    let chunk: any = null;
-    if (accessor && typeof accessor.find === 'function') {
-      chunk = accessor.find(id);
-    }
-    if (!chunk && typeof table?.iter === 'function') {
-      for (const row of table.iter() as Iterable<any>) {
-        const rowId = Number((row as any).chunkId ?? (row as any).chunk_id ?? -1);
-        if (rowId === id) {
-          chunk = row;
-          break;
-        }
-      }
-    }
+    const accessor = table?.chunkId ?? table?.chunk_id;
+    if (!accessor || typeof accessor.find !== 'function') return false;
+
+    const chunk = accessor.find(id);
     if (!chunk) return false;
 
     const cx = Number(chunk.cx);

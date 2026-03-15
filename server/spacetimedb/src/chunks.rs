@@ -229,6 +229,10 @@ pub fn destroy_blocks_in_world(
 // ── Structural Integrity ──
 
 /// Decompress chunks near the given positions into a sparse map.
+/// Missing chunks are generated on the fly and persisted to the DB so the
+/// structural integrity check always has complete neighbor data. Without
+/// this, blocks at ungenerated chunk boundaries are treated as "supported,"
+/// which prevents structures from collapsing when their support is removed.
 fn decompress_nearby_chunks(
     ctx: &ReducerContext,
     positions: &[(i32, i32, i32)],
@@ -262,7 +266,11 @@ fn decompress_nearby_chunks(
 
     let mut result = HashMap::new();
     for chunk_id in needed_chunks {
-        if let Some(chunk) = ctx.db.world_chunk().chunk_id().find(chunk_id) {
+        // Use get_or_generate_chunk to ensure we always have data — this
+        // lazily generates and persists any missing chunks so support
+        // detection never sees "unknown" blocks.
+        let (cx, cy, cz) = worldgen::unpack_chunk_id(chunk_id);
+        if let Some(chunk) = get_or_generate_chunk(ctx, cx, cy, cz) {
             let mut data = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
             worldgen::rle_decode(&chunk.data, &mut data);
             result.insert(chunk_id, data);

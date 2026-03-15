@@ -144,105 +144,55 @@ pub fn update_position(
         return Ok(());
     }
 
-    let clamped_pos = clamp_pos(&pos);
+    let mut final_pos = clamp_pos(&pos);
     let admin_bypass = is_admin(&player.username);
 
-    // Speed validation
+    // Anti-teleport validation (distance-per-update, immune to timing jitter).
+    // The old system computed speed = dist / dt which produced false positives
+    // whenever network jitter compressed dt (two packets arriving close together).
+    // Industry-standard approach: check absolute distance per update instead.
+    // maxMovementSpeed (35 units) acts as the max allowed distance per single
+    // reducer call.  At 30 Hz updates that is ~1050 units/sec — only a teleport
+    // hack would ever reach it during legitimate play.
     if !admin_bypass {
         if let Some(mv_state) = ctx.db.player_movement().identity().find(sender) {
-            let now_us = timestamp_micros(ctx.timestamp);
-            let last_us = timestamp_micros(mv_state.last_update);
-            let dt = (now_us.saturating_sub(last_us)) as f64 / 1_000_000.0;
+            let max_dist = max_movement_speed();
+            let max_dist_sq = max_dist * max_dist;
+            let d_sq = dist_sq(&final_pos, &mv_state.last_pos);
 
-            if dt > 0.01 {
-                if dt > 0.4 {
-                    ctx.db
-                        .player_movement()
-                        .identity()
-                        .update(PlayerMovementState {
-                            identity: sender,
-                            last_pos: clamped_pos.clone(),
-                            last_update: ctx.timestamp,
-                            violation_count: 0,
-                        });
-                    let spawn_protected = if player.spawn_protected {
-                        !is_grounded(ctx, &clamped_pos)
-                    } else {
-                        false
-                    };
-                    let updated = Player {
-                        pos: clamped_pos,
-                        vel,
-                        rot,
-                        current_weapon: selected_weapon,
-                        spawn_protected,
-                        ..player
-                    };
-                    ctx.db.player().identity().update(updated.clone());
-                    sync_player_entity(ctx, &updated);
-                    return Ok(());
-                }
-
-                let d_sq = dist_sq(&clamped_pos, &mv_state.last_pos);
+            if d_sq > max_dist_sq {
+                // Teleport detected: clamp to max allowed distance (direction preserved)
                 let dist = d_sq.sqrt();
-                let speed = dist / dt as f32;
-
-                if speed > max_movement_speed() {
-                    let new_violations = mv_state.violation_count + 1;
-                    if new_violations > speed_violation_threshold() {
-                        let corrected = Player {
-                            pos: mv_state.last_pos.clone(),
-                            rot,
-                            current_weapon: selected_weapon,
-                            ..player
-                        };
-                        ctx.db.player().identity().update(corrected.clone());
-                        sync_player_entity(ctx, &corrected);
-                        ctx.db
-                            .player_movement()
-                            .identity()
-                            .update(PlayerMovementState {
-                                identity: sender,
-                                last_pos: mv_state.last_pos,
-                                last_update: ctx.timestamp,
-                                violation_count: 0,
-                            });
-                        return Ok(());
-                    }
-                    ctx.db
-                        .player_movement()
-                        .identity()
-                        .update(PlayerMovementState {
-                            identity: sender,
-                            last_pos: clamped_pos.clone(),
-                            last_update: ctx.timestamp,
-                            violation_count: new_violations,
-                        });
-                } else {
-                    ctx.db
-                        .player_movement()
-                        .identity()
-                        .update(PlayerMovementState {
-                            identity: sender,
-                            last_pos: clamped_pos.clone(),
-                            last_update: ctx.timestamp,
-                            violation_count: 0,
-                        });
-                }
+                let ratio = max_dist / dist;
+                final_pos = Vec3 {
+                    x: mv_state.last_pos.x + (final_pos.x - mv_state.last_pos.x) * ratio,
+                    y: mv_state.last_pos.y + (final_pos.y - mv_state.last_pos.y) * ratio,
+                    z: mv_state.last_pos.z + (final_pos.z - mv_state.last_pos.z) * ratio,
+                };
             }
+
+            ctx.db
+                .player_movement()
+                .identity()
+                .update(PlayerMovementState {
+                    identity: sender,
+                    last_pos: final_pos.clone(),
+                    last_update: ctx.timestamp,
+                    violation_count: 0,
+                });
         } else {
-            init_movement_state(ctx, sender, &clamped_pos);
+            init_movement_state(ctx, sender, &final_pos);
         }
     }
 
     let spawn_protected = if player.spawn_protected {
-        !is_grounded(ctx, &clamped_pos)
+        !is_grounded(ctx, &final_pos)
     } else {
         false
     };
 
     let updated = Player {
-        pos: clamped_pos,
+        pos: final_pos,
         vel,
         rot,
         current_weapon: selected_weapon,

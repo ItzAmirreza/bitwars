@@ -101,7 +101,15 @@ export class VoxelWorld {
           this.onWorkerResult(event.data);
         };
         worker.onerror = () => {
+          // Workers failed — disable future dispatches and re-mark all
+          // in-flight jobs as dirty so they get rebuilt on the main thread.
           this.workersEnabled = false;
+          for (const [, meta] of this.pendingRequests) {
+            this.dirtyChunks.add(meta.chunkId);
+          }
+          this.pendingRequests.clear();
+          this.pendingChunkJobs.clear();
+          this.activeWorkerJobs = 0;
         };
         this.workers.push(worker);
       }
@@ -457,25 +465,10 @@ export class VoxelWorld {
     geo.setAttribute('color', new THREE.BufferAttribute(meshData.color, 3));
 
     const mesh = new THREE.Mesh(geo, this.mat);
-    mesh.castShadow = false;
+    mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);
     this.chunkMeshes.set(id, mesh);
-  }
-
-  updateChunkShadowCasting(anchorX: number, anchorZ: number, castRadiusChunks: number): void {
-    const anchorCx = Math.floor(anchorX / CHUNK);
-    const anchorCz = Math.floor(anchorZ / CHUNK);
-    const castRadiusSq = castRadiusChunks * castRadiusChunks;
-
-    for (const [id, mesh] of this.chunkMeshes) {
-      const [cx, , cz] = unpackChunkId(id);
-      const dx = cx - anchorCx;
-      const dz = cz - anchorCz;
-      const shouldCast = castRadiusChunks > 0 && (dx * dx + dz * dz) <= castRadiusSq;
-      if (mesh.castShadow !== shouldCast) mesh.castShadow = shouldCast;
-      if (!mesh.receiveShadow) mesh.receiveShadow = true;
-    }
   }
 
   dispose(scene: THREE.Scene): void {

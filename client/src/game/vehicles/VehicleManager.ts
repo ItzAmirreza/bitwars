@@ -768,11 +768,23 @@ export default class VehicleManager {
 
       // ── Position / rotation ──
       if (isLocal) {
-        // Dead-reckoning with drag-matched prediction (same as old HelicopterManager)
+        // Smooth server-following with drag-matched prediction.
+        //
+        // The old approach used velocity integration PLUS error correction
+        // toward the prediction.  This double-integration caused oscillation
+        // when player input changed (velocity integration pushes one way,
+        // correction pulls back → "pushback" feeling).
+        //
+        // Industry-standard fix: compute the predicted position from the
+        // last server snapshot, then smoothly lerp the displayed position
+        // toward it.  No separate velocity integration step.  The prediction
+        // naturally advances each frame (timeSinceUpdate grows), so the
+        // vehicle moves continuously without any double-force artifact.
         if (this.localLastServerTime > 0) {
           const now = performance.now();
           const timeSinceUpdate = (now - this.localLastServerTime) / 1000;
 
+          // Drag-matched position prediction (analytical integral)
           const dragPerTick = 0.992;
           const tickDt = 0.033;
           const dragFactor = Math.pow(dragPerTick, timeSinceUpdate / tickDt);
@@ -789,26 +801,17 @@ export default class VehicleManager {
             this.localSmoothedPitch = this.localLastServerPitch;
             this.localSmoothedInitialized = true;
           } else {
-            const currentVelX = this.localLastServerVel.x * dragFactor;
-            const currentVelY = this.localLastServerVel.y * dragFactor;
-            const currentVelZ = this.localLastServerVel.z * dragFactor;
-            this.localSmoothedPos.x += currentVelX * delta;
-            this.localSmoothedPos.y += currentVelY * delta;
-            this.localSmoothedPos.z += currentVelZ * delta;
+            // Pure smooth follow — frame-rate-independent exponential smoothing.
+            // ~20% correction per frame at 60 fps → 90% converged in ~170 ms.
+            // Fast enough for responsive control, gentle enough to eliminate jitter.
+            const correctionRate = 1 - Math.pow(1e-6, delta);
 
-            const correctionRate = 1 - Math.pow(0.001, delta);
-            const errX = predictedX - this.localSmoothedPos.x;
-            const errY = predictedY - this.localSmoothedPos.y;
-            const errZ = predictedZ - this.localSmoothedPos.z;
-            this.localSmoothedPos.x += errX * correctionRate;
-            this.localSmoothedPos.y += errY * correctionRate;
-            this.localSmoothedPos.z += errZ * correctionRate;
+            this.localSmoothedPos.x += (predictedX - this.localSmoothedPos.x) * correctionRate;
+            this.localSmoothedPos.y += (predictedY - this.localSmoothedPos.y) * correctionRate;
+            this.localSmoothedPos.z += (predictedZ - this.localSmoothedPos.z) * correctionRate;
 
+            // Shortest-path yaw wrap handling any accumulated revolutions
             let dyaw = this.localLastServerYaw - this.localSmoothedYaw;
-            // Wrap to [-PI, PI] handling any number of accumulated revolutions.
-            // The single if/else wrap only handles |dyaw| < 3*PI; continuous
-            // rotation can push smoothedYaw arbitrarily far from the server's
-            // wrapped [-PI, PI] range.
             dyaw -= Math.round(dyaw / (2 * Math.PI)) * 2 * Math.PI;
             this.localSmoothedYaw += dyaw * correctionRate;
             this.localSmoothedPitch += (this.localLastServerPitch - this.localSmoothedPitch) * correctionRate;
