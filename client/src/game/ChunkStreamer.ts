@@ -3,13 +3,15 @@ import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, unpackChunkI
 import type { DbConnection } from '../module_bindings';
 
 // ── Chunk streaming config ──
-const VIEW_DISTANCE = 24; // chunks (384 blocks)
-const UNLOAD_BUFFER = 4; // extra chunks before unloading
-const CHUNKS_PER_REQUEST = 8; // smooth request cadence to avoid frame spikes
-export const CHUNK_STREAM_INTERVAL_FRAMES = 2;
-export const CHUNK_REBUILD_BUDGET_MOVING = 8;
-export const CHUNK_REBUILD_BUDGET_IDLE = 16;
-export const CHUNK_REBUILD_BUDGET_BOOTSTRAP = 24;
+const VIEW_DISTANCE = 18; // chunks (288 blocks)
+const UNLOAD_BUFFER = 3; // extra chunks before unloading
+const CHUNKS_PER_REQUEST = 16; // keep network saturated without violating server cap
+const MAX_QUEUE_PROCESS_PER_TICK = 64; // hard cap to avoid long frame stalls
+export const ACTIVE_CHUNK_RADIUS = VIEW_DISTANCE + UNLOAD_BUFFER;
+export const CHUNK_STREAM_INTERVAL_FRAMES = 1;
+export const CHUNK_REBUILD_BUDGET_MOVING = 10;
+export const CHUNK_REBUILD_BUDGET_IDLE = 20;
+export const CHUNK_REBUILD_BUDGET_BOOTSTRAP = 40;
 const CHUNK_REQUEST_TIMEOUT_MS = 2000;
 const NUM_CHUNKS_Y = Math.ceil(WORLD_Y / CHUNK);
 const STARTUP_READY_RADIUS = 2;
@@ -146,7 +148,13 @@ export class ChunkStreamer {
 
     // Request missing chunks in small batches to spread decode/meshing cost across frames
     const batch: number[] = [];
-    while (batch.length < CHUNKS_PER_REQUEST && (this.bootstrapRequestQueue.length > 0 || this.chunkRequestQueue.length > 0)) {
+    let processed = 0;
+    while (
+      batch.length < CHUNKS_PER_REQUEST
+      && processed < MAX_QUEUE_PROCESS_PER_TICK
+      && (this.bootstrapRequestQueue.length > 0 || this.chunkRequestQueue.length > 0)
+    ) {
+      processed++;
       const fromBootstrap = this.bootstrapRequestQueue.length > 0;
       const id = fromBootstrap ? this.bootstrapRequestQueue.shift()! : this.chunkRequestQueue.shift()!;
       if (fromBootstrap) this.bootstrapQueued.delete(id);
@@ -154,6 +162,7 @@ export class ChunkStreamer {
       if (this.pendingChunkRequests.has(id)) continue;
       const [rcx, rcy, rcz] = unpackChunkId(id);
       if (this.ctx.world.isChunkLoaded(rcx, rcy, rcz)) continue;
+      if (this.hydrateChunkFromSubscription(id)) continue;
       this.pendingChunkRequests.set(id, performance.now());
       batch.push(id);
     }
@@ -311,6 +320,42 @@ export class ChunkStreamer {
 
       if (added >= CHUNKS_PER_REQUEST * 4) break;
     }
+  }
+
+  private hydrateChunkFromSubscription(id: number): boolean {
+    if (!this.ctx.conn) return false;
+
+    const table = this.ctx.conn.db.world_chunk as any;
+    const accessor = table?.chunk_id ?? table?.chunkId;
+    let chunk: any = null;
+    if (accessor && typeof accessor.find === 'function') {
+      chunk = accessor.find(id);
+    }
+    if (!chunk && typeof table?.iter === 'function') {
+      for (const row of table.iter() as Iterable<any>) {
+        const rowId = Number((row as any).chunkId ?? (row as any).chunk_id ?? -1);
+        if (rowId === id) {
+          chunk = row;
+          break;
+        }
+      }
+    }
+    if (!chunk) return false;
+
+    const cx = Number(chunk.cx);
+    const cy = Number(chunk.cy);
+    const cz = Number(chunk.cz);
+    if (!Number.isFinite(cx) || !Number.isFinite(cy) || !Number.isFinite(cz)) return false;
+    if (this.ctx.world.isChunkLoaded(cx, cy, cz)) return true;
+
+    const data = chunk.data instanceof Uint8Array ? chunk.data : new Uint8Array(chunk.data);
+    const decoded = VoxelWorld.rleDecodeChunk(data);
+    this.ctx.world.loadChunk(cx, cy, cz, decoded);
+    this.ctx.onChunkLoaded(cx, cy, cz, decoded);
+    this.pendingChunkRequests.delete(id);
+    this.queuedChunkRequests.delete(id);
+    this.bootstrapQueued.delete(id);
+    return true;
   }
 
   getLoadAnchorChunk(): [number, number] {

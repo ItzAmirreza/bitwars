@@ -11,7 +11,7 @@ import { ProjectileManager } from './ProjectileManager';
 import { SkySystem } from './SkySystem';
 import { LanternSystem } from './LanternSystem';
 import type { LanternContext } from './LanternSystem';
-import { ChunkStreamer, CHUNK_STREAM_INTERVAL_FRAMES, CHUNK_REBUILD_BUDGET_MOVING, CHUNK_REBUILD_BUDGET_IDLE, CHUNK_REBUILD_BUDGET_BOOTSTRAP } from './ChunkStreamer';
+import { ChunkStreamer, ACTIVE_CHUNK_RADIUS, CHUNK_STREAM_INTERVAL_FRAMES, CHUNK_REBUILD_BUDGET_MOVING, CHUNK_REBUILD_BUDGET_IDLE, CHUNK_REBUILD_BUDGET_BOOTSTRAP } from './ChunkStreamer';
 import { RemotePlayerManager, disposeObjectMaterials } from './RemotePlayerManager';
 import VehicleManager, { VEHICLE_WEAPONS } from './vehicles/VehicleManager';
 import type { VehicleEngineContext } from './vehicles/VehicleManager';
@@ -814,12 +814,9 @@ export class Engine {
       const [anchorCx, anchorCz] = this.chunkStreamer.getLoadAnchorChunk();
       const dx = cx - anchorCx;
       const dz = cz - anchorCz;
-      const viewDist = 28; // VIEW_DISTANCE + UNLOAD_BUFFER
-      if (dx * dx + dz * dz > viewDist * viewDist) {
-        // Clear pending tracking but don't load the chunk data
+      if (dx * dx + dz * dz > ACTIVE_CHUNK_RADIUS * ACTIVE_CHUNK_RADIUS) {
+        // Clear only in-flight state; keep queued state intact so nearby chunks can still be retried later.
         this.chunkStreamer.pendingChunkRequests.delete(id);
-        this.chunkStreamer.queuedChunkRequests.delete(id);
-        this.chunkStreamer.bootstrapQueued.delete(id);
         return;
       }
 
@@ -846,6 +843,17 @@ export class Engine {
     // World chunk updates (block destruction synced via chunk data)
     this.conn.db.world_chunk.onUpdate((_ctx: unknown, old: unknown, chunk: any) => {
       const cx = chunk.cx as number, cy = chunk.cy as number, cz = chunk.cz as number;
+      const id = packChunkId(cx, cy, cz);
+
+      const [anchorCx, anchorCz] = this.chunkStreamer.getLoadAnchorChunk();
+      const dx = cx - anchorCx;
+      const dz = cz - anchorCz;
+      const chunkIsNear = dx * dx + dz * dz <= ACTIVE_CHUNK_RADIUS * ACTIVE_CHUNK_RADIUS;
+      if (!chunkIsNear && !this.world.isChunkLoaded(cx, cy, cz)) {
+        this.chunkStreamer.pendingChunkRequests.delete(id);
+        return;
+      }
+
       const newData = chunk.data instanceof Uint8Array ? chunk.data : new Uint8Array(chunk.data);
       const newDecoded = VoxelWorld.rleDecodeChunk(newData);
 
@@ -874,7 +882,7 @@ export class Engine {
       // Apply authoritative chunk data (naturally corrects any rejected predictions)
       this.world.loadChunk(cx, cy, cz, newDecoded);
       this.lanterns.syncLanternLightsForChunk(cx, cy, cz, this.getLanternContext(), newDecoded);
-      this.chunkStreamer.pendingChunkRequests.delete(packChunkId(cx, cy, cz));
+      this.chunkStreamer.pendingChunkRequests.delete(id);
     });
   }
 

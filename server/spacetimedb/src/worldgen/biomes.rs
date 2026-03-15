@@ -16,12 +16,61 @@ pub enum Biome {
     Airport,
 }
 
+const BIOME_CELL_SIZE: i32 = 90;
+
+fn hash_u64(mut x: u64) -> u64 {
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94d0_49bb_1331_11eb);
+    x ^ (x >> 31)
+}
+
+fn airport_cell(seed: u64) -> Option<(i32, i32)> {
+    let min_cx = 1;
+    let min_cz = 1;
+    let max_cx = ((WORLD_SIZE_X as i32 - 1) / BIOME_CELL_SIZE) - 1;
+    let max_cz = ((WORLD_SIZE_Z as i32 - 1) / BIOME_CELL_SIZE) - 1;
+    if max_cx < min_cx || max_cz < min_cz {
+        return None;
+    }
+
+    let span_x = (max_cx - min_cx + 1) as u64;
+    let span_z = (max_cz - min_cz + 1) as u64;
+    let mut cx = min_cx + (hash_u64(seed ^ 0x93c4_67e3_5f2a_101d) % span_x) as i32;
+    let mut cz = min_cz + (hash_u64(seed ^ 0x1f0d_ea72_c95b_8841) % span_z) as i32;
+
+    let world_cx = WORLD_SIZE_X as i32 / 2;
+    let world_cz = WORLD_SIZE_Z as i32 / 2;
+    let center_x = cx * BIOME_CELL_SIZE + BIOME_CELL_SIZE / 2;
+    let center_z = cz * BIOME_CELL_SIZE + BIOME_CELL_SIZE / 2;
+    let dx = center_x - world_cx;
+    let dz = center_z - world_cz;
+
+    // Keep the airport away from the forced-Urban center gameplay zone.
+    if dx * dx + dz * dz < 120 * 120 {
+        let mid_x = (min_cx + max_cx) / 2;
+        let mid_z = (min_cz + max_cz) / 2;
+        cx = if cx <= mid_x { min_cx } else { max_cx };
+        cz = if cz <= mid_z { min_cz } else { max_cz };
+    }
+
+    Some((cx, cz))
+}
+
 // ── Biome Selection ──
 
 pub fn get_biome(wx: i32, wz: i32, seed: u64) -> Biome {
-    let cell_size = 90.0;
+    let cell_size = BIOME_CELL_SIZE as f64;
     let cx = (wx as f64 / cell_size).floor() as i32;
     let cz = (wz as f64 / cell_size).floor() as i32;
+
+    // Reserve exactly one biome cell for the airport.
+    if let Some((airport_cx, airport_cz)) = airport_cell(seed) {
+        if cx == airport_cx && cz == airport_cz {
+            return Biome::Airport;
+        }
+    }
 
     let mut best_dist = f64::MAX;
     let mut best_biome = Biome::Plains;
@@ -47,8 +96,7 @@ pub fn get_biome(wx: i32, wz: i32, seed: u64) -> Biome {
                     20..=39 => Biome::Forest,
                     40..=59 => Biome::Urban,
                     60..=79 => Biome::Mountains,
-                    80..=93 => Biome::Plains,
-                    _ => Biome::Airport,
+                    _ => Biome::Plains,
                 };
             }
         }

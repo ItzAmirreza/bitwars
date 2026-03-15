@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import { WORLD as WORLD_CONFIG, BLOCK_TYPES } from '../shared-config';
-
-// ── Constants (sourced from shared config) ──
+import { buildChunkMeshData } from './chunkMeshing';
+import type { ChunkMeshBuildInput, ChunkMeshData, ChunkNeighborData } from './chunkMeshing';
+import type { ChunkMeshWorkerRequest, ChunkMeshWorkerResponse, PendingMeshJob, CompletedMeshJob } from './chunkMeshingWorkerTypes';
 
 export const CHUNK = WORLD_CONFIG.chunkSize;
 export const WORLD_X = WORLD_CONFIG.sizeX;
 export const WORLD_Y = WORLD_CONFIG.sizeY;
 export const WORLD_Z = WORLD_CONFIG.sizeZ;
 
-// BlockType object — sourced from shared config, kept for backward compatibility
 export const BlockType = BLOCK_TYPES as {
   readonly Air: 0;
   readonly Concrete: 1;
@@ -45,37 +45,6 @@ export const BLOCK_COLORS: Record<number, number> = {
   [BlockType.Lantern]: 0xffcf78,
 };
 
-const LANTERN_NEAR_BOOST_OFFSETS: Array<[number, number, number]> = [
-  [1, 0, 0],
-  [-1, 0, 0],
-  [0, 1, 0],
-  [0, -1, 0],
-  [0, 0, 1],
-  [0, 0, -1],
-  [1, 1, 0],
-  [1, -1, 0],
-  [-1, 1, 0],
-  [-1, -1, 0],
-  [1, 0, 1],
-  [1, 0, -1],
-  [-1, 0, 1],
-  [-1, 0, -1],
-  [0, 1, 1],
-  [0, 1, -1],
-  [0, -1, 1],
-  [0, -1, -1],
-];
-
-// ── Noise helpers ──
-
-function hash2d(x: number, z: number): number {
-  let h = (x * 374761393 + z * 668265263) | 0;
-  h = ((h ^ (h >> 13)) * 1274126177) | 0;
-  return ((h ^ (h >> 16)) & 0x7fffffff) / 0x7fffffff;
-}
-
-// ── Chunk ID helpers ──
-
 export function packChunkId(cx: number, cy: number, cz: number): number {
   return (cx & 0xFF) | ((cy & 0xFF) << 8) | ((cz & 0xFF) << 16);
 }
@@ -84,21 +53,31 @@ export function unpackChunkId(id: number): [number, number, number] {
   return [id & 0xFF, (id >> 8) & 0xFF, (id >> 16) & 0xFF];
 }
 
-// ── VoxelWorld (Sparse Chunk Storage) ──
-
 export class VoxelWorld {
   sizeX: number;
   sizeY: number;
   sizeZ: number;
 
-  // Sparse chunk storage: chunk_id -> 4096-byte block data
   private chunks: Map<number, Uint8Array> = new Map();
   private chunkMeshes: Map<number, THREE.Mesh> = new Map();
   private dirtyChunks: Set<number> = new Set();
+  private chunkRevision: Map<number, number> = new Map();
   private mat: THREE.MeshPhongMaterial;
 
+  private workers: Worker[] = [];
+  private workersEnabled = false;
+  private nextWorkerIndex = 0;
+  private nextRequestId = 1;
+  private maxWorkerJobs = 0;
+  private activeWorkerJobs = 0;
+  private pendingRequests = new Map<number, PendingMeshJob>();
+  private pendingChunkJobs = new Set<number>();
+  private completedJobs: CompletedMeshJob[] = [];
+
   constructor(sx: number, sy: number, sz: number) {
-    this.sizeX = sx; this.sizeY = sy; this.sizeZ = sz;
+    this.sizeX = sx;
+    this.sizeY = sy;
+    this.sizeZ = sz;
     this.mat = new THREE.MeshPhongMaterial({
       vertexColors: true,
       emissive: new THREE.Color(0x10182a),
@@ -106,18 +85,69 @@ export class VoxelWorld {
       shininess: 6,
       specular: new THREE.Color(0x111418),
     });
+    this.initWorkers();
   }
 
-  // ── Server chunk loading ──
+  private initWorkers(): void {
+    if (typeof Worker === 'undefined' || typeof navigator === 'undefined') return;
 
-  /** RLE-decode a chunk data blob into a flat 16x16x16 array */
+    const hw = Number(navigator.hardwareConcurrency ?? 4);
+    const workerCount = Math.max(1, Math.min(4, hw - 1));
+
+    try {
+      for (let i = 0; i < workerCount; i++) {
+        const worker = new Worker(new URL('./workers/chunkMeshWorker.ts', import.meta.url), { type: 'module' });
+        worker.onmessage = (event: MessageEvent<ChunkMeshWorkerResponse>) => {
+          this.onWorkerResult(event.data);
+        };
+        worker.onerror = () => {
+          this.workersEnabled = false;
+        };
+        this.workers.push(worker);
+      }
+      this.workersEnabled = this.workers.length > 0;
+      this.maxWorkerJobs = this.workers.length * 2;
+    } catch {
+      this.workersEnabled = false;
+      for (const worker of this.workers) worker.terminate();
+      this.workers.length = 0;
+      this.maxWorkerJobs = 0;
+    }
+  }
+
+  private onWorkerResult(result: ChunkMeshWorkerResponse): void {
+    const meta = this.pendingRequests.get(result.requestId);
+    if (!meta) return;
+
+    this.pendingRequests.delete(result.requestId);
+    this.pendingChunkJobs.delete(meta.chunkId);
+    this.activeWorkerJobs = Math.max(0, this.activeWorkerJobs - 1);
+
+    if (!this.chunks.has(meta.chunkId)) return;
+    const currentRevision = this.chunkRevision.get(meta.chunkId) ?? 0;
+    if (currentRevision !== meta.revision) {
+      this.dirtyChunks.add(meta.chunkId);
+      return;
+    }
+
+    this.completedJobs.push({
+      chunkId: meta.chunkId,
+      revision: meta.revision,
+      mesh: {
+        position: result.position,
+        normal: result.normal,
+        color: result.color,
+      },
+    });
+  }
+
   static rleDecodeChunk(data: Uint8Array): Uint8Array {
     const output = new Uint8Array(CHUNK * CHUNK * CHUNK);
     let outIdx = 0;
     let i = 0;
     while (i + 1 < data.length && outIdx < output.length) {
-      const val = data[i];
-      const run = data[i + 1];
+      const val = data[i]!;
+      const run = data[i + 1]!;
       for (let j = 0; j < run && outIdx < output.length; j++) {
         output[outIdx++] = val;
       }
@@ -126,12 +156,10 @@ export class VoxelWorld {
     return output;
   }
 
-  /** Load a 16x16x16 chunk from decoded data into sparse storage. */
   loadChunk(cx: number, cy: number, cz: number, chunkBlocks: Uint8Array): void {
     const id = packChunkId(cx, cy, cz);
     this.chunks.set(id, chunkBlocks);
     this.markDirty(cx, cy, cz);
-    // Mark adjacent chunks dirty for boundary faces
     if (cx > 0) this.markDirty(cx - 1, cy, cz);
     this.markDirty(cx + 1, cy, cz);
     if (cy > 0) this.markDirty(cx, cy - 1, cz);
@@ -140,20 +168,28 @@ export class VoxelWorld {
     this.markDirty(cx, cy, cz + 1);
   }
 
-  /** Unload a chunk and remove its mesh from the scene. */
   unloadChunk(cx: number, cy: number, cz: number, scene: THREE.Scene): void {
     const id = packChunkId(cx, cy, cz);
     this.chunks.delete(id);
     this.dirtyChunks.delete(id);
+    this.chunkRevision.delete(id);
+    this.pendingChunkJobs.delete(id);
+
     const mesh = this.chunkMeshes.get(id);
     if (mesh) {
       scene.remove(mesh);
       mesh.geometry.dispose();
       this.chunkMeshes.delete(id);
     }
+
+    if (cx > 0) this.markDirty(cx - 1, cy, cz);
+    this.markDirty(cx + 1, cy, cz);
+    if (cy > 0) this.markDirty(cx, cy - 1, cz);
+    this.markDirty(cx, cy + 1, cz);
+    if (cz > 0) this.markDirty(cx, cy, cz - 1);
+    this.markDirty(cx, cy, cz + 1);
   }
 
-  /** Clear all chunks and meshes (for map reset). */
   clearAll(scene: THREE.Scene): void {
     for (const mesh of this.chunkMeshes.values()) {
       scene.remove(mesh);
@@ -162,24 +198,25 @@ export class VoxelWorld {
     this.chunks.clear();
     this.chunkMeshes.clear();
     this.dirtyChunks.clear();
+    this.chunkRevision.clear();
+    this.pendingChunkJobs.clear();
+    this.pendingRequests.clear();
+    this.completedJobs.length = 0;
+    this.activeWorkerJobs = 0;
   }
 
-  /** Check if a chunk is loaded. */
   isChunkLoaded(cx: number, cy: number, cz: number): boolean {
     return this.chunks.has(packChunkId(cx, cy, cz));
   }
 
-  /** Check if a chunk already has a built mesh in the scene. */
   hasChunkMesh(cx: number, cy: number, cz: number): boolean {
     return this.chunkMeshes.has(packChunkId(cx, cy, cz));
   }
 
-  /** Mark a loaded chunk dirty so it gets rebuilt. */
   markChunkDirty(cx: number, cy: number, cz: number): void {
     this.markDirty(cx, cy, cz);
   }
 
-  /** Startup readiness check for a chunk column around spawn/camera. */
   isStartupColumnReady(cx: number, cz: number, numChunksY: number): boolean {
     let loadedCount = 0;
     for (let cy = 0; cy < numChunksY; cy++) {
@@ -190,12 +227,9 @@ export class VoxelWorld {
     return loadedCount === numChunksY;
   }
 
-  /** Iterate loaded chunk IDs without allocating a copy. */
   getLoadedChunkIds(): Iterable<number> {
     return this.chunks.keys();
   }
-
-  // ── Block access ──
 
   inBounds(x: number, y: number, z: number): boolean {
     return x >= 0 && x < this.sizeX && y >= 0 && y < this.sizeY && z >= 0 && z < this.sizeZ;
@@ -203,27 +237,35 @@ export class VoxelWorld {
 
   getBlock(x: number, y: number, z: number): number {
     if (x < 0 || x >= this.sizeX || y < 0 || y >= this.sizeY || z < 0 || z >= this.sizeZ) return 0;
-    const cx = Math.floor(x / CHUNK), cy = Math.floor(y / CHUNK), cz = Math.floor(z / CHUNK);
+    const cx = Math.floor(x / CHUNK);
+    const cy = Math.floor(y / CHUNK);
+    const cz = Math.floor(z / CHUNK);
     const chunk = this.chunks.get(packChunkId(cx, cy, cz));
-    if (!chunk) return 0; // Unloaded chunk = air
-    const lx = x - cx * CHUNK, ly = y - cy * CHUNK, lz = z - cz * CHUNK;
-    return chunk[lx + ly * CHUNK + lz * CHUNK * CHUNK];
+    if (!chunk) return 0;
+    const lx = x - cx * CHUNK;
+    const ly = y - cy * CHUNK;
+    const lz = z - cz * CHUNK;
+    return chunk[lx + ly * CHUNK + lz * CHUNK * CHUNK]!;
   }
 
   setBlock(x: number, y: number, z: number, t: number): void {
     if (x < 0 || x >= this.sizeX || y < 0 || y >= this.sizeY || z < 0 || z >= this.sizeZ) return;
-    const cx = Math.floor(x / CHUNK), cy = Math.floor(y / CHUNK), cz = Math.floor(z / CHUNK);
+    const cx = Math.floor(x / CHUNK);
+    const cy = Math.floor(y / CHUNK);
+    const cz = Math.floor(z / CHUNK);
     const id = packChunkId(cx, cy, cz);
-    let chunk = this.chunks.get(id);
-    if (!chunk) return; // Can't set block in unloaded chunk
-    const lx = x - cx * CHUNK, ly = y - cy * CHUNK, lz = z - cz * CHUNK;
+    const chunk = this.chunks.get(id);
+    if (!chunk) return;
+    const lx = x - cx * CHUNK;
+    const ly = y - cy * CHUNK;
+    const lz = z - cz * CHUNK;
     chunk[lx + ly * CHUNK + lz * CHUNK * CHUNK] = t;
     this.markDirtyAt(x, y, z);
   }
 
-  /** Highest solid block Y at (x,z). Returns -1 if column is empty or unloaded. */
   getHighestBlock(x: number, z: number): number {
-    const bx = Math.floor(x), bz = Math.floor(z);
+    const bx = Math.floor(x);
+    const bz = Math.floor(z);
     if (bx < 0 || bx >= this.sizeX || bz < 0 || bz >= this.sizeZ) return -1;
     for (let y = this.sizeY - 1; y >= 0; y--) {
       if (this.getBlock(bx, y, bz) !== 0) return y;
@@ -231,9 +273,9 @@ export class VoxelWorld {
     return -1;
   }
 
-  /** Highest solid block Y at (x,z) at or below footY. Returns -1 if none. */
   getGroundHeightBelow(x: number, footY: number, z: number): number {
-    const bx = Math.floor(x), bz = Math.floor(z);
+    const bx = Math.floor(x);
+    const bz = Math.floor(z);
     if (bx < 0 || bx >= this.sizeX || bz < 0 || bz >= this.sizeZ) return -1;
     const startY = Math.min(Math.floor(footY), this.sizeY - 1);
     for (let y = startY; y >= 0; y--) {
@@ -242,12 +284,14 @@ export class VoxelWorld {
     return -1;
   }
 
-  // ── Chunk system ──
-
   private markDirtyAt(bx: number, by: number, bz: number): void {
-    const cx = Math.floor(bx / CHUNK), cy = Math.floor(by / CHUNK), cz = Math.floor(bz / CHUNK);
+    const cx = Math.floor(bx / CHUNK);
+    const cy = Math.floor(by / CHUNK);
+    const cz = Math.floor(bz / CHUNK);
     this.markDirty(cx, cy, cz);
-    const lx = bx % CHUNK, ly = by % CHUNK, lz = bz % CHUNK;
+    const lx = bx % CHUNK;
+    const ly = by % CHUNK;
+    const lz = bz % CHUNK;
     if (lx === 0) this.markDirty(cx - 1, cy, cz);
     if (lx === CHUNK - 1) this.markDirty(cx + 1, cy, cz);
     if (ly === 0) this.markDirty(cx, cy - 1, cz);
@@ -258,12 +302,11 @@ export class VoxelWorld {
 
   private markDirty(cx: number, cy: number, cz: number): void {
     const id = packChunkId(cx, cy, cz);
-    if (this.chunks.has(id)) {
-      this.dirtyChunks.add(id);
-    }
+    if (!this.chunks.has(id)) return;
+    this.dirtyChunks.add(id);
+    this.chunkRevision.set(id, (this.chunkRevision.get(id) ?? 0) + 1);
   }
 
-  /** Set the camera position used for distance-prioritized rebuilds. */
   setRebuildAnchor(x: number, y: number, z: number): void {
     this.anchorX = x;
     this.anchorY = y;
@@ -274,18 +317,17 @@ export class VoxelWorld {
   private anchorY = 0;
   private anchorZ = 0;
 
-  /** Rebuild only the chunks whose blocks changed, prioritized by distance to anchor. */
   rebuildDirtyChunks(scene: THREE.Scene, maxChunks = Number.POSITIVE_INFINITY): number {
-    if (maxChunks <= 0 || this.dirtyChunks.size === 0) return 0;
+    if (maxChunks <= 0) return 0;
 
-    // Build sorted list by distance to anchor (closest first)
+    let rebuilt = this.flushCompletedJobs(scene, maxChunks);
+    if (rebuilt >= maxChunks || this.dirtyChunks.size === 0) return rebuilt;
+
     const anchorCx = Math.floor(this.anchorX / CHUNK);
     const anchorCy = Math.floor(this.anchorY / CHUNK);
     const anchorCz = Math.floor(this.anchorZ / CHUNK);
 
     const dirtyIds = Array.from(this.dirtyChunks);
-
-    // Sort by squared distance to player chunk (ascending = closest first)
     dirtyIds.sort((a, b) => {
       const [ax, ay, az] = unpackChunkId(a);
       const [bx, by, bz] = unpackChunkId(b);
@@ -294,202 +336,153 @@ export class VoxelWorld {
       return da - db;
     });
 
-    let rebuilt = 0;
-    for (let i = 0; i < dirtyIds.length; i++) {
-      const id = dirtyIds[i];
-      this.dirtyChunks.delete(id);
-      if (!this.chunks.has(id)) continue;
+    for (const id of dirtyIds) {
+      if (rebuilt >= maxChunks) break;
+      if (!this.chunks.has(id)) {
+        this.dirtyChunks.delete(id);
+        continue;
+      }
+      if (this.pendingChunkJobs.has(id)) continue;
+
       const [cx, cy, cz] = unpackChunkId(id);
+      const revision = this.chunkRevision.get(id) ?? 0;
+      this.dirtyChunks.delete(id);
 
-      // Remove old mesh
-      const old = this.chunkMeshes.get(id);
-      if (old) { scene.remove(old); old.geometry.dispose(); }
-
-      // Build new mesh
-      const m = this.buildChunkMesh(cx, cy, cz);
-      if (m) {
-        m.castShadow = true;
-        m.receiveShadow = true;
-        scene.add(m);
-        this.chunkMeshes.set(id, m);
-      } else {
-        this.chunkMeshes.delete(id);
+      if (this.workersEnabled && this.activeWorkerJobs < this.maxWorkerJobs) {
+        this.dispatchMeshJobToWorker(id, revision, cx, cy, cz);
+        continue;
       }
 
+      const mesh = this.buildMeshDataLocally(cx, cy, cz);
+      this.applyMesh(scene, id, mesh);
       rebuilt++;
-      if (rebuilt >= maxChunks) break;
     }
+
+    if (rebuilt < maxChunks) {
+      rebuilt += this.flushCompletedJobs(scene, maxChunks - rebuilt);
+    }
+
     return rebuilt;
   }
 
-  private buildChunkMesh(cx: number, cy: number, cz: number): THREE.Mesh | null {
-    const x0 = cx * CHUNK, y0 = cy * CHUNK, z0 = cz * CHUNK;
-    const x1 = Math.min(x0 + CHUNK, this.sizeX);
-    const y1 = Math.min(y0 + CHUNK, this.sizeY);
-    const z1 = Math.min(z0 + CHUNK, this.sizeZ);
+  private dispatchMeshJobToWorker(id: number, revision: number, cx: number, cy: number, cz: number): void {
+    if (this.workers.length === 0) return;
+    const source = this.chunks.get(id);
+    if (!source) return;
 
-    const pos: number[] = [], nrm: number[] = [], col: number[] = [];
-    const c = new THREE.Color();
+    const worker = this.workers[this.nextWorkerIndex % this.workers.length]!;
+    this.nextWorkerIndex++;
 
-    // Use getBlock which handles sparse chunks
-    const gb = (x: number, y: number, z: number): number => this.getBlock(x, y, z);
+    const neighbors = this.collectNeighborData(cx, cy, cz, true);
+    const input: ChunkMeshBuildInput = {
+      cx,
+      cy,
+      cz,
+      chunkData: new Uint8Array(source),
+      neighbors,
+    };
+    const requestId = this.nextRequestId++;
+    const req: ChunkMeshWorkerRequest = { requestId, input };
+    const transfers: Transferable[] = [input.chunkData.buffer];
+    for (const n of input.neighbors) transfers.push(n.data.buffer);
 
-    for (let x = x0; x < x1; x++) {
-      for (let y = y0; y < y1; y++) {
-        for (let z = z0; z < z1; z++) {
-          const b = gb(x, y, z);
-          if (b === 0) continue;
-          c.setHex(BLOCK_COLORS[b] || 0x808080);
+    this.pendingRequests.set(requestId, { chunkId: id, revision });
+    this.pendingChunkJobs.add(id);
+    this.activeWorkerJobs++;
+    worker.postMessage(req, transfers);
+  }
 
-          if (b === BlockType.Lantern) {
-            c.multiplyScalar(1.45);
-            c.r = Math.min(1, c.r + 0.2);
-            c.g = Math.min(1, c.g + 0.12);
-          } else {
-            const nearBoost = lanternNeighborBoost(gb, x, y, z);
-            if (nearBoost > 1) {
-              c.multiplyScalar(nearBoost);
-              c.r = Math.min(1, c.r + 0.02 * (nearBoost - 1) * 10);
-              c.g = Math.min(1, c.g + 0.015 * (nearBoost - 1) * 10);
-            }
-          }
+  private buildMeshDataLocally(cx: number, cy: number, cz: number): ChunkMeshData {
+    const chunk = this.chunks.get(packChunkId(cx, cy, cz));
+    if (!chunk) {
+      return { position: new Float32Array(0), normal: new Float32Array(0), color: new Float32Array(0) };
+    }
 
-          // Subtle per-block color variation for gritty feel
-          const variation = (hash2d(x * 7 + y, z * 13 + y) - 0.5) * 0.06;
-          c.r = Math.max(0, Math.min(1, c.r + variation));
-          c.g = Math.max(0, Math.min(1, c.g + variation));
-          c.b = Math.max(0, Math.min(1, c.b + variation));
+    return buildChunkMeshData({
+      cx,
+      cy,
+      cz,
+      chunkData: chunk,
+      neighbors: this.collectNeighborData(cx, cy, cz, false),
+    });
+  }
 
-          if (gb(x + 1, y, z) === 0) addFace(pos, nrm, col, c, x + 1, y, z, 0, computeFaceAO(gb, x, y, z, 0), b);
-          if (gb(x - 1, y, z) === 0) addFace(pos, nrm, col, c, x, y, z, 1, computeFaceAO(gb, x, y, z, 1), b);
-          if (gb(x, y + 1, z) === 0) addFace(pos, nrm, col, c, x, y + 1, z, 2, computeFaceAO(gb, x, y, z, 2), b);
-          if (gb(x, y - 1, z) === 0) addFace(pos, nrm, col, c, x, y, z, 3, computeFaceAO(gb, x, y, z, 3), b);
-          if (gb(x, y, z + 1) === 0) addFace(pos, nrm, col, c, x, y, z + 1, 4, computeFaceAO(gb, x, y, z, 4), b);
-          if (gb(x, y, z - 1) === 0) addFace(pos, nrm, col, c, x, y, z, 5, computeFaceAO(gb, x, y, z, 5), b);
+  private collectNeighborData(cx: number, cy: number, cz: number, clone: boolean): ChunkNeighborData[] {
+    const neighbors: ChunkNeighborData[] = [];
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0 && dz === 0) continue;
+          const chunk = this.chunks.get(packChunkId(cx + dx, cy + dy, cz + dz));
+          if (!chunk) continue;
+          neighbors.push({ dx, dy, dz, data: clone ? new Uint8Array(chunk) : chunk });
         }
       }
     }
-
-    if (pos.length === 0) return null;
-
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    return new THREE.Mesh(geo, this.mat);
+    return neighbors;
   }
 
-  // ── Cleanup ──
+  private flushCompletedJobs(scene: THREE.Scene, maxToApply: number): number {
+    if (maxToApply <= 0 || this.completedJobs.length === 0) return 0;
+
+    let applied = 0;
+    while (applied < maxToApply && this.completedJobs.length > 0) {
+      const job = this.completedJobs.pop()!;
+      if (!this.chunks.has(job.chunkId)) continue;
+      const currentRevision = this.chunkRevision.get(job.chunkId) ?? 0;
+      if (currentRevision !== job.revision) {
+        this.dirtyChunks.add(job.chunkId);
+        continue;
+      }
+
+      this.applyMesh(scene, job.chunkId, job.mesh);
+      applied++;
+    }
+    return applied;
+  }
+
+  private applyMesh(scene: THREE.Scene, id: number, meshData: ChunkMeshData): void {
+    const old = this.chunkMeshes.get(id);
+    if (old) {
+      scene.remove(old);
+      old.geometry.dispose();
+      this.chunkMeshes.delete(id);
+    }
+
+    if (meshData.position.length === 0) return;
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(meshData.position, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(meshData.normal, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(meshData.color, 3));
+
+    const mesh = new THREE.Mesh(geo, this.mat);
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    this.chunkMeshes.set(id, mesh);
+  }
+
+  updateChunkShadowCasting(anchorX: number, anchorZ: number, castRadiusChunks: number): void {
+    const anchorCx = Math.floor(anchorX / CHUNK);
+    const anchorCz = Math.floor(anchorZ / CHUNK);
+    const castRadiusSq = castRadiusChunks * castRadiusChunks;
+
+    for (const [id, mesh] of this.chunkMeshes) {
+      const [cx, , cz] = unpackChunkId(id);
+      const dx = cx - anchorCx;
+      const dz = cz - anchorCz;
+      const shouldCast = castRadiusChunks > 0 && (dx * dx + dz * dz) <= castRadiusSq;
+      if (mesh.castShadow !== shouldCast) mesh.castShadow = shouldCast;
+      if (!mesh.receiveShadow) mesh.receiveShadow = true;
+    }
+  }
 
   dispose(scene: THREE.Scene): void {
     this.clearAll(scene);
+    for (const worker of this.workers) worker.terminate();
+    this.workers.length = 0;
+    this.workersEnabled = false;
     this.mat.dispose();
-  }
-}
-
-// ── Face geometry data ──
-
-const FACE_SHADING = [0.85, 0.85, 1.0, 0.7, 0.9, 0.9];
-const FACE_NORMALS = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
-const FACE_VERTS = [
-  [[0,0,0],[0,1,0],[0,1,1],[0,0,0],[0,1,1],[0,0,1]],  // +X
-  [[0,0,1],[0,1,1],[0,1,0],[0,0,1],[0,1,0],[0,0,0]],  // -X
-  [[0,0,0],[0,0,1],[1,0,1],[0,0,0],[1,0,1],[1,0,0]],  // +Y
-  [[1,0,0],[1,0,1],[0,0,1],[1,0,0],[0,0,1],[0,0,0]],  // -Y
-  [[0,0,0],[1,0,0],[1,1,0],[0,0,0],[1,1,0],[0,1,0]],  // +Z
-  [[0,1,0],[1,1,0],[1,0,0],[0,1,0],[1,0,0],[0,0,0]],  // -Z
-];
-
-// ── Per-vertex Ambient Occlusion ──
-
-const AO_TANGENTS: number[][] = [
-  [0,1,0, 0,0,1],  // face 0 (+X)
-  [0,1,0, 0,0,1],  // face 1 (-X)
-  [1,0,0, 0,0,1],  // face 2 (+Y)
-  [1,0,0, 0,0,1],  // face 3 (-Y)
-  [1,0,0, 0,1,0],  // face 4 (+Z)
-  [1,0,0, 0,1,0],  // face 5 (-Z)
-];
-
-const AO_SIGNS: number[][][] = [
-  [[-1,-1],[1,-1],[1,1],[-1,1]],
-  [[-1,1],[1,1],[1,-1],[-1,-1]],
-  [[-1,-1],[-1,1],[1,1],[1,-1]],
-  [[1,-1],[1,1],[-1,1],[-1,-1]],
-  [[-1,-1],[1,-1],[1,1],[-1,1]],
-  [[-1,1],[1,1],[1,-1],[-1,-1]],
-];
-
-const AO_CURVE = [0.45, 0.68, 0.85, 1.0];
-
-function vertexAO(s1: boolean, s2: boolean, c: boolean): number {
-  if (s1 && s2) return 0;
-  return 3 - (+s1) - (+s2) - (+c);
-}
-
-function computeFaceAO(
-  gb: (x: number, y: number, z: number) => number,
-  bx: number, by: number, bz: number, face: number,
-): [number, number, number, number] {
-  const n = FACE_NORMALS[face];
-  const t = AO_TANGENTS[face];
-  const signs = AO_SIGNS[face];
-  const nx = bx + n[0], ny = by + n[1], nz = bz + n[2];
-  const ao: [number, number, number, number] = [3, 3, 3, 3];
-  for (let c = 0; c < 4; c++) {
-    const s1 = signs[c][0], s2 = signs[c][1];
-    const side1 = gb(nx + s1*t[0], ny + s1*t[1], nz + s1*t[2]) !== 0;
-    const side2 = gb(nx + s2*t[3], ny + s2*t[4], nz + s2*t[5]) !== 0;
-    const corner = gb(nx + s1*t[0] + s2*t[3], ny + s1*t[1] + s2*t[4], nz + s1*t[2] + s2*t[5]) !== 0;
-    ao[c] = vertexAO(side1, side2, corner);
-  }
-  return ao;
-}
-
-function lanternLocalBoost(face: number, vx: number, vy: number, vz: number): number {
-  if (face === 2) return 1.28;
-  if (face === 3) return 1.02;
-  const centerDist = Math.abs(vx - 0.5) + Math.abs(vy - 0.5) + Math.abs(vz - 0.5);
-  return centerDist < 1.2 ? 1.22 : 1.14;
-}
-
-function lanternNeighborBoost(
-  gb: (x: number, y: number, z: number) => number,
-  bx: number,
-  by: number,
-  bz: number,
-): number {
-  let score = 0;
-  for (let i = 0; i < LANTERN_NEAR_BOOST_OFFSETS.length; i++) {
-    const o = LANTERN_NEAR_BOOST_OFFSETS[i]!;
-    if (gb(bx + o[0], by + o[1], bz + o[2]) === BlockType.Lantern) score++;
-    if (score >= 2) break;
-  }
-  if (score === 0) return 1;
-  if (score === 1) return 1.14;
-  return 1.24;
-}
-
-function addFace(
-  pos: number[], nrm: number[], col: number[],
-  color: THREE.Color, x: number, y: number, z: number, face: number,
-  ao: [number, number, number, number],
-  blockType?: number,
-): void {
-  const verts = FACE_VERTS[face];
-  const n = FACE_NORMALS[face];
-  const s = FACE_SHADING[face];
-  const corners = [verts[0], verts[1], verts[2], verts[5]];
-  const aoMul = [AO_CURVE[ao[0]] * s, AO_CURVE[ao[1]] * s, AO_CURVE[ao[2]] * s, AO_CURVE[ao[3]] * s];
-  const flip = ao[0] + ao[2] < ao[1] + ao[3];
-  const idx = flip ? [0,1,3, 1,2,3] : [0,1,2, 0,2,3];
-  for (let i = 0; i < 6; i++) {
-    const ci = idx[i];
-    const v = corners[ci];
-    const lanternBoost = blockType === BlockType.Lantern ? lanternLocalBoost(face, v[0], v[1], v[2]) : 1;
-    const m = Math.min(1.85, aoMul[ci] * lanternBoost);
-    pos.push(x + v[0], y + v[1], z + v[2]);
-    nrm.push(n[0], n[1], n[2]);
-    col.push(color.r * m, color.g * m, color.b * m);
   }
 }
