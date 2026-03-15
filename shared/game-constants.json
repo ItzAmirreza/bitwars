@@ -1,8 +1,8 @@
 {
   "world": {
-    "sizeX": 250,
+    "sizeX": 750,
     "sizeY": 48,
-    "sizeZ": 250,
+    "sizeZ": 750,
     "chunkSize": 16
   },
 
@@ -30,7 +30,8 @@
   },
 
   "vehicleTypes": {
-    "Helicopter": 0
+    "Helicopter": 0,
+    "FighterJet": 1
   },
 
   "player": {
@@ -170,6 +171,38 @@
       "height": 5.2,
       "pitchMin": -0.62,
       "pitchMax": 0.42
+    }
+  },
+
+  "fighterJet": {
+    "healthMax": 750,
+    "scale": 2.0,
+    "mountRange": 7.0,
+    "minAltitude": 3.0,
+    "maxAltitude": 140.0,
+    "minSpeed": 18.0,
+    "maxSpeed": 140.0,
+    "acceleration": 38.0,
+    "brakeDeceleration": 10.0,
+    "idleDeceleration": 3.0,
+    "maxYawRate": 2.8,
+    "maxPitchRate": 3.5,
+    "maxRollRate": 4.5,
+    "liftFactor": 0.55,
+    "gravity": 22.0,
+    "stallSpeed": 40.0,
+    "pilotSeatHeight": 1.6,
+    "hitbox": {
+      "centerY": 1.8,
+      "halfX": 5.0,
+      "halfY": 1.2,
+      "halfZ": 7.0
+    },
+    "camera": {
+      "distance": 18,
+      "height": 6.0,
+      "pitchMin": -0.72,
+      "pitchMax": 0.52
     }
   },
 

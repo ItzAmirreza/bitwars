@@ -370,6 +370,189 @@ export function playEmpty(core: AudioCore, spatial?: SpatialSoundOptions): void 
   osc.stop(t + 0.04);
 }
 
+// ── Vehicle-specific weapon sounds (louder, heavier than infantry) ──
+
+export function playVehicleMinigun(core: AudioCore, spatial?: SpatialSoundOptions): void {
+  const busOptions: SpatialBusOptions = {
+    gain: 1,
+    minDistance: 6,
+    maxDistance: 240,
+    rolloff: 1.1,
+    coneInner: 110,
+    coneOuter: 280,
+    coneOuterGain: 0.35,
+    occlusionStrength: 0.7,
+    baseLowpass: 14000,
+    reverbAmount: 0.12,
+  };
+  const { ctx, t, out, delay } = core.resolveOutput(spatial, busOptions, 0.28);
+  const t0 = t + delay;
+
+  // Heavy noise burst — much louder and longer than infantry machinegun
+  const src = ctx.createBufferSource();
+  src.buffer = core.noise(0.08, 0.12);
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 2200;
+  bp.Q.value = 1.4;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.42, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.08);
+  src.connect(bp).connect(g).connect(out);
+  src.start(t0);
+  src.stop(t0 + 0.09);
+
+  // Low-end thump (vehicle weapons have more bass)
+  const punch = ctx.createOscillator();
+  punch.type = 'sine';
+  punch.frequency.setValueAtTime(140, t0);
+  punch.frequency.exponentialRampToValueAtTime(55, t0 + 0.06);
+  const pg = ctx.createGain();
+  pg.gain.setValueAtTime(0.22, t0);
+  pg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.06);
+  punch.connect(pg).connect(out);
+  punch.start(t0);
+  punch.stop(t0 + 0.07);
+
+  // Mechanical rattle
+  const crack = ctx.createOscillator();
+  crack.type = 'square';
+  crack.frequency.setValueAtTime(1600, t0);
+  crack.frequency.exponentialRampToValueAtTime(900, t0 + 0.04);
+  const crackLp = ctx.createBiquadFilter();
+  crackLp.type = 'lowpass';
+  crackLp.frequency.value = 4000;
+  const cg = ctx.createGain();
+  cg.gain.setValueAtTime(0.10, t0);
+  cg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.04);
+  crack.connect(crackLp).connect(cg).connect(out);
+  crack.start(t0);
+  crack.stop(t0 + 0.05);
+}
+
+export function playVehicleRocket(core: AudioCore, spatial?: SpatialSoundOptions): void {
+  const busOptions: SpatialBusOptions = {
+    gain: 1,
+    minDistance: 5,
+    maxDistance: 260,
+    rolloff: 1.0,
+    coneInner: 60,
+    coneOuter: 240,
+    coneOuterGain: 0.2,
+    occlusionStrength: 0.85,
+    baseLowpass: 10000,
+    reverbAmount: 0.16,
+  };
+  const { ctx, t, out, delay } = core.resolveOutput(spatial, busOptions, 0.3);
+  const t0 = t + delay;
+
+  // Heavy whoosh
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(180, t0);
+  osc.frequency.exponentialRampToValueAtTime(45, t0 + 0.45);
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 550;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.38, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.45);
+  osc.connect(lp).connect(g).connect(out);
+  osc.start(t0);
+  osc.stop(t0 + 0.46);
+
+  // Ignition hiss
+  const hiss = ctx.createBufferSource();
+  hiss.buffer = core.noise(0.4, 0.22);
+  const hg = ctx.createGain();
+  hg.gain.setValueAtTime(0.18, t0);
+  hg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.4);
+  hiss.connect(hg).connect(out);
+  hiss.start(t0);
+  hiss.stop(t0 + 0.41);
+
+  // Sub-bass punch
+  const sub = ctx.createOscillator();
+  sub.type = 'sine';
+  sub.frequency.setValueAtTime(65, t0);
+  sub.frequency.exponentialRampToValueAtTime(25, t0 + 0.18);
+  const sg = ctx.createGain();
+  sg.gain.setValueAtTime(0.30, t0);
+  sg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.18);
+  sub.connect(sg).connect(out);
+  sub.start(t0);
+  sub.stop(t0 + 0.19);
+}
+
+// ── Projectile flyby / whiz ──
+
+export function playProjectileFlyby(
+  core: AudioCore,
+  speed: number,
+  spatial?: SpatialSoundOptions,
+): void {
+  const busOptions: SpatialBusOptions = {
+    gain: 1,
+    minDistance: 2,
+    maxDistance: 45,
+    rolloff: 1.6,
+    coneInner: 360,
+    coneOuter: 360,
+    coneOuterGain: 1,
+    occlusionStrength: 0.5,
+    baseLowpass: 16000,
+    reverbAmount: 0.06,
+  };
+  const { ctx, t, out, delay } = core.resolveOutput(spatial, busOptions, 0.1);
+  const t0 = t + delay;
+
+  // Speed factor: faster projectiles have higher pitch and shorter duration
+  const speedFactor = core.clamp(speed / 120, 0.4, 2.0);
+
+  // Main whiz: filtered noise with a quick pitch sweep
+  const src = ctx.createBufferSource();
+  src.buffer = core.noise(0.25, 0.35);
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.setValueAtTime(1800 * speedFactor, t0);
+  bp.frequency.exponentialRampToValueAtTime(800 * speedFactor, t0 + 0.18 / speedFactor);
+  bp.Q.value = 2.5;
+  const g = ctx.createGain();
+  const whizVol = 0.18 * core.clamp(speedFactor, 0.5, 1.5);
+  g.gain.setValueAtTime(whizVol, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22 / speedFactor);
+  src.connect(bp).connect(g).connect(out);
+  src.start(t0);
+  src.stop(t0 + 0.25 / speedFactor);
+
+  // Tonal whistle (thin sine that sweeps down — the "zing")
+  const whistle = ctx.createOscillator();
+  whistle.type = 'sine';
+  whistle.frequency.setValueAtTime(3200 * speedFactor, t0);
+  whistle.frequency.exponentialRampToValueAtTime(1200 * speedFactor, t0 + 0.15 / speedFactor);
+  const wg = ctx.createGain();
+  wg.gain.setValueAtTime(0.06 * speedFactor, t0);
+  wg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.15 / speedFactor);
+  whistle.connect(wg).connect(out);
+  whistle.start(t0);
+  whistle.stop(t0 + 0.18 / speedFactor);
+
+  // Air crack (very short transient for fast projectiles)
+  if (speed > 60) {
+    const crack = ctx.createBufferSource();
+    crack.buffer = core.noise(0.02, 0.05);
+    const crackHp = ctx.createBiquadFilter();
+    crackHp.type = 'highpass';
+    crackHp.frequency.value = 4000;
+    const crackG = ctx.createGain();
+    crackG.gain.setValueAtTime(0.12, t0);
+    crackG.gain.exponentialRampToValueAtTime(0.001, t0 + 0.02);
+    crack.connect(crackHp).connect(crackG).connect(out);
+    crack.start(t0);
+    crack.stop(t0 + 0.025);
+  }
+}
+
 export function playSwitch(core: AudioCore, spatial?: SpatialSoundOptions): void {
   const { ctx, t, out } = core.resolveOutput(
     spatial,

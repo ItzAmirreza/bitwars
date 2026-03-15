@@ -5,14 +5,17 @@
 //   3. Add it to the tick_vehicles dispatcher
 //   4. Add a new VEHICLE_TYPE_* constant in constants.rs
 
+pub mod fighter_jet;
 pub mod helicopter;
 pub mod interaction;
 pub mod spawning;
 pub mod weapons;
 
 // Re-export for convenience
+pub use fighter_jet::tick_fighter_jet;
 pub use helicopter::tick_helicopter;
 pub use interaction::{interact_vehicle, update_vehicle_input};
+pub use spawning::spawn_jets_at_airstrips;
 pub use spawning::spawn_sandbox_helicopters;
 pub use weapons::{
     fire_vehicle_weapon, reload_vehicle_weapon, switch_vehicle_weapon, vehicle_projectile_impact,
@@ -48,8 +51,9 @@ pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
         // Dispatch to per-vehicle-type physics
         if vehicle.vehicle_type == vehicle_type_helicopter() {
             tick_helicopter(ctx, vehicle, entity, &mut mounted_updates);
+        } else if vehicle.vehicle_type == vehicle_type_fighter_jet() {
+            tick_fighter_jet(ctx, vehicle, entity, &mut mounted_updates);
         }
-        // Future: else if vehicle.vehicle_type == vehicle_type_tank() { ... }
     }
 
     // Apply mounted player position updates

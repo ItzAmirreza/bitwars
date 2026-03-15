@@ -48,8 +48,10 @@ export function GameScreen() {
     vehicleAmmo: 0,
     vehicleMaxAmmo: 300,
     vehicleSpeed: 0,
+    vehicleThrottle: 0,
     vehicleReloading: false,
     nearVehicle: false,
+    nearVehicleName: null,
   });
 
   // ── Kill tracking hook ──
@@ -412,14 +414,53 @@ export function GameScreen() {
             padding: '6px 16px',
             backdropFilter: 'blur(4px)',
           }}>
-            <span style={{ color: 'var(--c-cyan)', fontWeight: 'bold' }}>[F]</span> ENTER HELICOPTER
+            <span style={{ color: 'var(--c-cyan)', fontWeight: 'bold' }}>[F]</span> ENTER {(state.nearVehicleName ?? 'VEHICLE').toUpperCase()}
           </div>
         </div>
       )}
 
-      {/* ═══ EJECT PROMPT (bottom-center) ═══ */}
+      {/* ═══ EJECT PROMPT + CONTROL HINTS (bottom-center) ═══ */}
       {state.locked && !chatOpen && !loadoutOpen && state.mountedVehicleName && (
-        <div className="absolute bottom-32 left-0 right-0 flex justify-center pointer-events-none z-10">
+        <div className="absolute bottom-24 left-0 right-0 flex flex-col items-center pointer-events-none z-10" style={{ gap: '6px' }}>
+          {/* Control hints */}
+          <div style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '9px',
+            letterSpacing: '0.14em',
+            color: 'var(--c-muted)',
+            textShadow: '0 0 6px rgba(0,0,0,0.8)',
+            background: 'rgba(6,8,16,0.55)',
+            border: '1px solid rgba(102,224,255,0.15)',
+            padding: '5px 12px',
+            backdropFilter: 'blur(4px)',
+            lineHeight: '1.8',
+            textAlign: 'center',
+          }}>
+            {state.mountedVehicleName === 'Fighter Jet' ? (<>
+              <div>
+                <span style={{ color: 'var(--c-text)' }}>W</span> THROTTLE UP
+                {' '}<span style={{ color: 'var(--c-text)' }}>S</span> THROTTLE DOWN
+                {' '}<span style={{ color: 'var(--c-text)' }}>A/D</span> YAW
+              </div>
+              <div>
+                <span style={{ color: 'var(--c-text)' }}>SPACE</span> PULL UP
+                {' '}<span style={{ color: 'var(--c-text)' }}>SHIFT</span> PUSH DOWN
+                {' '}<span style={{ color: 'var(--c-text)' }}>1/2</span> WEAPONS
+              </div>
+            </>) : (<>
+              <div>
+                <span style={{ color: 'var(--c-text)' }}>W/S</span> FWD/BACK
+                {' '}<span style={{ color: 'var(--c-text)' }}>A/D</span> YAW
+                {' '}<span style={{ color: 'var(--c-text)' }}>Q/E</span> STRAFE
+              </div>
+              <div>
+                <span style={{ color: 'var(--c-text)' }}>SPACE</span> ASCEND
+                {' '}<span style={{ color: 'var(--c-text)' }}>SHIFT</span> DESCEND
+                {' '}<span style={{ color: 'var(--c-text)' }}>1/2</span> WEAPONS
+              </div>
+            </>)}
+          </div>
+          {/* Eject button */}
           <div style={{
             fontFamily: 'var(--font-mono)',
             fontSize: '12px',
@@ -521,6 +562,7 @@ export function GameScreen() {
         vehicleReloading={state.vehicleReloading}
         vehicleAltitude={state.vehicleAltitude}
         vehicleSpeed={state.vehicleSpeed}
+        vehicleThrottle={state.vehicleThrottle}
       />
     </div>
   );

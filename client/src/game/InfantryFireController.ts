@@ -172,8 +172,8 @@ export class InfantryFireController {
       ctx.physics.applyExplosionForce(hx, hy, hz, w.radius * 2, w.damage * 1.5);
     }
 
-    // Rebuild affected chunks
-    ctx.world.rebuildDirtyChunks(ctx.scene);
+    // Rebuild affected chunks (capped to avoid frame spikes from large backlogs)
+    ctx.world.rebuildDirtyChunks(ctx.scene, 32);
   }
 
   // ── PROJECTILE IMPACT CALLBACK ──
@@ -244,8 +244,8 @@ export class InfantryFireController {
       ctx.physics.applyExplosionForce(hx, hy, hz, effectiveRadius * 2, effectiveDamage * 1.5);
     }
 
-    // Rebuild affected chunks
-    ctx.world.rebuildDirtyChunks(ctx.scene);
+    // Rebuild affected chunks (capped to avoid frame spikes from large backlogs)
+    ctx.world.rebuildDirtyChunks(ctx.scene, 32);
 
     // Server sync: route to correct reducer
     if (impact.isVehicle) {

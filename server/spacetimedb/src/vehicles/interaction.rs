@@ -30,9 +30,13 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
     // Find nearest mountable vehicle
     let mut best_vehicle: Option<(u64, Vec3, f32)> = None;
     for v in ctx.db.vehicle().iter() {
-        if v.vehicle_type != vehicle_type_helicopter() {
-            continue;
-        }
+        let mount_range = if v.vehicle_type == vehicle_type_helicopter() {
+            heli_mount_range()
+        } else if v.vehicle_type == vehicle_type_fighter_jet() {
+            jet_mount_range()
+        } else {
+            continue; // unknown vehicle type
+        };
         if v.pilot_identity.is_some() {
             continue;
         }
@@ -44,7 +48,7 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
         }
 
         let d2 = dist_sq(&player.pos, &entity.pos);
-        if d2 > heli_mount_range() * heli_mount_range() {
+        if d2 > mount_range * mount_range {
             continue;
         }
 
@@ -56,25 +60,34 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
 
     let (vehicle_id, vehicle_pos, _) = best_vehicle.ok_or("No vehicle in range")?;
 
-    if let Some(vehicle) = ctx.db.vehicle().entity_id().find(&vehicle_id) {
-        ctx.db.vehicle().entity_id().update(Vehicle {
-            pilot_identity: Some(sender),
-            input_forward: 0.0,
-            input_strafe: 0.0,
-            input_lift: 0.0,
-            input_yaw: 0.0,
-            boosting: false,
-            last_input_at: ctx.timestamp,
-            ..vehicle
-        });
-    }
+    let vehicle = ctx
+        .db
+        .vehicle()
+        .entity_id()
+        .find(&vehicle_id)
+        .ok_or("Vehicle not found")?;
+    let seat_height = if vehicle.vehicle_type == vehicle_type_helicopter() {
+        heli_pilot_seat_height()
+    } else {
+        jet_pilot_seat_height()
+    };
+    ctx.db.vehicle().entity_id().update(Vehicle {
+        pilot_identity: Some(sender),
+        input_forward: 0.0,
+        input_strafe: 0.0,
+        input_lift: 0.0,
+        input_yaw: 0.0,
+        boosting: false,
+        last_input_at: ctx.timestamp,
+        ..vehicle
+    });
 
     let mounted = Player {
         mounted_vehicle_id: vehicle_id,
         spawn_protected: false,
         pos: Vec3 {
             x: vehicle_pos.x,
-            y: vehicle_pos.y + heli_pilot_seat_height(),
+            y: vehicle_pos.y + seat_height,
             z: vehicle_pos.z,
         },
         vel: ZERO_VEL,

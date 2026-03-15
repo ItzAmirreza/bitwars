@@ -9,7 +9,7 @@ use crate::constants::*;
 use crate::helpers::*;
 use crate::tables::*;
 use crate::types::*;
-use crate::vehicles::spawn_sandbox_helicopters;
+use crate::vehicles::{spawn_jets_at_airstrips, spawn_sandbox_helicopters};
 
 use crate::worldgen::{self, CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
 
@@ -113,6 +113,7 @@ pub fn init(ctx: &ReducerContext) {
     });
 
     spawn_sandbox_helicopters(ctx);
+    spawn_jets_at_airstrips(ctx, seed);
 
     log::info!(
         "Environment initialized: time={:.1}h, weather={}",

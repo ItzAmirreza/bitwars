@@ -21,6 +21,7 @@ pub struct GameConfig {
     pub weapons: Vec<WeaponConfig>,
     pub vehicle_weapons: Vec<VehicleWeaponConfig>,
     pub helicopter: HelicopterConfig,
+    pub fighter_jet: FighterJetConfig,
     pub grenade: GrenadeConfig,
     pub combat: CombatConfig,
     pub weather: Vec<WeatherConfig>,
@@ -68,6 +69,7 @@ pub struct EntityKinds {
 #[serde(rename_all = "PascalCase")]
 pub struct VehicleTypes {
     pub helicopter: u8,
+    pub fighter_jet: u8,
 }
 
 #[derive(Deserialize, Debug)]
@@ -150,6 +152,48 @@ pub struct HelicopterHitbox {
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct HelicopterCamera {
+    pub distance: f32,
+    pub height: f32,
+    pub pitch_min: f32,
+    pub pitch_max: f32,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FighterJetConfig {
+    pub health_max: i32,
+    pub scale: f32,
+    pub mount_range: f32,
+    pub min_altitude: f32,
+    pub max_altitude: f32,
+    pub min_speed: f32,
+    pub max_speed: f32,
+    pub acceleration: f32,
+    pub brake_deceleration: f32,
+    pub idle_deceleration: f32,
+    pub max_yaw_rate: f32,
+    pub max_pitch_rate: f32,
+    pub max_roll_rate: f32,
+    pub lift_factor: f32,
+    pub gravity: f32,
+    pub stall_speed: f32,
+    pub pilot_seat_height: f32,
+    pub hitbox: FighterJetHitbox,
+    pub camera: FighterJetCamera,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FighterJetHitbox {
+    pub center_y: f32,
+    pub half_x: f32,
+    pub half_y: f32,
+    pub half_z: f32,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FighterJetCamera {
     pub distance: f32,
     pub height: f32,
     pub pitch_min: f32,

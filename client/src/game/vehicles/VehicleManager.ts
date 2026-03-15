@@ -10,7 +10,7 @@
 
 import * as THREE from 'three';
 import { InterpolationBuffer } from '../InterpolationBuffer';
-import { ENTITY_KINDS } from '../../shared-config';
+import { ENTITY_KINDS, VEHICLE_TYPES } from '../../shared-config';
 import { VEHICLE_WEAPON_DEFINITIONS } from '../WeaponRegistry';
 import type { VehicleWeaponDefinition } from '../WeaponRegistry';
 import type { DynamicLightOptions } from '../Engine';
@@ -29,6 +29,7 @@ import type {
   VehicleTypeDestroyContext,
 } from './VehicleBase';
 import { HelicopterType } from './HelicopterType';
+import { FighterJetType } from './FighterJetType';
 
 // ── Constants ──
 const ENTITY_KIND_VEHICLE = ENTITY_KINDS.Vehicle;
@@ -121,6 +122,7 @@ export default class VehicleManager {
   vehicleAmmo: [number, number] = [300, 16];
   vehicleReloadingUntil: [number, number] = [0, 0];
   vehicleCameraDistance = 14;
+  jetThrottle = 0; // 0..1 persistent throttle level
 
   private lastVehicleInputUpdate = 0;
 
@@ -140,6 +142,7 @@ export default class VehicleManager {
     this.engine = engine;
     // Register built-in vehicle types
     this.registerVehicleType(new HelicopterType());
+    this.registerVehicleType(new FighterJetType());
   }
 
   // ── Registry ──
@@ -209,7 +212,14 @@ export default class VehicleManager {
 
   /** Check if player is near any unoccupied vehicle (for ENTER prompt). */
   isNearVehicle(): boolean {
+    return this.getNearVehicleName() !== null;
+  }
+
+  /** Returns the name of the nearest mountable vehicle, or null. */
+  getNearVehicleName(): string | null {
     const camPos = this.engine.camera.position;
+    let bestName: string | null = null;
+    let bestDist = Infinity;
     for (const [entityId, mesh] of this.vehicles) {
       const inst = this.vehicleInstances.get(entityId);
       if (!inst) continue;
@@ -220,9 +230,12 @@ export default class VehicleManager {
       const dy = camPos.y - mesh.position.y;
       const dz = camPos.z - mesh.position.z;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      if (dist <= range) return true;
+      if (dist <= range && dist < bestDist) {
+        bestDist = dist;
+        bestName = vt.name;
+      }
     }
-    return false;
+    return bestName;
   }
 
   /** Get the VehicleType ID for a given entity, or -1 if unknown. */
@@ -240,6 +253,11 @@ export default class VehicleManager {
     if (!vt) return null;
 
     mesh = vt.createModel();
+    // YXZ order: yaw (Y) applied first in world space, then pitch (X) in the
+    // helicopter's local frame.  Default XYZ would apply pitch in world space,
+    // causing the nose direction to depend on compass heading instead of the
+    // vehicle's own forward axis.
+    mesh.rotation.order = 'YXZ';
     mesh.userData.entityId = entityId;
     mesh.userData.clientSpinAngle = 0;
     mesh.userData.smoothBlurT = 0;
@@ -263,7 +281,11 @@ export default class VehicleManager {
     });
 
     this.ensureLightRig(entityId, mesh);
-    this.engine.audio.startHelicopterSound(entityId);
+    if (typeId === VEHICLE_TYPES.Helicopter) {
+      this.engine.audio.startHelicopterSound(entityId);
+    } else if (typeId === VEHICLE_TYPES.FighterJet) {
+      this.engine.audio.startJetEngineSound(entityId);
+    }
     return mesh;
   }
 
@@ -342,7 +364,13 @@ export default class VehicleManager {
       this.pendingDestroyFallbacks.delete(entityId);
     }
     this.removeLightRig(entityId);
-    this.engine.audio.stopHelicopterSound(entityId, destroyed);
+    const inst = this.vehicleInstances.get(entityId);
+    const isJet = inst?.type === VEHICLE_TYPES.FighterJet;
+    if (isJet) {
+      this.engine.audio.stopJetEngineSound(entityId, destroyed);
+    } else {
+      this.engine.audio.stopHelicopterSound(entityId, destroyed);
+    }
     const mesh = this.vehicles.get(entityId);
     if (!mesh) return;
     this.engine.scene.remove(mesh);
@@ -415,15 +443,31 @@ export default class VehicleManager {
     }
   }
 
-  syncVehicleInput(): void {
+  syncVehicleInput(delta: number): void {
     if (!this.engine.conn || !this.engine.localIdentity || this.engine.mountedVehicleId === 0) return;
+
+    const mountedType = this.getMountedVehicleType();
+    const isJet = mountedType?.typeId === VEHICLE_TYPES.FighterJet;
+
+    // Update persistent jet throttle every frame (before rate-limiting the network send)
+    let forward = 0;
+    if (isJet) {
+      const throttleRate = 1.2; // per second
+      if (this.engine.controls.moveForward) {
+        this.jetThrottle = Math.min(1, this.jetThrottle + throttleRate * delta);
+      }
+      if (this.engine.controls.moveBackward) {
+        this.jetThrottle = Math.max(0, this.jetThrottle - throttleRate * delta);
+      }
+      forward = this.jetThrottle;
+    } else {
+      if (this.engine.controls.moveForward) forward += 1;
+      if (this.engine.controls.moveBackward) forward -= 1;
+    }
+
     const now = performance.now();
     if (now - this.lastVehicleInputUpdate < VEHICLE_INPUT_INTERVAL_MS) return;
     this.lastVehicleInputUpdate = now;
-
-    let forward = 0;
-    if (this.engine.controls.moveForward) forward += 1;
-    if (this.engine.controls.moveBackward) forward -= 1;
 
     let strafe = 0;
     if (this.engine.controls.ePressed) strafe += 1;
@@ -761,8 +805,11 @@ export default class VehicleManager {
             this.localSmoothedPos.z += errZ * correctionRate;
 
             let dyaw = this.localLastServerYaw - this.localSmoothedYaw;
-            if (dyaw > Math.PI) dyaw -= 2 * Math.PI;
-            if (dyaw < -Math.PI) dyaw += 2 * Math.PI;
+            // Wrap to [-PI, PI] handling any number of accumulated revolutions.
+            // The single if/else wrap only handles |dyaw| < 3*PI; continuous
+            // rotation can push smoothedYaw arbitrarily far from the server's
+            // wrapped [-PI, PI] range.
+            dyaw -= Math.round(dyaw / (2 * Math.PI)) * 2 * Math.PI;
             this.localSmoothedYaw += dyaw * correctionRate;
             this.localSmoothedPitch += (this.localLastServerPitch - this.localSmoothedPitch) * correctionRate;
           }
@@ -782,6 +829,11 @@ export default class VehicleManager {
           inst.buffer.sample(mesh.position, rot);
           mesh.rotation.set(rot.pitch, rot.yaw, 0);
         }
+      }
+
+      // ── Restore opacity for vehicles the local player is NOT mounted in ──
+      if (!isLocal && (mesh.userData.currentOpacity as number) < 0.99) {
+        this.setVehicleOpacity(mesh, 1.0);
       }
 
       // ── Delegate type-specific animation ──

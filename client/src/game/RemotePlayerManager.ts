@@ -316,7 +316,8 @@ export class RemotePlayerManager {
   // ── Public API ──
 
   shouldRenderRemotePlayer(player: any): boolean {
-    return player.online && player.health > 0 && !player.spawnProtected;
+    return player.online && player.health > 0 && !player.spawnProtected
+      && Number(player.mountedVehicleId ?? 0) === 0;
   }
 
   updateOtherPlayer(

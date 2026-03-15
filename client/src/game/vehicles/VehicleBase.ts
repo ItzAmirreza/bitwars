@@ -113,6 +113,12 @@ export interface VehicleTypeFrameContext {
       speed: number,
       isLocal: boolean,
     ): void;
+    updateJetEngineSound(
+      entityId: number,
+      position: THREE.Vector3,
+      speed: number,
+      isLocal: boolean,
+    ): void;
   };
   /** Sky system for day/night light rigs. */
   sky: { getSunVisibility(): number };

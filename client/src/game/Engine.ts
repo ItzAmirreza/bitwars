@@ -11,7 +11,7 @@ import { ProjectileManager } from './ProjectileManager';
 import { SkySystem } from './SkySystem';
 import { LanternSystem } from './LanternSystem';
 import type { LanternContext } from './LanternSystem';
-import { ChunkStreamer, CHUNK_STREAM_INTERVAL_FRAMES, CHUNK_REBUILD_BUDGET_MOVING, CHUNK_REBUILD_BUDGET_IDLE } from './ChunkStreamer';
+import { ChunkStreamer, CHUNK_STREAM_INTERVAL_FRAMES, CHUNK_REBUILD_BUDGET_MOVING, CHUNK_REBUILD_BUDGET_IDLE, CHUNK_REBUILD_BUDGET_BOOTSTRAP } from './ChunkStreamer';
 import { RemotePlayerManager, disposeObjectMaterials } from './RemotePlayerManager';
 import VehicleManager, { VEHICLE_WEAPONS } from './vehicles/VehicleManager';
 import type { VehicleEngineContext } from './vehicles/VehicleManager';
@@ -72,8 +72,10 @@ export interface EngineState {
   vehicleAmmo: number;
   vehicleMaxAmmo: number;
   vehicleSpeed: number;
+  vehicleThrottle: number;   // 0..1 for jet throttle
   vehicleReloading: boolean;
   nearVehicle: boolean;
+  nearVehicleName: string | null;
 }
 
 export class Engine {
@@ -249,7 +251,12 @@ export class Engine {
       onChunkUnloading: (chunkId) => this.lanterns.clearLanternLightsForChunk(chunkId, this.getLanternContext()),
     });
     this.chunkStreamer.loadWorldFromServer();
-    this.world.rebuildDirtyChunks(this.scene, 24);
+    this.world.setRebuildAnchor(
+      this.camera.position.x,
+      this.camera.position.y,
+      this.camera.position.z,
+    );
+    this.world.rebuildDirtyChunks(this.scene, CHUNK_REBUILD_BUDGET_BOOTSTRAP);
 
     // ── Ground plane ──
     const groundGeo = new THREE.PlaneGeometry(2048, 2048);
@@ -296,7 +303,8 @@ export class Engine {
     // NOTE: infantryFire is initialized after this, but the callback is only called
     // at runtime (not during construction), so the reference is valid by then.
     this.projectileManager = new ProjectileManager(
-      this.scene, this.world, this.weapons, this.vfx, this.remotePlayers.otherPlayers,
+      this.scene, this.world, this.weapons, this.vfx, this.audio, this.camera,
+      this.remotePlayers.otherPlayers,
       (impact) => this.infantryFire.handleProjectileImpact(impact),
     );
 
@@ -655,8 +663,8 @@ export class Engine {
     else if (weaponIdx === 3) this.audio.playMachineGun(spatial);
     else if (weaponIdx === 4) this.audio.playGrenadeLaunch(spatial);
     // Vehicle weapons (100+ namespace)
-    else if (weaponIdx === 100) this.audio.playMachineGun(spatial); // Minigun
-    else if (weaponIdx === 101) this.audio.playRPGLaunch(spatial);  // Rockets
+    else if (weaponIdx === 100) this.audio.playVehicleMinigun(spatial); // Minigun
+    else if (weaponIdx === 101) this.audio.playVehicleRocket(spatial);  // Rockets
   }
 
   private localAudioSource(heightOffset = 0): {
@@ -800,11 +808,25 @@ export class Engine {
     // New chunks arriving (lazy generation or subscription change)
     this.conn.db.world_chunk.onInsert((_ctx: unknown, chunk: any) => {
       const cx = chunk.cx as number, cy = chunk.cy as number, cz = chunk.cz as number;
+      const id = packChunkId(cx, cy, cz);
+
+      // Skip chunks that are far from the player (triggered by other players' requests)
+      const [anchorCx, anchorCz] = this.chunkStreamer.getLoadAnchorChunk();
+      const dx = cx - anchorCx;
+      const dz = cz - anchorCz;
+      const viewDist = 28; // VIEW_DISTANCE + UNLOAD_BUFFER
+      if (dx * dx + dz * dz > viewDist * viewDist) {
+        // Clear pending tracking but don't load the chunk data
+        this.chunkStreamer.pendingChunkRequests.delete(id);
+        this.chunkStreamer.queuedChunkRequests.delete(id);
+        this.chunkStreamer.bootstrapQueued.delete(id);
+        return;
+      }
+
       const data = chunk.data instanceof Uint8Array ? chunk.data : new Uint8Array(chunk.data);
       const decoded = VoxelWorld.rleDecodeChunk(data);
       this.world.loadChunk(cx, cy, cz, decoded);
       this.lanterns.syncLanternLightsForChunk(cx, cy, cz, this.getLanternContext(), decoded);
-      const id = packChunkId(cx, cy, cz);
       this.chunkStreamer.pendingChunkRequests.delete(id);
       this.chunkStreamer.queuedChunkRequests.delete(id);
       this.chunkStreamer.bootstrapQueued.delete(id);
@@ -965,8 +987,8 @@ export class Engine {
               this.vehicleManager.vehicleAmmo[1] = VEHICLE_WEAPONS[1].maxAmmo;
             }
           } else {
-            // Dismounting — restore helicopter opacity to full
-            // (VehicleManager handles opacity internally)
+            // Dismounting — reset jet throttle + restore opacity
+            this.vehicleManager.jetThrottle = 0;
           }
         }
         if (player.health < oldHealth) {
@@ -1531,7 +1553,7 @@ export class Engine {
     }
 
     if (this.mountedVehicleId !== 0) {
-      this.vehicleManager.syncVehicleInput();
+      this.vehicleManager.syncVehicleInput(delta);
     }
 
     // Vehicle per-frame update (delegated to VehicleManager)
@@ -1573,14 +1595,17 @@ export class Engine {
       this.sendPositionUpdate();
     }
 
-    // Rebuild dirty chunks with a frame budget (prevents movement hitches)
+    // Rebuild dirty chunks with distance-prioritized budget
+    this.world.setRebuildAnchor(
+      this.camera.position.x,
+      this.camera.position.y,
+      this.camera.position.z,
+    );
     const isMoving = this.controls.moveForward || this.controls.moveBackward
       || this.controls.moveLeft || this.controls.moveRight
       || this.controls.isSliding || !this.controls.onGround;
-    this.world.rebuildDirtyChunks(
-      this.scene,
-      isMoving ? CHUNK_REBUILD_BUDGET_MOVING : CHUNK_REBUILD_BUDGET_IDLE,
-    );
+    const baseBudget = isMoving ? CHUNK_REBUILD_BUDGET_MOVING : CHUNK_REBUILD_BUDGET_IDLE;
+    this.world.rebuildDirtyChunks(this.scene, baseBudget);
 
     this.renderFrame(delta);
     this.pushHudState(startupProgress);
@@ -1821,6 +1846,7 @@ export class Engine {
     let vehicleMaxHealth = this.vehicleManager.HEALTH_MAX;
     let vehicleSpeed = 0;
     let nearVehicle = false;
+    let nearVehicleName: string | null = null;
 
     if (this.mountedVehicleId !== 0) {
       const vRow = this.vehicleManager.getVehicleRow(this.mountedVehicleId);
@@ -1849,7 +1875,9 @@ export class Engine {
       }
     } else {
       // Check for nearby vehicle (for "ENTER" prompt)
-      nearVehicle = this.vehicleManager.isNearVehicle();
+      const nearName = this.vehicleManager.getNearVehicleName();
+      nearVehicle = nearName !== null;
+      nearVehicleName = nearName;
     }
 
     const curVehWep = VEHICLE_WEAPONS[this.vehicleManager.vehicleWeaponIndex];
@@ -1879,8 +1907,10 @@ export class Engine {
       vehicleAmmo: this.vehicleManager.vehicleAmmo[this.vehicleManager.vehicleWeaponIndex] ?? 0,
       vehicleMaxAmmo: curVehWep?.maxAmmo ?? 0,
       vehicleSpeed,
+      vehicleThrottle: this.vehicleManager.jetThrottle,
       vehicleReloading: this.mountedVehicleId !== 0 && this.vehicleManager.vehicleReloadingUntil[this.vehicleManager.vehicleWeaponIndex] > performance.now(),
       nearVehicle,
+      nearVehicleName,
     });
   }
 

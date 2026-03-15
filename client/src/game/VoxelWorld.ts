@@ -259,18 +259,43 @@ export class VoxelWorld {
   private markDirty(cx: number, cy: number, cz: number): void {
     const id = packChunkId(cx, cy, cz);
     if (this.chunks.has(id)) {
-      if (this.dirtyChunks.has(id)) this.dirtyChunks.delete(id);
       this.dirtyChunks.add(id);
     }
   }
 
-  /** Rebuild only the chunks whose blocks changed. */
+  /** Set the camera position used for distance-prioritized rebuilds. */
+  setRebuildAnchor(x: number, y: number, z: number): void {
+    this.anchorX = x;
+    this.anchorY = y;
+    this.anchorZ = z;
+  }
+
+  private anchorX = 0;
+  private anchorY = 0;
+  private anchorZ = 0;
+
+  /** Rebuild only the chunks whose blocks changed, prioritized by distance to anchor. */
   rebuildDirtyChunks(scene: THREE.Scene, maxChunks = Number.POSITIVE_INFINITY): number {
     if (maxChunks <= 0 || this.dirtyChunks.size === 0) return 0;
 
-    let rebuilt = 0;
+    // Build sorted list by distance to anchor (closest first)
+    const anchorCx = Math.floor(this.anchorX / CHUNK);
+    const anchorCy = Math.floor(this.anchorY / CHUNK);
+    const anchorCz = Math.floor(this.anchorZ / CHUNK);
+
     const dirtyIds = Array.from(this.dirtyChunks);
-    for (let i = dirtyIds.length - 1; i >= 0; i--) {
+
+    // Sort by squared distance to player chunk (ascending = closest first)
+    dirtyIds.sort((a, b) => {
+      const [ax, ay, az] = unpackChunkId(a);
+      const [bx, by, bz] = unpackChunkId(b);
+      const da = (ax - anchorCx) ** 2 + (ay - anchorCy) ** 2 + (az - anchorCz) ** 2;
+      const db = (bx - anchorCx) ** 2 + (by - anchorCy) ** 2 + (bz - anchorCz) ** 2;
+      return da - db;
+    });
+
+    let rebuilt = 0;
+    for (let i = 0; i < dirtyIds.length; i++) {
       const id = dirtyIds[i];
       this.dirtyChunks.delete(id);
       if (!this.chunks.has(id)) continue;

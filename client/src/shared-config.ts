@@ -13,6 +13,7 @@ export const PLAYER = config.player;
 export const WEAPONS_CONFIG = config.weapons;
 export const VEHICLE_WEAPONS_CONFIG = config.vehicleWeapons;
 export const HELICOPTER = config.helicopter;
+export const FIGHTER_JET = config.fighterJet;
 export const GRENADE = config.grenade;
 export const COMBAT = config.combat;
 export const WEATHER = config.weather;

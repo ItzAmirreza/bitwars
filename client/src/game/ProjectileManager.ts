@@ -2,9 +2,12 @@ import * as THREE from 'three';
 import { VoxelWorld } from './VoxelWorld';
 import { WeaponSystem, WEAPONS } from './Weapons';
 import { VFX } from './VFX';
+import type { AudioSystem } from './AudioSystem';
 
 const MAX_PROJECTILES = 64;
 const MAX_LIGHTS = 4;
+const FLYBY_TRIGGER_DIST = 25;    // Start whiz when projectile enters this radius
+const FLYBY_MIN_SPEED = 20;       // Min speed to trigger flyby sound
 
 export interface ProjectileImpact {
   weaponIndex: number;
@@ -47,6 +50,9 @@ interface ActiveProjectile {
   isVehicle: boolean;
   vehicleWeaponIndex: number;
   sourceVehicleId: number;
+  // Flyby audio
+  flybyPlayed: boolean;
+  prevDistToListener: number;
 }
 
 // Shared geometry/material for all projectile meshes
@@ -58,6 +64,8 @@ export class ProjectileManager {
   private world: VoxelWorld;
   private weapons: WeaponSystem;
   private vfx: VFX;
+  private audio: AudioSystem;
+  private camera: THREE.Camera;
   private otherPlayers: Map<string, THREE.Group>;
   private onLocalImpact: (impact: ProjectileImpact) => void;
   private activeLightCount = 0;
@@ -67,6 +75,8 @@ export class ProjectileManager {
     world: VoxelWorld,
     weapons: WeaponSystem,
     vfx: VFX,
+    audio: AudioSystem,
+    camera: THREE.Camera,
     otherPlayers: Map<string, THREE.Group>,
     onLocalImpact: (impact: ProjectileImpact) => void,
   ) {
@@ -74,6 +84,8 @@ export class ProjectileManager {
     this.world = world;
     this.weapons = weapons;
     this.vfx = vfx;
+    this.audio = audio;
+    this.camera = camera;
     this.otherPlayers = otherPlayers;
     this.onLocalImpact = onLocalImpact;
   }
@@ -194,6 +206,8 @@ export class ProjectileManager {
       isVehicle: !!vehicleOpts,
       vehicleWeaponIndex: vehicleOpts?.vehicleWeaponIndex ?? 0,
       sourceVehicleId: vehicleOpts?.sourceVehicleId ?? 0,
+      flybyPlayed: isLocal, // Local projectiles never play flyby on yourself
+      prevDistToListener: Infinity,
     };
 
     this.projectiles.push(proj);
@@ -314,6 +328,28 @@ export class ProjectileManager {
           p.trailTimer = 0;
           this.vfx.emitProjectileTrail(p.pos.x, p.pos.y, p.pos.z, p.trailColor);
         }
+      }
+
+      // Flyby / whiz sound: triggers once when a non-local projectile
+      // passes near the listener, giving a clear directional audio cue.
+      if (!p.flybyPlayed) {
+        const dx = p.pos.x - this.camera.position.x;
+        const dy = p.pos.y - this.camera.position.y;
+        const dz = p.pos.z - this.camera.position.z;
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const projSpeed = p.vel.length();
+
+        if (dist < FLYBY_TRIGGER_DIST && projSpeed > FLYBY_MIN_SPEED) {
+          // Play on closest approach (distance started increasing) or on entry
+          if (dist > p.prevDistToListener) {
+            // Just passed closest point — play the whiz at closest position
+            p.flybyPlayed = true;
+            this.audio.playProjectileFlyby(projSpeed, {
+              position: { x: p.pos.x, y: p.pos.y, z: p.pos.z },
+            });
+          }
+        }
+        p.prevDistToListener = dist;
       }
     }
   }

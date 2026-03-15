@@ -164,6 +164,84 @@ pub fn heli_hitbox_half_z() -> f32 {
     shared_config::config().helicopter.hitbox.half_z
 }
 
+// ── Fighter Jet ──
+// Sourced from shared/game-constants.json → fighterJet + vehicleTypes
+
+pub fn vehicle_type_fighter_jet() -> u8 {
+    shared_config::config().vehicle_types.fighter_jet
+}
+
+/// Not in shared JSON — server-only spawn config.
+pub const SANDBOX_JET_COUNT: usize = 1;
+/// Not in shared JSON — server-only spawn config.
+pub const JET_SPAWN_CLEARANCE_RADIUS: i32 = 6;
+/// Not in shared JSON — server-only spawn config.
+pub const JET_SPAWN_CLEARANCE_HEIGHT: i32 = 4;
+
+pub fn jet_scale() -> f32 {
+    shared_config::config().fighter_jet.scale
+}
+pub fn jet_mount_range() -> f32 {
+    shared_config::config().fighter_jet.mount_range
+}
+pub fn jet_min_altitude() -> f32 {
+    shared_config::config().fighter_jet.min_altitude
+}
+pub fn jet_max_altitude() -> f32 {
+    shared_config::config().fighter_jet.max_altitude
+}
+pub fn jet_min_speed() -> f32 {
+    shared_config::config().fighter_jet.min_speed
+}
+pub fn jet_max_speed() -> f32 {
+    shared_config::config().fighter_jet.max_speed
+}
+pub fn jet_acceleration() -> f32 {
+    shared_config::config().fighter_jet.acceleration
+}
+pub fn jet_brake_deceleration() -> f32 {
+    shared_config::config().fighter_jet.brake_deceleration
+}
+pub fn jet_idle_deceleration() -> f32 {
+    shared_config::config().fighter_jet.idle_deceleration
+}
+pub fn jet_max_yaw_rate() -> f32 {
+    shared_config::config().fighter_jet.max_yaw_rate
+}
+pub fn jet_max_pitch_rate() -> f32 {
+    shared_config::config().fighter_jet.max_pitch_rate
+}
+pub fn jet_max_roll_rate() -> f32 {
+    shared_config::config().fighter_jet.max_roll_rate
+}
+pub fn jet_lift_factor() -> f32 {
+    shared_config::config().fighter_jet.lift_factor
+}
+pub fn jet_gravity() -> f32 {
+    shared_config::config().fighter_jet.gravity
+}
+pub fn jet_stall_speed() -> f32 {
+    shared_config::config().fighter_jet.stall_speed
+}
+pub fn jet_pilot_seat_height() -> f32 {
+    shared_config::config().fighter_jet.pilot_seat_height
+}
+pub fn jet_health_max() -> i32 {
+    shared_config::config().fighter_jet.health_max
+}
+pub fn jet_hitbox_center_y() -> f32 {
+    shared_config::config().fighter_jet.hitbox.center_y
+}
+pub fn jet_hitbox_half_x() -> f32 {
+    shared_config::config().fighter_jet.hitbox.half_x
+}
+pub fn jet_hitbox_half_y() -> f32 {
+    shared_config::config().fighter_jet.hitbox.half_y
+}
+pub fn jet_hitbox_half_z() -> f32 {
+    shared_config::config().fighter_jet.hitbox.half_z
+}
+
 // ── Combat Validation ──
 // Sourced from shared/game-constants.json → combat + player.godModeHealth
 

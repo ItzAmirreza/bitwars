@@ -93,3 +93,96 @@ pub fn spawn_sandbox_helicopters(ctx: &ReducerContext) {
 
     log::info!("Spawned {} sandbox helicopters", spawned);
 }
+
+/// Spawn a single fighter jet entity + vehicle row.
+pub fn spawn_fighter_jet(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
+    let entity = ctx.db.entity().insert(Entity {
+        id: 0,
+        kind: entity_kind_vehicle(),
+        subtype: vehicle_type_fighter_jet(),
+        pos,
+        vel: ZERO_VEL,
+        rot: Rotation { yaw, pitch: 0.0 },
+        scale: jet_scale(),
+        active: true,
+        created_at: ctx.timestamp,
+        updated_at: ctx.timestamp,
+    });
+
+    let minigun = weapons::get_vehicle_weapon(0);
+    let rockets = weapons::get_vehicle_weapon(1);
+
+    ctx.db.vehicle().insert(Vehicle {
+        entity_id: entity.id,
+        vehicle_type: vehicle_type_fighter_jet(),
+        pilot_identity: None,
+        seat_count: 1,
+        input_forward: 0.0,
+        input_strafe: 0.0,
+        input_lift: 0.0,
+        input_yaw: 0.0,
+        boosting: false,
+        rotor_spin: 0.0,
+        health: jet_health_max(),
+        weapon_type: 0,
+        weapon_ammo_primary: minigun.max_ammo,
+        weapon_ammo_secondary: rockets.max_ammo,
+        weapon_last_fire: ctx.timestamp,
+        created_at: ctx.timestamp,
+        last_input_at: ctx.timestamp,
+    });
+
+    entity.id
+}
+
+/// Spawn fighter jets at the START of each Airport biome runway.
+/// Uses `airport_runway_start` to get the exact hardcoded position that
+/// matches the runway laid down by `place_airport_layouts`.
+pub fn spawn_jets_at_airstrips(ctx: &ReducerContext, world_seed: u64) {
+    use crate::worldgen::biomes::{biome_height, get_biome, Biome};
+    use crate::worldgen::structures::airstrip::airport_runway_start;
+
+    let cell_size = 90i32;
+    let num_cells_x = (WORLD_SIZE_X as i32 / cell_size) + 1;
+    let num_cells_z = (WORLD_SIZE_Z as i32 / cell_size) + 1;
+    let mut spawned = 0usize;
+
+    'outer: for cx in 0..num_cells_x {
+        for cz in 0..num_cells_z {
+            let center_x = cx * cell_size + cell_size / 2;
+            let center_z = cz * cell_size + cell_size / 2;
+            if center_x < 0
+                || center_x >= WORLD_SIZE_X as i32
+                || center_z < 0
+                || center_z >= WORLD_SIZE_Z as i32
+            {
+                continue;
+            }
+
+            if spawned >= SANDBOX_JET_COUNT {
+                break 'outer;
+            }
+
+            let biome = get_biome(center_x, center_z, world_seed);
+            if biome != Biome::Airport {
+                continue;
+            }
+
+            let base_y = biome_height(biome, center_x, center_z, world_seed);
+            let (rx, ry, rz) = airport_runway_start(center_x, center_z, base_y);
+
+            spawn_fighter_jet(
+                ctx,
+                Vec3 {
+                    x: rx as f32 + 0.5,
+                    y: ry as f32 + 1.0, // slightly above runway surface
+                    z: rz as f32 + 0.5,
+                },
+                -std::f32::consts::FRAC_PI_2, // yaw=-PI/2 → forward is +X (down the runway)
+            );
+            spawned += 1;
+        }
+    }
+
+    log::info!("Spawned {} jets at airport runways", spawned);
+}

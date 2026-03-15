@@ -112,6 +112,7 @@ export interface BottomHudProps {
   vehicleReloading: boolean;
   vehicleAltitude: number;
   vehicleSpeed: number;
+  vehicleThrottle: number;
 }
 
 export function BottomHud({
@@ -132,6 +133,7 @@ export function BottomHud({
   vehicleReloading,
   vehicleAltitude,
   vehicleSpeed,
+  vehicleThrottle,
 }: BottomHudProps) {
   const healthColor = health > 50 ? 'var(--c-green)' : health > 25 ? 'var(--c-amber)' : 'var(--c-red)';
   const healthRawColor = health > 50 ? '#00ff41' : health > 25 ? '#ff9800' : '#ff0033';
@@ -432,6 +434,79 @@ export function BottomHud({
               </div>
             </div>
 
+            {/* ── JET THROTTLE + AIRSPEED BARS (fixed, flanking crosshair) ── */}
+            {mountedVehicleName === 'Fighter Jet' && (() => {
+              const thrFill = Math.max(0, Math.min(1, vehicleThrottle));
+              const spdFill = Math.max(0, Math.min(1, vehicleSpeed / 80));
+              const barHeight = 120;
+              const barWidth = 8;
+              const barStyle: React.CSSProperties = {
+                position: 'fixed',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '4px',
+                pointerEvents: 'none',
+                zIndex: 10,
+              };
+              return (<>
+                {/* Left: Throttle */}
+                <div style={{ ...barStyle, left: 'calc(50% - 140px)' }}>
+                  <span style={{
+                    fontFamily: 'var(--font-mono)', fontSize: '8px', letterSpacing: '0.12em',
+                    color: '#ff9800', opacity: 0.8,
+                  }}>THR</span>
+                  <div style={{
+                    width: barWidth, height: barHeight,
+                    background: 'rgba(6,8,16,0.7)',
+                    border: '1px solid rgba(255,152,0,0.3)',
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      position: 'absolute', bottom: 0, left: 0, right: 0,
+                      height: `${thrFill * 100}%`,
+                      background: 'linear-gradient(0deg, #ff9800, #ffb74d)',
+                      boxShadow: '0 0 6px rgba(255,152,0,0.5)',
+                      transition: 'height 0.1s ease',
+                    }} />
+                  </div>
+                  <span style={{
+                    fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 'bold',
+                    color: '#ff9800', lineHeight: '1',
+                  }}>{Math.round(thrFill * 100)}%</span>
+                </div>
+                {/* Right: Airspeed */}
+                <div style={{ ...barStyle, left: 'auto', right: 'calc(50% - 140px)' }}>
+                  <span style={{
+                    fontFamily: 'var(--font-mono)', fontSize: '8px', letterSpacing: '0.12em',
+                    color: '#66e0ff', opacity: 0.8,
+                  }}>SPD</span>
+                  <div style={{
+                    width: barWidth, height: barHeight,
+                    background: 'rgba(6,8,16,0.7)',
+                    border: '1px solid rgba(102,224,255,0.3)',
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      position: 'absolute', bottom: 0, left: 0, right: 0,
+                      height: `${spdFill * 100}%`,
+                      background: 'linear-gradient(0deg, #66e0ff, #99ecff)',
+                      boxShadow: '0 0 6px rgba(102,224,255,0.5)',
+                      transition: 'height 0.1s ease',
+                    }} />
+                  </div>
+                  <span style={{
+                    fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 'bold',
+                    color: '#66e0ff', lineHeight: '1',
+                  }}>{Math.round(vehicleSpeed)}</span>
+                </div>
+              </>);
+            })()}
+
             {mountedVehicleName && (() => {
               const vw = VEHICLE_WEAPON_DATA[vehicleWeapon] ?? VEHICLE_WEAPON_DATA[0];
               const vHealthPct = vehicleMaxHealth > 0 ? (vehicleHealth / vehicleMaxHealth) * 100 : 0;
@@ -452,11 +527,17 @@ export function BottomHud({
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {/* Helicopter icon */}
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                          <path d="M2 5h12M8 5v4M4 9h8l1 2H3l1-2z" stroke={vHealthColor} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                          <circle cx="8" cy="4" r="1.5" stroke={vHealthColor} strokeWidth="1"/>
-                        </svg>
+                        {/* Vehicle icon (type-specific) */}
+                        {mountedVehicleName === 'Fighter Jet' ? (
+                          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M2 8h12M8 3l2 5-2 1-2-1 2-5zM5 8l-2 3h2l1-1M11 8l2 3h-2l-1-1z" stroke={vHealthColor} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        ) : (
+                          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                            <path d="M2 5h12M8 5v4M4 9h8l1 2H3l1-2z" stroke={vHealthColor} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                            <circle cx="8" cy="4" r="1.5" stroke={vHealthColor} strokeWidth="1"/>
+                          </svg>
+                        )}
                         <span style={{
                           fontFamily: 'var(--font-mono)', fontSize: '9px',
                           color: 'var(--c-muted)', letterSpacing: '0.14em',

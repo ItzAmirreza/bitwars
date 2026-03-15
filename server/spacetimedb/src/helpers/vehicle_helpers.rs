@@ -28,6 +28,50 @@ pub fn helicopter_hitbox_bounds(entity: &Entity) -> (Vec3, Vec3) {
     )
 }
 
+pub fn fighter_jet_hitbox_bounds(entity: &Entity) -> (Vec3, Vec3) {
+    let center = Vec3 {
+        x: entity.pos.x,
+        y: entity.pos.y + jet_hitbox_center_y(),
+        z: entity.pos.z,
+    };
+    (
+        Vec3 {
+            x: center.x - jet_hitbox_half_x(),
+            y: center.y - jet_hitbox_half_y(),
+            z: center.z - jet_hitbox_half_z(),
+        },
+        Vec3 {
+            x: center.x + jet_hitbox_half_x(),
+            y: center.y + jet_hitbox_half_y(),
+            z: center.z + jet_hitbox_half_z(),
+        },
+    )
+}
+
+pub fn vehicle_hitbox_bounds(entity: &Entity) -> (Vec3, Vec3) {
+    if entity.subtype == vehicle_type_fighter_jet() {
+        fighter_jet_hitbox_bounds(entity)
+    } else {
+        helicopter_hitbox_bounds(entity)
+    }
+}
+
+pub fn vehicle_hitbox_center_y(entity: &Entity) -> f32 {
+    if entity.subtype == vehicle_type_fighter_jet() {
+        jet_hitbox_center_y()
+    } else {
+        heli_hitbox_center_y()
+    }
+}
+
+pub fn vehicle_hitbox_max_half(entity: &Entity) -> f32 {
+    if entity.subtype == vehicle_type_fighter_jet() {
+        jet_hitbox_half_x().max(jet_hitbox_half_z())
+    } else {
+        heli_hitbox_half_x().max(heli_hitbox_half_z())
+    }
+}
+
 pub fn helicopter_ground_rest_height(ctx: &ReducerContext, x: f32, z: f32) -> f32 {
     use crate::worldgen::{AIR, WORLD_SIZE_X, WORLD_SIZE_Y, WORLD_SIZE_Z};
 
@@ -110,9 +154,10 @@ pub fn apply_vehicle_damage(
         return;
     }
 
-    let heli_center = Vec3 {
+    let center_y = vehicle_hitbox_center_y(&entity);
+    let vehicle_center = Vec3 {
         x: entity.pos.x,
-        y: entity.pos.y + heli_hitbox_center_y(),
+        y: entity.pos.y + center_y,
         z: entity.pos.z,
     };
 
@@ -125,13 +170,13 @@ pub fn apply_vehicle_damage(
         ctx.db.explosion_event().insert(ExplosionEvent {
             id: 0,
             origin: attacker,
-            pos: heli_center.clone(),
+            pos: vehicle_center.clone(),
             radius: 1.4,
             weapon: hit_weapon,
             destroyed_blocks: Vec::new(),
             created_at: ctx.timestamp,
         });
-        crate::grenades::push_grenades_from_explosion(ctx, &heli_center, 1.4, 0);
+        crate::grenades::push_grenades_from_explosion(ctx, &vehicle_center, 1.4, 0);
         return;
     }
 

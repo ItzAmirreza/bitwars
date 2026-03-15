@@ -7,9 +7,9 @@ const VIEW_DISTANCE = 24; // chunks (384 blocks)
 const UNLOAD_BUFFER = 4; // extra chunks before unloading
 const CHUNKS_PER_REQUEST = 8; // smooth request cadence to avoid frame spikes
 export const CHUNK_STREAM_INTERVAL_FRAMES = 2;
-export const CHUNK_REBUILD_BUDGET_MOVING = 2;
-export const CHUNK_REBUILD_BUDGET_IDLE = 6;
-export const CHUNK_REBUILD_BUDGET_BOOTSTRAP = 14;
+export const CHUNK_REBUILD_BUDGET_MOVING = 8;
+export const CHUNK_REBUILD_BUDGET_IDLE = 16;
+export const CHUNK_REBUILD_BUDGET_BOOTSTRAP = 24;
 const CHUNK_REQUEST_TIMEOUT_MS = 2000;
 const NUM_CHUNKS_Y = Math.ceil(WORLD_Y / CHUNK);
 const STARTUP_READY_RADIUS = 2;
@@ -83,12 +83,21 @@ export class ChunkStreamer {
 
   rehydrateSubscribedChunks(maxNewChunks = Number.POSITIVE_INFINITY): number {
     if (!this.ctx.conn || maxNewChunks <= 0) return 0;
+
+    const [anchorCx, anchorCz] = this.getLoadAnchorChunk();
+    const viewDistSq = (VIEW_DISTANCE + UNLOAD_BUFFER) * (VIEW_DISTANCE + UNLOAD_BUFFER);
+
     let loaded = 0;
     for (const chunk of this.ctx.conn.db.world_chunk.iter() as Iterable<any>) {
       const cx = chunk.cx as number;
       const cy = chunk.cy as number;
       const cz = chunk.cz as number;
       if (this.ctx.world.isChunkLoaded(cx, cy, cz)) continue;
+
+      // Only load chunks within view distance
+      const dx = cx - anchorCx;
+      const dz = cz - anchorCz;
+      if (dx * dx + dz * dz > viewDistSq) continue;
 
       const data = chunk.data instanceof Uint8Array ? chunk.data : new Uint8Array(chunk.data);
       const decoded = VoxelWorld.rleDecodeChunk(data);

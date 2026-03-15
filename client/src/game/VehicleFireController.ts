@@ -152,7 +152,7 @@ export class VehicleFireController {
       this.syncVehicleFireToServer(origin, dir, [], [], []);
 
       // Audio + VFX
-      ctx.audio.playRPGLaunch(ctx.localAudioSource(-0.1));
+      ctx.audio.playVehicleRocket(ctx.localAudioSource(-0.1));
       ctx.vfx.emitMuzzleFlashAt(origin, dir, 0xff4400);
       ctx.vfx.shake(0.6);
       return;
@@ -228,7 +228,7 @@ export class VehicleFireController {
     }
 
     // Audio: minigun burst
-    ctx.audio.playMachineGun(ctx.localAudioSource(-0.1));
+    ctx.audio.playVehicleMinigun(ctx.localAudioSource(-0.1));
     ctx.vfx.shake(0.15);
 
     // Sync to server
@@ -240,8 +240,8 @@ export class VehicleFireController {
       destroyed.map((b) => ({ x: b.x, y: b.y, z: b.z })),
     );
 
-    // Rebuild affected chunks
-    ctx.world.rebuildDirtyChunks(ctx.scene);
+    // Rebuild affected chunks (capped to avoid frame spikes from large backlogs)
+    ctx.world.rebuildDirtyChunks(ctx.scene, 32);
   }
 
   // ── SERVER SYNC ──

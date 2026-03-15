@@ -52,6 +52,18 @@ export class AudioSystem {
     WeaponAudio.playGrenadeLaunch(this.core, spatial);
   }
 
+  playVehicleMinigun(spatial?: SpatialSoundOptions): void {
+    WeaponAudio.playVehicleMinigun(this.core, spatial);
+  }
+
+  playVehicleRocket(spatial?: SpatialSoundOptions): void {
+    WeaponAudio.playVehicleRocket(this.core, spatial);
+  }
+
+  playProjectileFlyby(speed: number, spatial?: SpatialSoundOptions): void {
+    WeaponAudio.playProjectileFlyby(this.core, speed, spatial);
+  }
+
   playReload(spatial?: SpatialSoundOptions): void {
     WeaponAudio.playReload(this.core, spatial);
   }
@@ -170,6 +182,25 @@ export class AudioSystem {
     VehicleAudio.stopHelicopterSound(this.core, id, destroyed);
   }
 
+  // ── Vehicle (Fighter Jet) ──
+
+  startJetEngineSound(id: number): void {
+    VehicleAudio.startJetEngineSound(this.core, id);
+  }
+
+  updateJetEngineSound(
+    id: number,
+    position: Vec3Like,
+    speed: number,
+    isLocal: boolean,
+  ): void {
+    VehicleAudio.updateJetEngineSound(this.core, id, position, speed, isLocal);
+  }
+
+  stopJetEngineSound(id: number, destroyed?: boolean): void {
+    VehicleAudio.stopJetEngineSound(this.core, id, destroyed);
+  }
+
   // ── Ambient ──
 
   startMenuAmbience(): void {
@@ -188,6 +219,7 @@ export class AudioSystem {
 
   dispose(): void {
     VehicleAudio.disposeAllHelicopterSounds();
+    VehicleAudio.disposeAllJetSounds();
     this.core.dispose();
   }
 }

@@ -13,6 +13,7 @@ pub enum Biome {
     Urban,
     Mountains,
     Plains,
+    Airport,
 }
 
 // ── Biome Selection ──
@@ -41,12 +42,13 @@ pub fn get_biome(wx: i32, wz: i32, seed: u64) -> Biome {
             if dist < best_dist {
                 best_dist = dist;
                 let biome_hash = hash2d_seeded(ci * 97, cj * 89, seed.wrapping_add(300));
-                best_biome = match (biome_hash * 5.0) as u32 {
-                    0 => Biome::Desert,
-                    1 => Biome::Forest,
-                    2 => Biome::Urban,
-                    3 => Biome::Mountains,
-                    _ => Biome::Plains,
+                best_biome = match (biome_hash * 100.0) as u32 {
+                    0..=19 => Biome::Desert,
+                    20..=39 => Biome::Forest,
+                    40..=59 => Biome::Urban,
+                    60..=79 => Biome::Mountains,
+                    80..=93 => Biome::Plains,
+                    _ => Biome::Airport,
                 };
             }
         }
@@ -100,6 +102,10 @@ pub fn biome_height(biome: Biome, wx: i32, wz: i32, seed: u64) -> i32 {
             let base = 3.0 + fbm_seeded(nx * 3.4, nz * 3.4, 3, seed.wrapping_add(50)) * 3.8;
             base.max(3.0).min(6.0)
         }
+        Biome::Airport => {
+            let base: f64 = 4.0;
+            base.max(4.0).min(4.0)
+        }
     };
     h.floor() as i32
 }
@@ -117,6 +123,7 @@ pub fn biome_surface_block(biome: Biome) -> u8 {
         Biome::Urban => ASPHALT,
         Biome::Mountains => STONE,
         Biome::Plains => GRASS,
+        Biome::Airport => ASPHALT,
     }
 }
 
@@ -127,6 +134,7 @@ pub fn biome_subsurface_block(biome: Biome) -> u8 {
         Biome::Urban => CONCRETE,
         Biome::Mountains => DARK_CONCRETE,
         Biome::Plains => DIRT,
+        Biome::Airport => CONCRETE,
     }
 }
 
@@ -137,6 +145,7 @@ pub fn biome_deep_block(biome: Biome) -> u8 {
         Biome::Urban => DARK_CONCRETE,
         Biome::Mountains => STONE,
         Biome::Plains => DIRT,
+        Biome::Airport => DARK_CONCRETE,
     }
 }
 
@@ -147,6 +156,7 @@ pub fn biome_wall_block(biome: Biome) -> u8 {
         Biome::Urban => CONCRETE,
         Biome::Mountains => STONE,
         Biome::Plains => BRICK,
+        Biome::Airport => METAL,
     }
 }
 
@@ -157,6 +167,7 @@ pub fn biome_floor_block(biome: Biome) -> u8 {
         Biome::Urban => DARK_CONCRETE,
         Biome::Mountains => STONE,
         Biome::Plains => DIRT,
+        Biome::Airport => CONCRETE,
     }
 }
 

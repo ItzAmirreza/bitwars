@@ -19,9 +19,9 @@ pub use structural::{check_structural_integrity_sparse, StructuralCollapsePlan};
 
 // ── World Constants ──
 
-pub const WORLD_SIZE_X: usize = 250;
+pub const WORLD_SIZE_X: usize = 750;
 pub const WORLD_SIZE_Y: usize = 48;
-pub const WORLD_SIZE_Z: usize = 250;
+pub const WORLD_SIZE_Z: usize = 750;
 pub const CHUNK_SIZE: usize = 16;
 pub const NUM_CHUNKS_X: usize = (WORLD_SIZE_X + CHUNK_SIZE - 1) / CHUNK_SIZE;
 pub const NUM_CHUNKS_Y: usize = (WORLD_SIZE_Y + CHUNK_SIZE - 1) / CHUNK_SIZE;
@@ -135,6 +135,32 @@ pub fn set_chunk_block(
         if cb[idx] == AIR || bt != AIR {
             cb[idx] = bt;
         }
+    }
+}
+
+/// Unconditionally sets a block (can set AIR over non-air, used for terrain clearing).
+pub fn force_chunk_block(
+    cb: &mut [u8; 4096],
+    cx: i32,
+    cy: i32,
+    cz: i32,
+    wx: i32,
+    wy: i32,
+    wz: i32,
+    bt: u8,
+) {
+    let lx = wx - cx;
+    let ly = wy - cy;
+    let lz = wz - cz;
+    if lx >= 0
+        && lx < CHUNK_SIZE as i32
+        && ly >= 0
+        && ly < CHUNK_SIZE as i32
+        && lz >= 0
+        && lz < CHUNK_SIZE as i32
+    {
+        let idx = lx as usize + ly as usize * CHUNK_SIZE + lz as usize * CHUNK_SIZE * CHUNK_SIZE;
+        cb[idx] = bt;
     }
 }
 
@@ -252,8 +278,11 @@ pub fn generate_chunk(cx: usize, cy: usize, cz: usize, seed: u64) -> Vec<u8> {
     // Phase 3a: Urban districts
     structures::place_urban_districts(&mut chunk_blocks, chunk_wx, chunk_wy, chunk_wz, seed);
 
-    // Phase 3b: Dense structures across all biomes
+    // Phase 3b: Dense structures across all biomes (Airport excluded — has own layout)
     structures::place_biome_structures(&mut chunk_blocks, chunk_wx, chunk_wy, chunk_wz, seed);
+
+    // Phase 3c: Hardcoded airport layouts for Airport biome cells
+    structures::place_airport_layouts(&mut chunk_blocks, chunk_wx, chunk_wy, chunk_wz, seed);
 
     rle_encode(&chunk_blocks)
 }

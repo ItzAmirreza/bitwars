@@ -1,5 +1,7 @@
 /**
- * VehicleAudio — helicopter persistent spatial rotor/engine/wind loop.
+ * VehicleAudio — persistent spatial engine loops for vehicles.
+ * Helicopter: rotor chop + engine drone + tail rotor + wind
+ * Fighter Jet: turbine whine + broadband roar + afterburner scaling
  */
 
 import type { AudioCore, Vec3Like, HeliSoundNodes } from './AudioCore';
@@ -24,7 +26,14 @@ function getOrCreateNoiseBuffer(core: AudioCore): AudioBuffer {
 // ── Public API ──
 
 export function startHelicopterSound(core: AudioCore, id: number): void {
-  if (heliSounds.has(id)) return; // already running
+  const existing = heliSounds.get(id);
+  if (existing) {
+    if (!existing.stopping) return; // genuinely running — nothing to do
+    // Old sound is fading out (e.g. after map reset); kill it immediately
+    // so we can start a fresh one.
+    if (existing.stopTimer) clearTimeout(existing.stopTimer);
+    cleanupHeliSound(id);
+  }
   const ctx = core.ensure();
   const t = ctx.currentTime;
   const noiseBuf = getOrCreateNoiseBuffer(core);
@@ -264,4 +273,204 @@ export function disposeAllHelicopterSounds(): void {
   }
   heliSounds.clear();
   helicopterNoiseBuffer = null;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  FIGHTER JET ENGINE SOUND
+// ══════════════════════════════════════════════════════════════
+
+interface JetSoundNodes {
+  turbineOsc: OscillatorNode;
+  turbineGain: GainNode;
+  roarSrc: AudioBufferSourceNode;
+  roarBp: BiquadFilterNode;
+  roarGain: GainNode;
+  mixGain: GainNode;
+  outputFilter: BiquadFilterNode;
+  panner: PannerNode;
+  allSources: (AudioBufferSourceNode | OscillatorNode)[];
+  wasLocal: boolean;
+  stopping: boolean;
+  stopTimer: ReturnType<typeof setTimeout> | null;
+}
+
+const jetSounds = new Map<number, JetSoundNodes>();
+let jetNoiseBuffer: AudioBuffer | null = null;
+
+function getOrCreateJetNoiseBuffer(core: AudioCore): AudioBuffer {
+  if (jetNoiseBuffer) return jetNoiseBuffer;
+  const ctx = core.ensure();
+  const sr = ctx.sampleRate;
+  const len = sr * 2;
+  const buf = ctx.createBuffer(1, len, sr);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  jetNoiseBuffer = buf;
+  return buf;
+}
+
+export function startJetEngineSound(core: AudioCore, id: number): void {
+  const existing = jetSounds.get(id);
+  if (existing) {
+    if (!existing.stopping) return;
+    if (existing.stopTimer) clearTimeout(existing.stopTimer);
+    cleanupJetSound(id);
+  }
+  const ctx = core.ensure();
+  const t = ctx.currentTime;
+  const noiseBuf = getOrCreateJetNoiseBuffer(core);
+  const allSources: (AudioBufferSourceNode | OscillatorNode)[] = [];
+
+  // ── Layer 1: Turbine Whine (triangle wave, ~200Hz) ──
+  const turbineOsc = ctx.createOscillator();
+  turbineOsc.type = 'triangle';
+  turbineOsc.frequency.value = 200;
+  allSources.push(turbineOsc);
+
+  const turbineGain = ctx.createGain();
+  turbineGain.gain.value = 0.06;
+
+  turbineOsc.connect(turbineGain);
+
+  // ── Layer 2: Broadband Jet Roar (filtered noise) ──
+  const roarSrc = ctx.createBufferSource();
+  roarSrc.buffer = noiseBuf;
+  roarSrc.loop = true;
+  allSources.push(roarSrc);
+
+  const roarBp = ctx.createBiquadFilter();
+  roarBp.type = 'highpass';
+  roarBp.frequency.value = 400;
+  roarBp.Q.value = 0.5;
+
+  const roarGain = ctx.createGain();
+  roarGain.gain.value = 0.04;
+
+  roarSrc.connect(roarBp).connect(roarGain);
+
+  // ── Output chain ──
+  const mixGain = ctx.createGain();
+  mixGain.gain.setValueAtTime(0, t);
+  mixGain.gain.linearRampToValueAtTime(0.12, t + 1.2);
+
+  turbineGain.connect(mixGain);
+  roarGain.connect(mixGain);
+
+  const outputFilter = ctx.createBiquadFilter();
+  outputFilter.type = 'lowpass';
+  outputFilter.frequency.value = 5000;
+
+  const panner = ctx.createPanner();
+  panner.panningModel = 'HRTF';
+  panner.distanceModel = 'inverse';
+  panner.refDistance = 20;
+  panner.maxDistance = 120;
+  panner.rolloffFactor = 1.6;
+  panner.coneInnerAngle = 360;
+  panner.coneOuterAngle = 360;
+
+  mixGain.connect(outputFilter).connect(panner).connect(core.master!);
+
+  turbineOsc.start(t);
+  roarSrc.start(t);
+
+  jetSounds.set(id, {
+    turbineOsc,
+    turbineGain,
+    roarSrc,
+    roarBp,
+    roarGain,
+    mixGain,
+    outputFilter,
+    panner,
+    allSources,
+    wasLocal: false,
+    stopping: false,
+    stopTimer: null,
+  });
+}
+
+export function updateJetEngineSound(
+  core: AudioCore,
+  id: number,
+  position: Vec3Like,
+  speed: number,
+  isLocal: boolean,
+): void {
+  const nodes = jetSounds.get(id);
+  if (!nodes || nodes.stopping || !core.ctx) return;
+  const t = core.ctx.currentTime;
+
+  // Speed factor 0–1 (maxSpeed ~65)
+  const speedFactor = Math.min(1, speed / 65);
+
+  // ── Turbine pitch: higher with speed ──
+  const turbineFreq = 180 + speedFactor * 220;
+  nodes.turbineOsc.frequency.setTargetAtTime(turbineFreq, t, 0.12);
+  const turbineVol = 0.04 + speedFactor * 0.06;
+  nodes.turbineGain.gain.setTargetAtTime(turbineVol, t, 0.15);
+
+  // ── Roar volume & filter: louder and brighter with speed ──
+  const roarVol = 0.02 + speedFactor * 0.08;
+  nodes.roarGain.gain.setTargetAtTime(roarVol, t, 0.2);
+  const roarCutoff = 350 + speedFactor * 600;
+  nodes.roarBp.frequency.setTargetAtTime(roarCutoff, t, 0.15);
+
+  // ── Local vs remote tonal adjustment ──
+  if (isLocal !== nodes.wasLocal) {
+    nodes.wasLocal = isLocal;
+    const cutoff = isLocal ? 2200 : 5000;
+    const vol = isLocal ? 0.09 : 0.12;
+    nodes.outputFilter.frequency.setTargetAtTime(cutoff, t, 0.3);
+    nodes.mixGain.gain.setTargetAtTime(vol, t, 0.3);
+  }
+
+  // ── Panner position ──
+  core.setPannerPosition(nodes.panner, position, t);
+}
+
+export function stopJetEngineSound(core: AudioCore, id: number, destroyed = false): void {
+  const nodes = jetSounds.get(id);
+  if (!nodes || nodes.stopping) return;
+  nodes.stopping = true;
+  if (!core.ctx) {
+    jetSounds.delete(id);
+    return;
+  }
+  const t = core.ctx.currentTime;
+
+  if (destroyed) {
+    const fadeTime = 0.5;
+    nodes.turbineOsc.frequency.setTargetAtTime(100, t, 0.1);
+    nodes.mixGain.gain.setTargetAtTime(0, t, 0.12);
+    nodes.stopTimer = setTimeout(() => cleanupJetSound(id), fadeTime * 1000);
+  } else {
+    const fadeTime = 0.7;
+    nodes.mixGain.gain.setTargetAtTime(0, t, 0.18);
+    nodes.stopTimer = setTimeout(() => cleanupJetSound(id), fadeTime * 1000);
+  }
+}
+
+function cleanupJetSound(id: number): void {
+  const nodes = jetSounds.get(id);
+  if (!nodes) return;
+  for (const src of nodes.allSources) {
+    try { src.stop(); } catch { /* already stopped */ }
+    src.disconnect();
+  }
+  nodes.mixGain.disconnect();
+  nodes.outputFilter.disconnect();
+  nodes.panner.disconnect();
+  jetSounds.delete(id);
+}
+
+/** Called by AudioSystem.dispose() to clean up all jet sounds. */
+export function disposeAllJetSounds(): void {
+  for (const id of Array.from(jetSounds.keys())) {
+    const nodes = jetSounds.get(id);
+    if (nodes?.stopTimer) clearTimeout(nodes.stopTimer);
+    cleanupJetSound(id);
+  }
+  jetSounds.clear();
+  jetNoiseBuffer = null;
 }
