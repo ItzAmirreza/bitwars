@@ -403,11 +403,31 @@ export default class VehicleManager {
 
     // Local pilot: store latest server snapshot for smooth chase
     if (id === this.engine.mountedVehicleId) {
-      this.localLastServerPos.set(Number(entity.pos.x), Number(entity.pos.y), Number(entity.pos.z));
-      this.localLastServerVel.set(Number(vel.x), Number(vel.y), Number(vel.z));
+      const newPos = { x: Number(entity.pos.x), y: Number(entity.pos.y), z: Number(entity.pos.z) };
+      const newVel = { x: Number(vel.x), y: Number(vel.y), z: Number(vel.z) };
+
+      // Net diagnostics: vehicle server update
+      (this.engine as any).netDiag?.recordVehicleServerUpdate?.(
+        newPos, newVel,
+        { x: this.localSmoothedPos.x, y: this.localSmoothedPos.y, z: this.localSmoothedPos.z },
+      );
+
+      this.localLastServerPos.set(newPos.x, newPos.y, newPos.z);
+      this.localLastServerVel.set(newVel.x, newVel.y, newVel.z);
       this.localLastServerYaw = Number(rot.yaw ?? 0);
       this.localLastServerPitch = Number(rot.pitch ?? 0);
       this.localLastServerTime = performance.now();
+
+      // Initialize smoothed position directly from the first server snapshot.
+      // updatePerFrame also does this, but entity callbacks can fire in bursts
+      // between animation frames, leaving localSmoothedPos at (0,0,0) until
+      // the next frame — which causes the camera to freeze or jump to origin.
+      if (!this.localSmoothedInitialized) {
+        this.localSmoothedPos.set(newPos.x, newPos.y, newPos.z);
+        this.localSmoothedYaw = this.localLastServerYaw;
+        this.localSmoothedPitch = this.localLastServerPitch;
+        this.localSmoothedInitialized = true;
+      }
     }
 
     // Remote vehicles use InterpolationBuffer
@@ -488,6 +508,7 @@ export default class VehicleManager {
       yaw,
       boosting: false,
     });
+    (this.engine as any).netDiag?.recordVehicleInputSent?.();
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -551,8 +572,36 @@ export default class VehicleManager {
   }
 
   syncMountedCameraToVehicle(delta: number): void {
-    const pose = this.getMountedVehiclePose();
-    if (!pose) return;
+    let pose = this.getMountedVehiclePose();
+
+    // Diagnostics: log the pipeline state when F3 is open
+    const diag = (this.engine as any).netDiag;
+    if (diag?.visible) {
+      const mesh = this.vehicles.get(this.engine.mountedVehicleId);
+      const entityRow = this.findEntityRow(this.engine.mountedVehicleId);
+      diag.recordMountedCameraState({
+        mountedId: this.engine.mountedVehicleId,
+        hasMesh: !!mesh,
+        hasEntityRow: !!entityRow,
+        poseResult: pose ? (mesh ? 'mesh' : 'entity') : 'null',
+        meshPos: mesh ? { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z } : null,
+        cameraPos: { x: this.engine.camera.position.x, y: this.engine.camera.position.y, z: this.engine.camera.position.z },
+        vehicleCount: this.vehicles.size,
+        localServerTime: this.localLastServerTime,
+      });
+    }
+
+    // Fallback: if normal pose lookup fails, read directly from entity table
+    // or from the raw server player position.  This prevents the camera from
+    // freezing when the vehicle mesh pipeline has a gap.
+    if (!pose) {
+      const raw = this.getMountedVehiclePoseRaw();
+      if (raw) {
+        pose = raw;
+      } else {
+        return;
+      }
+    }
 
     const vt = this.getMountedVehicleType();
     const camConfig = vt?.getCameraConfig() ?? { distance: 14, height: 5.2, pitchMin: -0.62, pitchMax: 0.42 };
@@ -819,6 +868,16 @@ export default class VehicleManager {
 
           mesh.position.copy(this.localSmoothedPos);
           mesh.rotation.set(this.localSmoothedPitch, this.localSmoothedYaw, 0);
+
+          // Net diagnostics: prediction error + staleness
+          const predErrX = this.localSmoothedPos.x - this.localLastServerPos.x;
+          const predErrY = this.localSmoothedPos.y - this.localLastServerPos.y;
+          const predErrZ = this.localSmoothedPos.z - this.localLastServerPos.z;
+          const diag = (this.engine as any).netDiag;
+          diag?.recordVehiclePredError?.(
+            Math.sqrt(predErrX * predErrX + predErrY * predErrY + predErrZ * predErrZ),
+          );
+          diag?.recordVehicleStaleness?.(now - this.localLastServerTime);
         } else {
           const entity = this.findEntityRow(id);
           if (entity) {

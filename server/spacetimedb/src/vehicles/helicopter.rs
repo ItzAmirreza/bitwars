@@ -187,16 +187,30 @@ pub fn tick_helicopter(
     // ── Mounted pilot position sync ──
     if let Some(pilot_id) = vehicle.pilot_identity {
         if let Some(pilot) = ctx.db.player().identity().find(pilot_id) {
-            mounted_updates.push(Player {
-                pos: Vec3 {
-                    x: entity.pos.x,
-                    y: entity.pos.y + heli_pilot_seat_height(),
-                    z: entity.pos.z,
-                },
-                vel: entity.vel.clone(),
-                spawn_protected: false,
-                ..pilot
-            });
+            // Keep pilot linkage consistent: only force mounted sync when the
+            // player row confirms this exact mounted vehicle.
+            if pilot.mounted_vehicle_id == entity_id {
+                mounted_updates.push(Player {
+                    pos: Vec3 {
+                        x: entity.pos.x,
+                        y: entity.pos.y + heli_pilot_seat_height(),
+                        z: entity.pos.z,
+                    },
+                    vel: entity.vel.clone(),
+                    spawn_protected: false,
+                    ..pilot
+                });
+            } else {
+                ctx.db.vehicle().entity_id().update(Vehicle {
+                    pilot_identity: None,
+                    input_forward: 0.0,
+                    input_strafe: 0.0,
+                    input_lift: 0.0,
+                    input_yaw: 0.0,
+                    boosting: false,
+                    ..vehicle.clone()
+                });
+            }
         }
     }
 }

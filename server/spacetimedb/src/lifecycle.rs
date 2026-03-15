@@ -125,7 +125,44 @@ pub fn init(ctx: &ReducerContext) {
 #[reducer(client_connected)]
 pub fn client_connected(ctx: &ReducerContext) {
     let sender = ctx.sender();
+    let Some(conn_id) = ctx.connection_id() else {
+        // Defensive: host-invoked contexts may not have a connection id.
+        return;
+    };
+
+    if let Some(existing) = ctx.db.player_session().identity().find(sender) {
+        ctx.db.player_session().identity().update(PlayerSession {
+            connection_id: conn_id,
+            connected_at: ctx.timestamp,
+            ..existing
+        });
+    } else {
+        ctx.db.player_session().insert(PlayerSession {
+            identity: sender,
+            connection_id: conn_id,
+            connected_at: ctx.timestamp,
+        });
+    }
+
     if let Some(player) = ctx.db.player().identity().find(sender) {
+        // Defensive cleanup for stale mount state (e.g. abrupt disconnect where
+        // pilot linkage survived). Reconnecting players always respawn on foot.
+        if player.mounted_vehicle_id != 0 {
+            if let Some(vehicle) = ctx.db.vehicle().entity_id().find(&player.mounted_vehicle_id) {
+                if vehicle.pilot_identity == Some(sender) {
+                    ctx.db.vehicle().entity_id().update(Vehicle {
+                        pilot_identity: None,
+                        input_forward: 0.0,
+                        input_strafe: 0.0,
+                        input_lift: 0.0,
+                        input_yaw: 0.0,
+                        boosting: false,
+                        ..vehicle
+                    });
+                }
+            }
+        }
+
         let entity_id = ensure_player_entity(ctx, &player);
         let loadout = normalize_or_create_player_loadout(ctx, &player.username);
         let current_weapon = if weapon_in_loadout(&loadout, player.current_weapon) {
@@ -152,19 +189,6 @@ pub fn client_connected(ctx: &ReducerContext) {
         }
         init_weapon_state(ctx, sender);
         init_movement_state(ctx, sender, &SPAWN_POS);
-        if player.mounted_vehicle_id != 0 {
-            if let Some(vehicle) = ctx
-                .db
-                .vehicle()
-                .entity_id()
-                .find(&player.mounted_vehicle_id)
-            {
-                ctx.db.vehicle().entity_id().update(Vehicle {
-                    pilot_identity: Some(sender),
-                    ..vehicle
-                });
-            }
-        }
         log::info!("Player reconnected: {:?}", sender);
     }
 }
@@ -172,6 +196,13 @@ pub fn client_connected(ctx: &ReducerContext) {
 #[reducer(client_disconnected)]
 pub fn client_disconnected(ctx: &ReducerContext) {
     let sender = ctx.sender();
+    if let Some(session) = ctx.db.player_session().identity().find(sender) {
+        if let Some(conn_id) = ctx.connection_id() {
+            if session.connection_id == conn_id {
+                ctx.db.player_session().identity().delete(&session.identity);
+            }
+        }
+    }
     if let Some(player) = ctx.db.player().identity().find(sender) {
         let disconnected = dismount_player_internal(ctx, player, true);
         let disconnected = Player {

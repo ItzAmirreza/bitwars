@@ -1,7 +1,7 @@
 // ── Table Definitions ──
 // All SpacetimeDB tables. This is the data schema for the entire game.
 
-use spacetimedb::{table, Identity, ScheduleAt, Timestamp};
+use spacetimedb::{table, ConnectionId, Identity, ScheduleAt, Timestamp};
 
 use crate::types::{DestroyedBlock, Rotation, Vec3};
 
@@ -37,6 +37,16 @@ pub struct Player {
     pub mounted_vehicle_id: u64,
     pub joined_at: Timestamp,
     pub last_damage_time: Timestamp,
+}
+
+/// Tracks which live websocket connection currently controls a player identity.
+/// Used to ignore stale reducers from ghost/old client sessions.
+#[table(accessor = player_session)]
+pub struct PlayerSession {
+    #[primary_key]
+    pub identity: Identity,
+    pub connection_id: ConnectionId,
+    pub connected_at: Timestamp,
 }
 
 /// Abstract entity root shared by all world objects (player, vehicle, item, ...).

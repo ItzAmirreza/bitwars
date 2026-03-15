@@ -10,6 +10,19 @@ use crate::tables::*;
 use crate::types::*;
 use crate::weapons;
 
+fn sender_connection_is_current(ctx: &ReducerContext, sender: spacetimedb::Identity) -> bool {
+    let Some(conn_id) = ctx.connection_id() else {
+        return false;
+    };
+
+    ctx.db
+        .player_session()
+        .identity()
+        .find(sender)
+        .map(|session| session.connection_id == conn_id)
+        .unwrap_or(false)
+}
+
 #[reducer]
 pub fn set_username(
     ctx: &ReducerContext,
@@ -23,6 +36,9 @@ pub fn set_username(
     let character_preset = normalize_character_preset(character_preset);
 
     let sender = ctx.sender();
+    if !sender_connection_is_current(ctx, sender) {
+        return Ok(());
+    }
     for p in ctx.db.player().iter() {
         if p.username == username && p.identity != sender {
             return Err("Username already taken".to_string());
@@ -90,6 +106,11 @@ pub fn update_position(
     weapon: u8,
 ) -> Result<(), String> {
     let sender = ctx.sender();
+    if !sender_connection_is_current(ctx, sender) {
+        // Ignore stale reducers from old websocket sessions for this identity.
+        return Ok(());
+    }
+
     let player = ctx
         .db
         .player()
@@ -212,6 +233,10 @@ pub fn set_loadout(ctx: &ReducerContext, slot1: u8, slot2: u8, slot3: u8) -> Res
     }
 
     let sender = ctx.sender();
+    if !sender_connection_is_current(ctx, sender) {
+        return Ok(());
+    }
+
     let player = ctx
         .db
         .player()
@@ -261,6 +286,10 @@ pub fn set_loadout(ctx: &ReducerContext, slot1: u8, slot2: u8, slot3: u8) -> Res
 #[reducer]
 pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
     let sender = ctx.sender();
+    if !sender_connection_is_current(ctx, sender) {
+        return Ok(());
+    }
+
     let player = ctx
         .db
         .player()
