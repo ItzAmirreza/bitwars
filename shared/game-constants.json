@@ -34,6 +34,8 @@
     "FighterJet": 1
   },
 
+  "vehicleTickIntervalMs": 33,
+
   "player": {
     "maxHealth": 100,
     "eyeHeight": 1.7,
@@ -160,6 +162,10 @@
     "maxYawRate": 5.2,
     "maxPitchRate": 4.2,
     "pilotSeatHeight": 1.8,
+    "dragPiloted": 0.992,
+    "dragUnpiloted": 0.962,
+    "horizBlend": 0.28,
+    "vertBlend": 0.22,
     "hitbox": {
       "centerY": 2.5,
       "halfX": 6.4,
@@ -192,6 +198,9 @@
     "gravity": 22.0,
     "stallSpeed": 40.0,
     "pilotSeatHeight": 1.6,
+    "dragPiloted": 0.995,
+    "dragUnpiloted": 0.980,
+    "velocityBlend": 0.45,
     "hitbox": {
       "centerY": 1.8,
       "halfX": 5.0,

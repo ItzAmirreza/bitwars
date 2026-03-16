@@ -22,8 +22,12 @@ pub fn send_chat(ctx: &ReducerContext, text: String) -> Result<(), String> {
         .ok_or("Not registered")?;
 
     if text == "/" || text.eq_ignore_ascii_case("/help") {
-        insert_admin_help(ctx);
-        return Ok(());
+        if is_admin(&player.username) {
+            insert_admin_help(ctx);
+            return Ok(());
+        }
+        // Non-admins fall through to the "starts with '/'" check below,
+        // which returns "Unknown command".
     }
 
     if text.starts_with('/') {

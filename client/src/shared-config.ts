@@ -18,6 +18,9 @@ export const GRENADE = config.grenade;
 export const COMBAT = config.combat;
 export const WEATHER = config.weather;
 
+// ── Vehicle physics ──
+export const VEHICLE_TICK_INTERVAL_MS = config.vehicleTickIntervalMs;
+
 // ── Convenience helpers ──
 export const NUM_WEAPONS = config.weapons.length;
 export const NUM_VEHICLE_WEAPONS = config.vehicleWeapons.length;

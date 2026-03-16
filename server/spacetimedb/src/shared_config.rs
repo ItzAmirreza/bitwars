@@ -17,6 +17,7 @@ pub struct GameConfig {
     pub block_types: BlockTypes,
     pub entity_kinds: EntityKinds,
     pub vehicle_types: VehicleTypes,
+    pub vehicle_tick_interval_ms: u64,
     pub player: PlayerConfig,
     pub weapons: Vec<WeaponConfig>,
     pub vehicle_weapons: Vec<VehicleWeaponConfig>,
@@ -136,6 +137,10 @@ pub struct HelicopterConfig {
     pub max_yaw_rate: f32,
     pub max_pitch_rate: f32,
     pub pilot_seat_height: f32,
+    pub drag_piloted: f32,
+    pub drag_unpiloted: f32,
+    pub horiz_blend: f32,
+    pub vert_blend: f32,
     pub hitbox: HelicopterHitbox,
     pub camera: HelicopterCamera,
 }
@@ -178,6 +183,9 @@ pub struct FighterJetConfig {
     pub gravity: f32,
     pub stall_speed: f32,
     pub pilot_seat_height: f32,
+    pub drag_piloted: f32,
+    pub drag_unpiloted: f32,
+    pub velocity_blend: f32,
     pub hitbox: FighterJetHitbox,
     pub camera: FighterJetCamera,
 }

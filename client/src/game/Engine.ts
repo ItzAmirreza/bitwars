@@ -1324,11 +1324,14 @@ export class Engine {
     if (worldConfigTable) {
       worldConfigTable.onUpdate((_ctx: unknown, _old: unknown, config: any) => {
         console.log(`[BitWars] Map reset! New round #${config.roundNumber}`);
+
+        // ── World ──
         this.world.clearAll(this.scene);
         this.lanterns.reset(this.getLanternContext());
         this.chunkStreamer.resetAll();
+
+        // ── Vehicles: suppress VFX, remove meshes, clear breakup pieces ──
         this.vehicleManager.suppressDeleteFxUntil = performance.now() + 1500;
-        // Clean up all vehicle state for map reset
         for (const id of Array.from(this.vehicleManager.vehicles.keys())) this.vehicleManager.removeVehicleMesh(id);
         for (const piece of this.vehicleManager.vehicleBreakupPieces) {
           this.scene.remove(piece.mesh);
@@ -1340,10 +1343,67 @@ export class Engine {
           }
         }
         this.vehicleManager.vehicleBreakupPieces.length = 0;
+
+        // ── Dismount local player if in vehicle ──
+        if (this.mountedVehicleId !== 0) {
+          this.mountedVehicleId = 0;
+          this.vehicleManager.resetLocalPilotSmoothing();
+          this.vehicleManager.vehiclePilotYaw = 0;
+          this.vehicleManager.vehiclePilotPitch = 0;
+          this.vehicleManager.vehicleWeaponIndex = 0;
+          this.vehicleManager.lastVehicleFireAt = 0;
+          this.vehicleManager.vehicleAmmo[0] = VEHICLE_WEAPONS[0].maxAmmo;
+          this.vehicleManager.vehicleAmmo[1] = VEHICLE_WEAPONS[1].maxAmmo;
+          this.vehicleManager.vehicleReloadingUntil[0] = 0;
+          this.vehicleManager.vehicleReloadingUntil[1] = 0;
+          this.vehicleManager.vehicleCameraDistance = this.vehicleManager.CAMERA_DISTANCE;
+          this.vehicleManager.jetThrottle = 0;
+        }
+
+        // ── Camera + Controls ──
         const sx = WORLD_X * 0.5;
         const sz = WORLD_Z * 0.5;
         this.camera.position.set(sx, Math.max(this.camera.position.y, 6), sz);
-        this.controls.resetVelocity();
+        this.controls.resetMovementState();
+        this.mouseDown = false;
+
+        // ── Projectiles + Grenades ──
+        this.projectileManager.clearAll();
+        for (const vis of this.grenadeVisuals.values()) {
+          this.scene.remove(vis.mesh);
+          vis.mesh.geometry.dispose();
+          (vis.mesh.material as THREE.Material).dispose();
+          if (vis.light) {
+            this.scene.remove(vis.light);
+            vis.light.dispose();
+          }
+        }
+        this.grenadeVisuals.clear();
+
+        // ── Physics debris + VFX ──
+        this.physics.clearAll();
+        this.vfx.clearAll();
+
+        // ── Weapons: clear predictions + fire cooldown ──
+        this.weapons.clearPendingDestructions();
+        this.weapons.resetFireState();
+
+        // ── PostFX: clear damage vignette ──
+        this.postfx.resetDamage();
+
+        // ── Remote players: flush interpolation buffers to prevent sliding ──
+        this.remotePlayers.flushAllBuffers();
+
+        // ── HUD state ──
+        this.hitMarkerTimer = 0;
+        this.hitMarkerType = 'none';
+        this.prevKills = 0;
+        this.prevDeaths = 0;
+        this.health = 100;
+        this.kills = 0;
+        this.deaths = 0;
+
+        // ── Rebuild from server ──
         this.chunkStreamer.rehydrateSubscribedChunks();
         this.vehicleManager.rebuildVehiclesFromServer();
         // Chunk streaming will re-request nearby chunks on next frame
@@ -1498,13 +1558,18 @@ export class Engine {
     if (!this.conn) return;
     if (this.health <= 0) return; // Dead — don't send position updates
     const now = performance.now();
-    // Adaptive rate: 30Hz when moving/shooting, 10Hz when idle
+    // Adaptive rate:
+    //   Mounted: 50ms (~20Hz) — only sending aim direction + weapon; server
+    //     already computes player position from the vehicle entity in
+    //     tick_vehicles, so high-rate position updates are redundant.
+    //   Active infantry: 33ms (~30Hz)
+    //   Idle infantry: 100ms (~10Hz)
     const vel = this.controls.getVelocity();
     const isActive = this.mountedVehicleId !== 0
       || this.controls.horizontalSpeed > 0.5
       || Math.abs(vel.y) > 0.5
       || this.mouseDown;
-    const interval = this.mountedVehicleId !== 0 ? 16 : (isActive ? 33 : 100);
+    const interval = this.mountedVehicleId !== 0 ? 50 : (isActive ? 33 : 100);
     if (now - this.lastPositionUpdate < interval) return;
     this.lastPositionUpdate = now;
 
@@ -1528,10 +1593,13 @@ export class Engine {
     });
     this.netDiag.recordPositionSent(sentPos);
 
-    if (this.mountedVehicleId !== 0) {
+    // Skip syncEntityTransform while mounted — the server's tick_vehicles
+    // already syncs the player entity position to the vehicle every 33ms.
+    // Sending it from the client was redundant and wasted bandwidth.
+    if (this.mountedVehicleId === 0) {
+      // Infantry entity sync (unchanged)
       const entityId = this.findLocalPlayerEntityId();
-      if (entityId === 0n) return;
-      if (now - this.vehicleManager.lastVehicleSyncAt >= 80) {
+      if (entityId !== 0n && now - this.vehicleManager.lastVehicleSyncAt >= 80) {
         this.vehicleManager.lastVehicleSyncAt = now;
         this.conn.reducers.syncEntityTransform({
           entityId,

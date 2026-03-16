@@ -23,11 +23,13 @@ fn find_player_by_name(ctx: &ReducerContext, name: &str) -> Option<Player> {
         .find(|p| p.username.to_lowercase() == name_lower)
 }
 
+/// Insert a private admin feedback message. Uses "[ADMIN]" sender_name so the
+/// client can filter it — only the sender (admin) will display it.
 fn insert_system_message(ctx: &ReducerContext, text: &str) {
     ctx.db.chat_message().insert(ChatMessage {
         id: 0,
         sender: ctx.sender(),
-        sender_name: "[SERVER]".to_string(),
+        sender_name: "[ADMIN]".to_string(),
         text: text.to_string(),
         sent_at: ctx.timestamp,
     });
@@ -170,7 +172,7 @@ pub fn process_admin_command(
                     .find(sender)
                     .ok_or("Not registered")?;
                 let healed = Player {
-                    health: max_health(),
+                    health: player.max_health,
                     ..player
                 };
                 ctx.db.player().identity().update(healed.clone());

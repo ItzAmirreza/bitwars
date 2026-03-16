@@ -167,6 +167,40 @@ export class FPSControls {
     this.onGround = false;
   }
 
+  /** Reset all movement mode state (used on map reset) */
+  resetMovementState(): void {
+    this.hVelX = 0;
+    this.hVelZ = 0;
+    this.velocity.y = 0;
+    this.onGround = false;
+    this.isSprinting = false;
+    this.isCrouching = false;
+    this.isSliding = false;
+    this.isClimbing = false;
+    this.isJumping = false;
+    this.slideTimer = 0;
+    this.slideSpeed = 0;
+    this.slideDirX = 0;
+    this.slideDirZ = 0;
+    this.landingDip = 0;
+    this.justLanded = false;
+    this.justJumped = false;
+    this.jumpBuffered = false;
+    this.jumpBufferTimer = 0;
+    this.coyoteTimer = 0;
+    this.currentEyeHeight = this.standHeight;
+    this.targetEyeHeight = this.standHeight;
+    this.headBobX = 0;
+    this.headBobY = 0;
+    this.bobTime = 0;
+    this.horizontalSpeed = 0;
+    this.cameraTiltZ = 0;
+    this.sprintFovOffset = 0;
+    this.strafeInput = 0;
+    this.rawStrafeInput = 0;
+    this.sprintToggleActive = false;
+  }
+
   /** Get current velocity vector for network sync */
   getVelocity(): { x: number; y: number; z: number } {
     return { x: this.hVelX, y: this.velocity.y, z: this.hVelZ };

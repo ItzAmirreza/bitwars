@@ -146,7 +146,7 @@ pub fn tick_fighter_jet(
     let new_forward_z = new_fz * new_cos_pitch;
 
     // Blend velocity toward forward direction * target_speed
-    let blend = if has_pilot { 0.45 } else { 0.1 };
+    let blend = if has_pilot { jet_velocity_blend() } else { 0.1 };
     let target_vx = new_forward_x * target_speed;
     let target_vy = new_forward_y * target_speed * stall_factor;
     let target_vz = new_forward_z * target_speed;
@@ -166,7 +166,11 @@ pub fn tick_fighter_jet(
     }
 
     // Drag
-    let drag = if has_pilot { 0.995 } else { 0.980 };
+    let drag = if has_pilot {
+        jet_drag_piloted()
+    } else {
+        jet_drag_unpiloted()
+    };
     entity.vel.x *= drag;
     entity.vel.z *= drag;
     entity.vel.y *= drag;

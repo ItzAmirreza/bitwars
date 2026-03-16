@@ -63,7 +63,7 @@ export function GameScreen() {
   );
 
   // ── Chat hook ──
-  const { chatMessages, chatDraft, setChatDraft, sendChatMessage, pushLocalSystemMessage } = useChat(connection);
+  const { chatMessages, chatDraft, setChatDraft, sendChatMessage, pushLocalSystemMessage } = useChat(connection, identity);
 
   // ── Chat state ──
   const [chatOpen, setChatOpen] = useState(false);
@@ -85,7 +85,7 @@ export function GameScreen() {
           ? Number(config.roundStart.toMillis()) : 0;
         if (startMs === 0) { setRoundTimer(''); return; }
         const elapsed = (Date.now() - startMs) / 1000;
-        const remaining = Math.max(0, 300 - elapsed);
+        const remaining = Math.max(0, 1800 - elapsed);
         const m = Math.floor(remaining / 60);
         const s = Math.floor(remaining % 60);
         setRoundTimer(`${m}:${s.toString().padStart(2, '0')}`);
@@ -166,8 +166,8 @@ export function GameScreen() {
       if (!text.trim()) return;
       const trimmed = text.trim();
 
-      await sendChatMessage(trimmed);
-      if (trimmed.toLowerCase() === '/fly') {
+      const success = await sendChatMessage(trimmed);
+      if (success && trimmed.toLowerCase() === '/fly') {
         engineRef.current?.toggleFly();
       }
     },

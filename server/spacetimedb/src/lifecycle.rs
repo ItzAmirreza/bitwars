@@ -70,7 +70,7 @@ pub fn init(ctx: &ReducerContext) {
     });
     ctx.db.map_reset_timer().insert(MapResetTimer {
         scheduled_id: 0,
-        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(300)),
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(1800)),
     });
 
     // Initialize world environment
@@ -150,21 +150,9 @@ pub fn client_connected(ctx: &ReducerContext) {
         if let Some(updated) = ctx.db.player().identity().find(sender) {
             sync_player_entity(ctx, &updated);
         }
-        init_weapon_state(ctx, sender);
+        // Reset ammo to max on reconnect (player gets a fresh start)
+        crate::weapons::reset_all_ammo(ctx, sender);
         init_movement_state(ctx, sender, &SPAWN_POS);
-        if player.mounted_vehicle_id != 0 {
-            if let Some(vehicle) = ctx
-                .db
-                .vehicle()
-                .entity_id()
-                .find(&player.mounted_vehicle_id)
-            {
-                ctx.db.vehicle().entity_id().update(Vehicle {
-                    pilot_identity: Some(sender),
-                    ..vehicle
-                });
-            }
-        }
         log::info!("Player reconnected: {:?}", sender);
     }
 }

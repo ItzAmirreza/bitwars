@@ -352,21 +352,34 @@ export class HelicopterType implements VehicleType {
     const mesh = instance.mesh;
     const id = instance.entityId;
 
-    // Banking/roll animation
+    // Banking/roll animation — uses an exponential moving average for the
+    // derived velocity to filter out the fixed-timestep quantization noise
+    // that raw frame-differencing produces.
     const prevPos = mesh.userData.prevFramePos as THREE.Vector3 | undefined;
     if (prevPos && delta > 0) {
-      const derivedVelX = (mesh.position.x - prevPos.x) / delta;
-      const derivedVelZ = (mesh.position.z - prevPos.z) / delta;
-      mesh.userData.derivedHSpeed = Math.sqrt(derivedVelX * derivedVelX + derivedVelZ * derivedVelZ);
+      const rawVelX = (mesh.position.x - prevPos.x) / delta;
+      const rawVelZ = (mesh.position.z - prevPos.z) / delta;
+
+      // Exponential moving average of derived velocity (smooth over ~100ms)
+      const velSmooth = 1 - Math.pow(0.00001, delta); // ~0.19 at 60fps
+      const prevDvx = (mesh.userData.smoothDerivedVelX as number) ?? rawVelX;
+      const prevDvz = (mesh.userData.smoothDerivedVelZ as number) ?? rawVelZ;
+      const smoothVelX = prevDvx + (rawVelX - prevDvx) * velSmooth;
+      const smoothVelZ = prevDvz + (rawVelZ - prevDvz) * velSmooth;
+      mesh.userData.smoothDerivedVelX = smoothVelX;
+      mesh.userData.smoothDerivedVelZ = smoothVelZ;
+
+      mesh.userData.derivedHSpeed = Math.sqrt(smoothVelX * smoothVelX + smoothVelZ * smoothVelZ);
       const yaw = mesh.rotation.y;
       const rightX = Math.cos(yaw);
       const rightZ = -Math.sin(yaw);
-      const lateralSpeed = derivedVelX * rightX + derivedVelZ * rightZ;
+      const lateralSpeed = smoothVelX * rightX + smoothVelZ * rightZ;
       const targetRoll = -lateralSpeed * 0.04;
       const maxRoll = 0.26;
       const clampedRoll = Math.max(-maxRoll, Math.min(maxRoll, targetRoll));
       const prevRoll = mesh.userData.smoothRoll ?? 0;
-      const rollLerp = 1 - Math.pow(0.05, delta);
+      // Gentler roll lerp: ~0.12 at 60fps for smooth banking transitions
+      const rollLerp = 1 - Math.pow(0.001, delta);
       const smoothRoll = prevRoll + (clampedRoll - prevRoll) * rollLerp;
       mesh.userData.smoothRoll = smoothRoll;
       mesh.rotation.z = smoothRoll;

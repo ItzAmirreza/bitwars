@@ -300,24 +300,35 @@ export class FighterJetType implements VehicleType {
     const mesh = instance.mesh;
     const id = instance.entityId;
 
-    // Banking/roll animation (stronger than helicopter)
+    // Banking/roll animation (stronger than helicopter) — uses smoothed
+    // derived velocity to avoid fixed-timestep quantization jitter.
     const prevPos = mesh.userData.prevFramePos as THREE.Vector3 | undefined;
     let hSpeed = 0;
     if (prevPos && delta > 0) {
-      const derivedVelX = (mesh.position.x - prevPos.x) / delta;
-      const derivedVelZ = (mesh.position.z - prevPos.z) / delta;
-      hSpeed = Math.sqrt(derivedVelX * derivedVelX + derivedVelZ * derivedVelZ);
+      const rawVelX = (mesh.position.x - prevPos.x) / delta;
+      const rawVelZ = (mesh.position.z - prevPos.z) / delta;
+
+      // Exponential moving average of derived velocity (smooth over ~100ms)
+      const velSmooth = 1 - Math.pow(0.00001, delta);
+      const prevDvx = (mesh.userData.smoothDerivedVelX as number) ?? rawVelX;
+      const prevDvz = (mesh.userData.smoothDerivedVelZ as number) ?? rawVelZ;
+      const smoothVelX = prevDvx + (rawVelX - prevDvx) * velSmooth;
+      const smoothVelZ = prevDvz + (rawVelZ - prevDvz) * velSmooth;
+      mesh.userData.smoothDerivedVelX = smoothVelX;
+      mesh.userData.smoothDerivedVelZ = smoothVelZ;
+
+      hSpeed = Math.sqrt(smoothVelX * smoothVelX + smoothVelZ * smoothVelZ);
       mesh.userData.derivedHSpeed = hSpeed;
 
       const yaw = mesh.rotation.y;
       const rightX = Math.cos(yaw);
       const rightZ = -Math.sin(yaw);
-      const lateralSpeed = derivedVelX * rightX + derivedVelZ * rightZ;
+      const lateralSpeed = smoothVelX * rightX + smoothVelZ * rightZ;
       const targetRoll = -lateralSpeed * 0.06;
       const maxRoll = 0.55;
       const clampedRoll = Math.max(-maxRoll, Math.min(maxRoll, targetRoll));
       const prevRoll = mesh.userData.smoothRoll ?? 0;
-      const rollLerp = 1 - Math.pow(0.03, delta);
+      const rollLerp = 1 - Math.pow(0.001, delta);
       const smoothRoll = prevRoll + (clampedRoll - prevRoll) * rollLerp;
       mesh.userData.smoothRoll = smoothRoll;
       mesh.rotation.z = smoothRoll;

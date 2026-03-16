@@ -254,6 +254,7 @@ export const Vehicle = __t.object("Vehicle", {
   inputLift: __t.f32(),
   inputYaw: __t.f32(),
   boosting: __t.bool(),
+  inputSeq: __t.u32(),
   rotorSpin: __t.f32(),
   health: __t.i32(),
   weaponType: __t.u8(),

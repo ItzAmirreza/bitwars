@@ -101,6 +101,12 @@ export class PostFX {
     this.damageAmount = Math.min(1, this.damageAmount + intensity);
   }
 
+  /** Clear damage vignette immediately (used on map reset). */
+  resetDamage(): void {
+    this.damageAmount = 0;
+    this.material.uniforms.uDamage.value = 0;
+  }
+
   update(delta: number, elapsedTime: number): void {
     this.damageAmount = Math.max(0, this.damageAmount - delta * 2.0);
     this.material.uniforms.uDamage.value = this.damageAmount;

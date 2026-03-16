@@ -16,4 +16,5 @@ export default {
   lift: __t.f32(),
   yaw: __t.f32(),
   boosting: __t.bool(),
+  inputSeq: __t.u32(),
 };

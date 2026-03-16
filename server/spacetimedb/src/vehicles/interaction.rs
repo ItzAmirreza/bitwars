@@ -78,6 +78,7 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
         input_lift: 0.0,
         input_yaw: 0.0,
         boosting: false,
+        input_seq: 0,
         last_input_at: ctx.timestamp,
         ..vehicle
     });
@@ -108,6 +109,7 @@ pub fn update_vehicle_input(
     lift: f32,
     yaw: f32,
     boosting: bool,
+    input_seq: u32,
 ) -> Result<(), String> {
     let sender = ctx.sender();
     let player = ctx
@@ -135,6 +137,7 @@ pub fn update_vehicle_input(
     vehicle.input_lift = clamp_vehicle_axis(lift);
     vehicle.input_yaw = clamp_vehicle_axis(yaw);
     vehicle.boosting = boosting;
+    vehicle.input_seq = input_seq;
     vehicle.last_input_at = ctx.timestamp;
     ctx.db.vehicle().entity_id().update(vehicle);
 

@@ -72,6 +72,10 @@ pub struct Vehicle {
     pub input_lift: f32,
     pub input_yaw: f32,
     pub boosting: bool,
+    /// Monotonic sequence number of the last input received from the pilot.
+    /// Used by the client's rewind-and-replay prediction system to know
+    /// which inputs the server has processed.
+    pub input_seq: u32,
     pub rotor_spin: f32,
     pub health: i32,
     pub weapon_type: u8,

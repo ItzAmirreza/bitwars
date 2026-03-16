@@ -37,7 +37,19 @@ function mergeMessages(prev: DisplayMessage[], next: DisplayMessage[]): DisplayM
     .slice(-MAX_CHAT_MESSAGES);
 }
 
-export function useChat(connection: DbConnection | null) {
+/** Check whether a raw ChatMessage row should be shown to this client. */
+function isVisibleMessage(msg: any, localIdentity: string | null): boolean {
+  // "[ADMIN]" messages are private admin command feedback — only the
+  // admin who ran the command should see them.
+  if (String(msg.senderName) === '[ADMIN]') {
+    if (!localIdentity) return false;
+    const senderHex: string | undefined = msg.sender?.toHexString?.();
+    return senderHex === localIdentity;
+  }
+  return true;
+}
+
+export function useChat(connection: DbConnection | null, localIdentity: string | null) {
   const [chatMessages, setChatMessages] = useState<DisplayMessage[]>([]);
   const [chatDraft, setChatDraft] = useState('');
   const localChatIdRef = useRef(-1);
@@ -59,14 +71,16 @@ export function useChat(connection: DbConnection | null) {
   }, []);
 
   const sendChatMessage = useCallback(
-    async (text: string) => {
-      if (!connection || !text.trim()) return;
+    async (text: string): Promise<boolean> => {
+      if (!connection || !text.trim()) return false;
       const trimmed = text.trim();
 
       try {
         await connection.reducers.sendChat({ text: trimmed });
+        return true;
       } catch (error) {
         pushLocalSystemMessage(error instanceof Error ? error.message : 'Failed to send chat message');
+        return false;
       }
     },
     [connection, pushLocalSystemMessage],
@@ -78,10 +92,13 @@ export function useChat(connection: DbConnection | null) {
     const db = connection.db as any;
     if (!db.chat_message) return;
 
-    const initial = Array.from(db.chat_message.iter(), (msg: any) => toDisplayMessage(msg));
+    const initial = Array.from(db.chat_message.iter())
+      .filter((msg: any) => isVisibleMessage(msg, localIdentity))
+      .map((msg: any) => toDisplayMessage(msg));
     setChatMessages(mergeMessages([], initial));
 
     const handleInsert = (_ctx: unknown, msg: any) => {
+      if (!isVisibleMessage(msg, localIdentity)) return;
       setChatMessages((prev) => mergeMessages(prev, [toDisplayMessage(msg)]));
     };
 
@@ -92,7 +109,7 @@ export function useChat(connection: DbConnection | null) {
         db.chat_message.removeOnInsert(handleInsert);
       }
     };
-  }, [connection]);
+  }, [connection, localIdentity]);
 
   return {
     chatMessages,

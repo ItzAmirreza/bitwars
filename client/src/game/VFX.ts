@@ -373,6 +373,23 @@ export class VFX {
     }
   }
 
+  /** Clear all active particles, tracers, and shake (used on map reset). */
+  clearAll(): void {
+    this.particles.length = 0;
+    this.geometry.setDrawRange(0, 0);
+    for (const t of this.tracers) {
+      this.scene.remove(t.mesh);
+      t.mesh.geometry.dispose();
+      (t.mesh.material as THREE.Material).dispose();
+    }
+    this.tracers.length = 0;
+    this.shakeAmount = 0;
+    this.shakeOffsetX = 0;
+    this.shakeOffsetY = 0;
+    this.muzzleTimer = 0;
+    this.muzzleLight.intensity = 0;
+  }
+
   dispose(): void {
     this.scene.remove(this.points);
     this.geometry.dispose();

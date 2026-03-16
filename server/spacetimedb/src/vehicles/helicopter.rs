@@ -96,13 +96,17 @@ pub fn tick_helicopter(
     let target_vz = fz * forward_speed + rz * strafe_speed;
     let target_vy = if has_pilot { lift_speed } else { -2.2 };
 
-    let horiz_blend = if has_pilot { 0.28 } else { 0.09 };
-    let vert_blend = if has_pilot { 0.22 } else { 0.06 };
+    let horiz_blend = if has_pilot { heli_horiz_blend() } else { 0.09 };
+    let vert_blend = if has_pilot { heli_vert_blend() } else { 0.06 };
     entity.vel.x += (target_vx - entity.vel.x) * horiz_blend;
     entity.vel.z += (target_vz - entity.vel.z) * horiz_blend;
     entity.vel.y += (target_vy - entity.vel.y) * vert_blend;
 
-    let drag = if has_pilot { 0.992 } else { 0.962 };
+    let drag = if has_pilot {
+        heli_drag_piloted()
+    } else {
+        heli_drag_unpiloted()
+    };
     entity.vel.x *= drag;
     entity.vel.z *= drag;
     if !has_pilot {

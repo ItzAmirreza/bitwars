@@ -588,9 +588,14 @@ export class ProjectileManager {
     this.projectiles.splice(index, 1);
   }
 
-  dispose(): void {
+  /** Remove all active projectiles (used on map reset). */
+  clearAll(): void {
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       this.removeProjectile(i);
     }
+  }
+
+  dispose(): void {
+    this.clearAll();
   }
 }

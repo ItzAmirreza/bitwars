@@ -10,7 +10,7 @@
 
 import * as THREE from 'three';
 import { InterpolationBuffer } from '../InterpolationBuffer';
-import { ENTITY_KINDS, VEHICLE_TYPES } from '../../shared-config';
+import { ENTITY_KINDS, VEHICLE_TYPES, VEHICLE_TICK_INTERVAL_MS } from '../../shared-config';
 import { VEHICLE_WEAPON_DEFINITIONS } from '../WeaponRegistry';
 import type { VehicleWeaponDefinition } from '../WeaponRegistry';
 import type { DynamicLightOptions } from '../Engine';
@@ -31,10 +31,13 @@ import type {
 } from './VehicleBase';
 import { HelicopterType } from './HelicopterType';
 import { FighterJetType } from './FighterJetType';
+import { VehiclePrediction } from './VehiclePhysics';
+import type { PhysicsInput } from './VehiclePhysics';
 
 // ── Constants ──
 const ENTITY_KIND_VEHICLE = ENTITY_KINDS.Vehicle;
-const VEHICLE_INPUT_INTERVAL_MS = 16;
+/** Send vehicle input at server tick rate — sending faster is wasted. */
+const VEHICLE_INPUT_INTERVAL_MS = VEHICLE_TICK_INTERVAL_MS;
 
 // ── Vehicle weapon info (re-exported for Engine / VehicleFireController) ──
 export interface VehicleWeaponInfo {
@@ -101,11 +104,11 @@ export default class VehicleManager {
   suppressDeleteFxUntil = 0;
   lastVehicleSyncAt = 0;
 
-  // ── Local pilot smooth chase state ──
-  private localSmoothedPos = new THREE.Vector3();
-  private localSmoothedYaw = 0;
-  private localSmoothedPitch = 0;
-  private localSmoothedInitialized = false;
+  // ── Client-side prediction for the local vehicle ──
+  private prediction: VehiclePrediction | null = null;
+  /** Current physics input assembled from keyboard state each frame. */
+  private currentInput: PhysicsInput = { forward: 0, strafe: 0, lift: 0, yaw: 0 };
+  // Legacy fields kept for mount-transition seeding in Engine.ts
   localLastServerPos = new THREE.Vector3();
   localLastServerVel = new THREE.Vector3();
   localLastServerYaw = 0;
@@ -114,6 +117,10 @@ export default class VehicleManager {
 
   // ── Mounted camera state ──
   private mountedCameraPosition = new THREE.Vector3();
+  /** Smoothed vehicle center used for lookAt — prevents oscillating
+   *  perspective shift caused by the camera position being lerped
+   *  while the lookAt target was using the raw mesh position. */
+  private mountedLookAtCenter = new THREE.Vector3();
   private mountedCameraInitialized = false;
 
   // ── Vehicle pilot input state ──
@@ -403,31 +410,43 @@ export default class VehicleManager {
     const vel = entity.vel || { x: 0, y: 0, z: 0 };
     const rot = entity.rot || { yaw: 0, pitch: 0 };
 
-    // Local pilot: store latest server snapshot for smooth chase
+    // Local pilot: rewind-and-replay reconciliation.
+    // The server's Entity update is the authoritative state.  We read
+    // the acknowledged input_seq from the Vehicle table, discard old
+    // inputs, and replay unacknowledged ones from the server state.
+    // If the physics match (they should), the replayed result is
+    // identical to our prediction — zero visible correction.
     if (id === this.engine.mountedVehicleId) {
       const newPos = { x: Number(entity.pos.x), y: Number(entity.pos.y), z: Number(entity.pos.z) };
       const newVel = { x: Number(vel.x), y: Number(vel.y), z: Number(vel.z) };
 
-      // Record diagnostics before updating (uses old smoothed pos for jump measurement)
+      // Record diagnostics
+      const predState = this.prediction?.state;
       this.engine.netDiag.recordVehicleServerUpdate(
         newPos, newVel,
-        { x: this.localSmoothedPos.x, y: this.localSmoothedPos.y, z: this.localSmoothedPos.z },
+        predState
+          ? { x: predState.px, y: predState.py, z: predState.pz }
+          : { x: 0, y: 0, z: 0 },
       );
 
+      // Keep legacy fields in sync (used by Engine mount-transition code)
       this.localLastServerPos.set(newPos.x, newPos.y, newPos.z);
       this.localLastServerVel.set(newVel.x, newVel.y, newVel.z);
       this.localLastServerYaw = Number(rot.yaw ?? 0);
       this.localLastServerPitch = Number(rot.pitch ?? 0);
       this.localLastServerTime = performance.now();
 
-      // Snap smoothed position to server reality on every update.
-      // This eliminates prediction drift that caused 3–36u VEH_SNAP_JUMPs.
-      // The camera chase lerp in syncMountedCameraToVehicle provides all
-      // the visual smoothing needed, so the mesh can track the server tightly.
-      if (this.localSmoothedInitialized) {
-        this.localSmoothedPos.copy(this.localLastServerPos);
-        this.localSmoothedYaw = this.localLastServerYaw;
-        this.localSmoothedPitch = this.localLastServerPitch;
+      // Read the acknowledged input sequence from the Vehicle table
+      const ackedSeq = Number(vehicle.inputSeq ?? 0);
+
+      // Rewind-and-replay reconciliation
+      if (this.prediction) {
+        this.prediction.reconcile({
+          px: newPos.x, py: newPos.y, pz: newPos.z,
+          vx: newVel.x, vy: newVel.y, vz: newVel.z,
+          yaw: Number(rot.yaw ?? 0),
+          pitch: Number(rot.pitch ?? 0),
+        }, ackedSeq);
       }
     }
 
@@ -486,10 +505,6 @@ export default class VehicleManager {
       if (this.engine.controls.moveBackward) forward -= 1;
     }
 
-    const now = performance.now();
-    if (now - this.lastVehicleInputUpdate < VEHICLE_INPUT_INTERVAL_MS) return;
-    this.lastVehicleInputUpdate = now;
-
     let strafe = 0;
     if (this.engine.controls.ePressed) strafe += 1;
     if (this.engine.controls.qPressed) strafe -= 1;
@@ -502,12 +517,30 @@ export default class VehicleManager {
     if (this.engine.controls.moveRight) yaw += 1;
     if (this.engine.controls.moveLeft) yaw -= 1;
 
+    // Always update the local input for client-side prediction (every frame).
+    // The prediction system uses this immediately for instant response.
+    this.currentInput.forward = forward;
+    this.currentInput.strafe = strafe;
+    this.currentInput.lift = lift;
+    this.currentInput.yaw = yaw;
+
+    // Rate-limit the network send to match the server tick rate
+    const now = performance.now();
+    if (now - this.lastVehicleInputUpdate < VEHICLE_INPUT_INTERVAL_MS) return;
+    this.lastVehicleInputUpdate = now;
+
+    // Send the latest tickSeq so the server can store it in the Vehicle
+    // table — the client reads it back on Entity updates to know which
+    // inputs have been acknowledged for rewind-and-replay.
+    const inputSeq = this.prediction ? this.prediction.tickSeq : 0;
+
     this.engine.conn.reducers.updateVehicleInput({
       forward,
       strafe,
       lift,
       yaw,
       boosting: false,
+      inputSeq,
     });
   }
 
@@ -598,19 +631,23 @@ export default class VehicleManager {
 
     if (!this.mountedCameraInitialized) {
       this.mountedCameraPosition.copy(desired);
+      this.mountedLookAtCenter.set(pose.x, pose.y, pose.z);
       this.mountedCameraInitialized = true;
     } else {
-      // Higher lerp rate (0.88 vs old 0.72) to track the snap-corrected mesh
-      // without visible lag.  At 60fps this reaches 99% in ~3 frames (~50ms).
-      const lerpFactor = 1 - Math.pow(1 - 0.88, delta * 60);
+      // Moderate lerp — smooth chase-cam feel without amplifying jitter.
+      // 0.5 at 60fps: reaches 97% in ~3 frames (~50ms).
+      const lerpFactor = 1 - Math.pow(1 - 0.5, delta * 60);
       this.mountedCameraPosition.lerp(desired, lerpFactor);
+      this.mountedLookAtCenter.x += (pose.x - this.mountedLookAtCenter.x) * lerpFactor;
+      this.mountedLookAtCenter.y += (pose.y - this.mountedLookAtCenter.y) * lerpFactor;
+      this.mountedLookAtCenter.z += (pose.z - this.mountedLookAtCenter.z) * lerpFactor;
     }
 
     this.engine.camera.position.copy(this.mountedCameraPosition);
     this.engine.camera.lookAt(
-      pose.x + fx * 18,
-      pose.y + 2.2 + fy * 18,
-      pose.z + fz * 18,
+      this.mountedLookAtCenter.x + fx * 18,
+      this.mountedLookAtCenter.y + 2.2 + fy * 18,
+      this.mountedLookAtCenter.z + fz * 18,
     );
     this.engine.controls.resetVelocity();
 
@@ -753,7 +790,7 @@ export default class VehicleManager {
   // ══════════════════════════════════════════════════════════════
 
   resetLocalPilotSmoothing(): void {
-    this.localSmoothedInitialized = false;
+    this.prediction = null;
     this.localLastServerTime = 0;
     this.mountedCameraInitialized = false;
   }
@@ -791,55 +828,34 @@ export default class VehicleManager {
 
       // ── Position / rotation ──
       if (isLocal) {
-        // Dead-reckoning with drag-matched prediction (same as old HelicopterManager)
-        if (this.localLastServerTime > 0) {
-          const now = performance.now();
-          const timeSinceUpdate = (now - this.localLastServerTime) / 1000;
+        // Client-side prediction: run the same physics locally using the
+        // player's current input.  This gives instant response (0ms input
+        // latency).  The server corrects drift via correctToward() in
+        // updateVehicleEntity, which is typically < 1 unit because the
+        // physics is identical.
+        const typeId = inst?.type ?? VEHICLE_TYPES.Helicopter;
 
-          const dragPerTick = 0.992;
-          const tickDt = 0.033;
-          const dragFactor = Math.pow(dragPerTick, timeSinceUpdate / tickDt);
-          const lnDrag = Math.log(dragPerTick);
-          const posIntegral = lnDrag !== 0 ? (tickDt / lnDrag) * (dragFactor - 1) : timeSinceUpdate;
+        // Lazily create the prediction on first use
+        if (!this.prediction && this.localLastServerTime > 0) {
+          this.prediction = new VehiclePrediction(typeId, {
+            px: this.localLastServerPos.x,
+            py: this.localLastServerPos.y,
+            pz: this.localLastServerPos.z,
+            vx: this.localLastServerVel.x,
+            vy: this.localLastServerVel.y,
+            vz: this.localLastServerVel.z,
+            yaw: this.localLastServerYaw,
+            pitch: this.localLastServerPitch,
+          }, (x, z) => this.getGroundHeight(x, z));
+        }
 
-          const predictedX = this.localLastServerPos.x + this.localLastServerVel.x * posIntegral;
-          const predictedY = this.localLastServerPos.y + this.localLastServerVel.y * posIntegral;
-          const predictedZ = this.localLastServerPos.z + this.localLastServerVel.z * posIntegral;
-
-          if (!this.localSmoothedInitialized) {
-            this.localSmoothedPos.set(predictedX, predictedY, predictedZ);
-            this.localSmoothedYaw = this.localLastServerYaw;
-            this.localSmoothedPitch = this.localLastServerPitch;
-            this.localSmoothedInitialized = true;
-          } else {
-            const currentVelX = this.localLastServerVel.x * dragFactor;
-            const currentVelY = this.localLastServerVel.y * dragFactor;
-            const currentVelZ = this.localLastServerVel.z * dragFactor;
-            this.localSmoothedPos.x += currentVelX * delta;
-            this.localSmoothedPos.y += currentVelY * delta;
-            this.localSmoothedPos.z += currentVelZ * delta;
-
-            const correctionRate = 1 - Math.pow(0.001, delta);
-            const errX = predictedX - this.localSmoothedPos.x;
-            const errY = predictedY - this.localSmoothedPos.y;
-            const errZ = predictedZ - this.localSmoothedPos.z;
-            this.localSmoothedPos.x += errX * correctionRate;
-            this.localSmoothedPos.y += errY * correctionRate;
-            this.localSmoothedPos.z += errZ * correctionRate;
-
-            let dyaw = this.localLastServerYaw - this.localSmoothedYaw;
-            // Wrap to [-PI, PI] handling any number of accumulated revolutions.
-            // The single if/else wrap only handles |dyaw| < 3*PI; continuous
-            // rotation can push smoothedYaw arbitrarily far from the server's
-            // wrapped [-PI, PI] range.
-            dyaw -= Math.round(dyaw / (2 * Math.PI)) * 2 * Math.PI;
-            this.localSmoothedYaw += dyaw * correctionRate;
-            this.localSmoothedPitch += (this.localLastServerPitch - this.localSmoothedPitch) * correctionRate;
-          }
-
-          mesh.position.copy(this.localSmoothedPos);
-          mesh.rotation.set(this.localSmoothedPitch, this.localSmoothedYaw, 0);
+        if (this.prediction) {
+          // Advance physics with current input — immediate response
+          const predicted = this.prediction.advance(delta, this.currentInput);
+          mesh.position.set(predicted.px, predicted.py, predicted.pz);
+          mesh.rotation.set(predicted.pitch, predicted.yaw, 0);
         } else {
+          // No server data yet — use raw entity table position
           const entity = this.findEntityRow(id);
           if (entity) {
             mesh.position.set(Number(entity.pos.x), Number(entity.pos.y), Number(entity.pos.z));

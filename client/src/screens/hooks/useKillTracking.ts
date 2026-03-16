@@ -38,6 +38,22 @@ export function useKillTracking(
   const [respawnCountdown, setRespawnCountdown] = useState(0);
   const respawnTimerRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
+  // Detect round reset: kills or deaths decreased (server reset them to 0)
+  useEffect(() => {
+    if (kills < prevKillsRef.current || deaths < prevDeathsRef.current) {
+      // Round reset — clear all tracking state
+      prevKillsRef.current = kills;
+      prevDeathsRef.current = deaths;
+      setKillStreak(0);
+      setKillFeed([]);
+      setKillNotifications([]);
+      setIsDead(false);
+      setRespawnCountdown(0);
+      clearInterval(respawnTimerRef.current);
+      clearTimeout(killStreakTimerRef.current);
+    }
+  }, [kills, deaths]);
+
   // Detect kills
   useEffect(() => {
     if (kills > prevKillsRef.current) {

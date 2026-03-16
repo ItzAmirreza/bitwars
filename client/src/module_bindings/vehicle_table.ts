@@ -20,6 +20,7 @@ export default __t.row({
   inputLift: __t.f32().name("input_lift"),
   inputYaw: __t.f32().name("input_yaw"),
   boosting: __t.bool(),
+  inputSeq: __t.u32().name("input_seq"),
   rotorSpin: __t.f32().name("rotor_spin"),
   health: __t.i32(),
   weaponType: __t.u8().name("weapon_type"),

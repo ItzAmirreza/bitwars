@@ -81,14 +81,8 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
         });
     }
 
-    // Respawn all online players
-    let player_ids: Vec<Identity> = ctx
-        .db
-        .player()
-        .iter()
-        .filter(|p| p.online)
-        .map(|p| p.identity)
-        .collect();
+    // Respawn ALL players (online AND offline) so no stale state persists
+    let player_ids: Vec<Identity> = ctx.db.player().iter().map(|p| p.identity).collect();
     for id in player_ids {
         if let Some(p) = ctx.db.player().identity().find(id) {
             let entity_id = ensure_player_entity(ctx, &p);
@@ -99,21 +93,32 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
                 loadout.slot1
             };
             let p = dismount_player_internal(ctx, p, true);
+            let is_god = p.max_health >= god_mode_health();
             let reset = Player {
                 entity_id,
-                health: max_health(),
-                max_health: max_health(),
+                health: if is_god {
+                    god_mode_health()
+                } else {
+                    max_health()
+                },
+                max_health: if is_god {
+                    god_mode_health()
+                } else {
+                    max_health()
+                },
                 pos: SPAWN_POS,
                 vel: ZERO_VEL,
                 kills: 0,
                 deaths: 0,
                 spawn_protected: true,
                 current_weapon,
+                mounted_vehicle_id: 0,
                 ..p
             };
             ctx.db.player().identity().update(reset.clone());
             sync_player_entity(ctx, &reset);
-            init_weapon_state(ctx, id);
+            // Reset ammo to max (not just init missing rows)
+            crate::weapons::reset_all_ammo(ctx, id);
             init_movement_state(ctx, id, &SPAWN_POS);
         }
     }
@@ -163,6 +168,12 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
     spawn_sandbox_helicopters(ctx);
     spawn_jets_at_airstrips(ctx, new_seed);
 
+    // Clean up in-flight grenades (they must not survive into the new round)
+    let grenade_ids: Vec<u64> = ctx.db.grenade_projectile().iter().map(|g| g.id).collect();
+    for id in grenade_ids {
+        ctx.db.grenade_projectile().id().delete(&id);
+    }
+
     // Clean up stale events
     let event_ids: Vec<u64> = ctx.db.detach_event().iter().map(|e| e.id).collect();
     for id in event_ids {
@@ -176,6 +187,10 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
     for id in explosion_ids {
         ctx.db.explosion_event().id().delete(&id);
     }
+    let kill_event_ids: Vec<u64> = ctx.db.kill_event().iter().map(|e| e.id).collect();
+    for id in kill_event_ids {
+        ctx.db.kill_event().id().delete(&id);
+    }
     let vehicle_destroy_ids: Vec<u64> = ctx
         .db
         .vehicle_destroy_event()
@@ -188,7 +203,7 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
 
     ctx.db.map_reset_timer().insert(MapResetTimer {
         scheduled_id: 0,
-        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(300)),
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(1800)),
     });
 
     ctx.db.chat_message().insert(ChatMessage {

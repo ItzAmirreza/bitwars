@@ -115,7 +115,10 @@ pub const HELI_SPAWN_CLEARANCE_RADIUS: i32 = 4;
 pub const HELI_SPAWN_CLEARANCE_HEIGHT: i32 = 7;
 /// Not in shared JSON — server-only spawn config.
 pub const HELI_SPAWN_MIN_SEPARATION: f32 = 28.0;
-/// Not in shared JSON — server-only tick rate.
+/// Vehicle physics tick interval.  The canonical value lives in
+/// shared/game-constants.json (`vehicleTickIntervalMs`).  We keep a const
+/// here because Rust `const` can't call a function, and the server tick
+/// rate doesn't change at runtime.  If you change it, update the JSON too.
 pub const HELI_TICK_INTERVAL_MS: u64 = 33;
 
 pub fn heli_scale() -> f32 {
@@ -162,6 +165,18 @@ pub fn heli_hitbox_half_y() -> f32 {
 }
 pub fn heli_hitbox_half_z() -> f32 {
     shared_config::config().helicopter.hitbox.half_z
+}
+pub fn heli_drag_piloted() -> f32 {
+    shared_config::config().helicopter.drag_piloted
+}
+pub fn heli_drag_unpiloted() -> f32 {
+    shared_config::config().helicopter.drag_unpiloted
+}
+pub fn heli_horiz_blend() -> f32 {
+    shared_config::config().helicopter.horiz_blend
+}
+pub fn heli_vert_blend() -> f32 {
+    shared_config::config().helicopter.vert_blend
 }
 
 // ── Fighter Jet ──
@@ -240,6 +255,15 @@ pub fn jet_hitbox_half_y() -> f32 {
 }
 pub fn jet_hitbox_half_z() -> f32 {
     shared_config::config().fighter_jet.hitbox.half_z
+}
+pub fn jet_drag_piloted() -> f32 {
+    shared_config::config().fighter_jet.drag_piloted
+}
+pub fn jet_drag_unpiloted() -> f32 {
+    shared_config::config().fighter_jet.drag_unpiloted
+}
+pub fn jet_velocity_blend() -> f32 {
+    shared_config::config().fighter_jet.velocity_blend
 }
 
 // ── Combat Validation ──

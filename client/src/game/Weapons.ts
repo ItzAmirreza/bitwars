@@ -293,6 +293,17 @@ export class WeaponSystem {
     this.pendingBlockDestructions.delete(key);
   }
 
+  /** Clear all pending block destructions (used on map reset). */
+  clearPendingDestructions(): void {
+    this.pendingBlockDestructions.clear();
+  }
+
+  /** Reset fire cooldown and ammo state to max (used on map reset). */
+  resetFireState(): void {
+    this.lastFireTime = 0;
+    this.ammoState = WEAPONS.map((w) => w.maxAmmo);
+  }
+
   reload(): void {
     // Client-side prediction only; actual reload goes through server
     this.ammoState[this.currentWeapon] = this.weapon.maxAmmo;

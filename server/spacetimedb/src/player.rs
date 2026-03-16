@@ -145,36 +145,28 @@ pub fn update_position(
     }
 
     let clamped_pos = clamp_pos(&pos);
-    let admin_bypass = is_admin(&player.username);
 
-    // Movement history tracking (no snapback — server never overrides client
-    // infantry position).  Speed-based anti-cheat was removed because
-    // server-side reducer timestamp compression under load (tick_vehicles,
-    // reset_map) produced false speed spikes that caused the server to snap
-    // the player back to an old position, creating the A↔B teleport loop.
-    // Anti-cheat will be re-added using distance-budget-per-second instead of
-    // instantaneous speed once movement is stable.
-    if !admin_bypass {
-        if ctx.db.player_movement().identity().find(sender).is_some() {
-            ctx.db
-                .player_movement()
-                .identity()
-                .update(PlayerMovementState {
-                    identity: sender,
-                    last_pos: clamped_pos.clone(),
-                    last_update: ctx.timestamp,
-                    violation_count: 0,
-                });
-        } else {
-            init_movement_state(ctx, sender, &clamped_pos);
-        }
+    // Movement history tracking — always updated for all players (including
+    // admins) so movement state stays fresh for when distance-budget
+    // anti-cheat is re-enabled.
+    if ctx.db.player_movement().identity().find(sender).is_some() {
+        ctx.db
+            .player_movement()
+            .identity()
+            .update(PlayerMovementState {
+                identity: sender,
+                last_pos: clamped_pos.clone(),
+                last_update: ctx.timestamp,
+                violation_count: 0,
+            });
+    } else {
+        init_movement_state(ctx, sender, &clamped_pos);
     }
 
-    let spawn_protected = if player.spawn_protected {
-        !is_grounded(ctx, &clamped_pos)
-    } else {
-        false
-    };
+    // Admins skip grounding check — they may be flying (/fly) and would
+    // otherwise stay permanently spawn-protected, which blocks firing.
+    let spawn_protected =
+        player.spawn_protected && !is_admin(&player.username) && !is_grounded(ctx, &clamped_pos);
 
     let updated = Player {
         pos: clamped_pos,

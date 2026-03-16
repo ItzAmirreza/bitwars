@@ -386,6 +386,14 @@ export class PhysicsSystem {
 
   // ── Cleanup ──
 
+  /** Remove all falling blocks and settled debris (used on map reset). */
+  clearAll(): void {
+    for (const fb of this.falling) this.pool.release(fb);
+    this.falling.length = 0;
+    this.settled.length = 0;
+    this.instancedMesh.count = 0;
+  }
+
   dispose(): void {
     this.falling = [];
     this.settled = [];

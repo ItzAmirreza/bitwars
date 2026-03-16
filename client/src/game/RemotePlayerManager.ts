@@ -420,6 +420,13 @@ export class RemotePlayerManager {
     }
   }
 
+  /** Flush all interpolation buffers (used on map reset to prevent position sliding). */
+  flushAllBuffers(): void {
+    for (const buffer of this.interpBuffers.values()) {
+      buffer.clear();
+    }
+  }
+
   /** Remove and dispose all tracked remote players. */
   destroyAll(): void {
     for (const id of Array.from(this.otherPlayers.keys())) this.removeOtherPlayer(id);
