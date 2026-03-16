@@ -1,8 +1,8 @@
 {
   "world": {
-    "sizeX": 448,
+    "sizeX": 750,
     "sizeY": 48,
-    "sizeZ": 448,
+    "sizeZ": 750,
     "chunkSize": 16
   },
 

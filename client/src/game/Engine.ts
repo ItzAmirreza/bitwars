@@ -22,7 +22,6 @@ import type { VehicleFireContext } from './VehicleFireController';
 import { ENTITY_KINDS } from '../shared-config';
 import type { DbConnection } from '../module_bindings';
 import type { GameSettings } from '../store';
-import { NetDiagnostics } from './NetDiagnostics';
 
 const ENTITY_KIND_VEHICLE = ENTITY_KINDS.Vehicle;
 
@@ -154,7 +153,6 @@ export class Engine {
   private hitMarkerTimer = 0;
   private hitMarkerType: 'block' | 'player' | 'none' = 'none';
   private lastWeaponIndex = 0;
-
   private prevKills = 0;
   private prevDeaths = 0;
   private lowHealthHeartbeatTimer = 0;
@@ -170,9 +168,6 @@ export class Engine {
 
   // Chunk streaming
   private chunkStreamer!: ChunkStreamer;
-
-  // Dev-only networking diagnostics (F3 overlay)
-  private netDiag = new NetDiagnostics();
 
   constructor(
     container: HTMLElement,
@@ -329,13 +324,6 @@ export class Engine {
     // ── Server sync ──
     this.setupServerListeners();
 
-    // ── Hydrate initial state from already-synced tables ──
-    // SpacetimeDB delivers initial subscription data before onUpdate callbacks
-    // are registered.  Without this, mountedVehicleId stays 0 until the next
-    // server-side Player row change, which desynchronises the camera pipeline
-    // (FPSControls runs instead of vehicle camera, server overrides position).
-    this.hydrateInitialPlayerState();
-
     // ── Input ──
     container.addEventListener('mousedown', this.onMouseDown);
     container.addEventListener('mouseup', this.onMouseUp);
@@ -345,39 +333,6 @@ export class Engine {
     window.addEventListener('resize', this.onResize);
 
     this.animate();
-  }
-
-  // ── INITIAL STATE HYDRATION ──
-
-  private hydrateInitialPlayerState(): void {
-    if (!this.conn || !this.localIdentity) return;
-    for (const row of this.conn.db.player.iter()) {
-      const p = row as any;
-      if (p.identity.toHexString() !== this.localIdentity) continue;
-
-      // Sync mounted state so the camera pipeline picks the right mode
-      this.mountedVehicleId = Number(p.mountedVehicleId ?? 0);
-      this.health = p.health ?? 100;
-      this.kills = p.kills ?? 0;
-      this.deaths = p.deaths ?? 0;
-
-      // If the player is already at a known position, teleport camera there
-      const sp = p.pos;
-      if (sp) {
-        const dx = sp.x - this.camera.position.x;
-        const dy = sp.y - this.camera.position.y;
-        const dz = sp.z - this.camera.position.z;
-        if (dx * dx + dy * dy + dz * dz > 4) {
-          this.camera.position.set(sp.x, sp.y, sp.z);
-        }
-      }
-
-      // If already mounted, init vehicle smoothing from current entity data
-      if (this.mountedVehicleId !== 0) {
-        this.vehicleManager.resetLocalPilotSmoothing();
-      }
-      break;
-    }
   }
 
   // ── SETTINGS ──
@@ -990,13 +945,6 @@ export class Engine {
 
       if (this.localIdentity && id === this.localIdentity) {
         const wasMounted = this.mountedVehicleId !== 0;
-        const nextMountedVehicleId = Number(player.mountedVehicleId ?? 0);
-        const isMountedNow = nextMountedVehicleId !== 0;
-
-        // Apply mount state immediately so the rest of this callback uses the
-        // same authority mode as the server packet.
-        this.mountedVehicleId = nextMountedVehicleId;
-
         const serverWeapon = Number(player.currentWeapon);
         const localSwitchAgeMs = performance.now() - this.lastLocalWeaponSwitchAt;
         if (
@@ -1008,60 +956,23 @@ export class Engine {
           this.lastWeaponIndex = serverWeapon;
         }
 
-        // Server reconciliation:
-        // - Infantry: reconcile camera position directly.
-        // - Mounted: never move camera here (vehicle camera is authoritative in
-        //   VehicleManager.syncMountedCameraToVehicle).  Reconcile only the
-        //   pilot-seat anchor for diagnostics/smoothing health.
+        // Detect server-side teleportation (large position jump)
         const sp = player.pos;
         const cp = this.camera.position;
-        if (isMountedNow) {
-          const pose = this.vehicleManager.getMountedVehiclePoseRaw();
-          const seatPos = pose
-            ? { x: pose.x, y: pose.y + 1.8, z: pose.z }
-            : { x: cp.x, y: cp.y, z: cp.z };
-
-          this.netDiag.recordServerEcho(sp, seatPos);
-
-          // Keep mounted smoothing healthy if client and server anchor diverge
-          // heavily (camera remains owned by mounted-camera pipeline).
-          const mdx = sp.x - seatPos.x;
-          const mdy = sp.y - seatPos.y;
-          const mdz = sp.z - seatPos.z;
-          const mountEchoDsq = mdx * mdx + mdy * mdy + mdz * mdz;
-          if (mountEchoDsq > 400) {
-            this.vehicleManager.resetLocalPilotSmoothing();
-          }
-        } else {
-          const tdx = sp.x - cp.x;
-          const tdy = sp.y - cp.y;
-          const tdz = sp.z - cp.z;
-          const echoDsq = tdx * tdx + tdy * tdy + tdz * tdz;
-
-          this.netDiag.recordServerEcho(sp, { x: cp.x, y: cp.y, z: cp.z });
-
-          if (echoDsq > 400) {
-            // > 20u: hard snap (respawn, admin teleport, severe desync)
-            this.netDiag.recordTeleport(sp, { x: cp.x, y: cp.y, z: cp.z });
-            this.camera.position.set(sp.x, sp.y, sp.z);
-            this.controls.resetVelocity();
-          } else if (echoDsq > 16) {
-            // 4-20u: smooth follow for infantry desync
-            const t = Math.min(0.5, echoDsq * 0.015);
-            this.camera.position.x += tdx * t;
-            this.camera.position.y += tdy * t;
-            this.camera.position.z += tdz * t;
-          }
+        const tdx = sp.x - cp.x, tdy = sp.y - cp.y, tdz = sp.z - cp.z;
+        if (tdx * tdx + tdy * tdy + tdz * tdz > 100) {
+          this.camera.position.set(sp.x, sp.y, sp.z);
+          this.controls.resetVelocity();
         }
-        // <= 4u: ignore normal RTT echo
 
         const oldHealth = this.health;
         this.health = player.health;
         this.kills = player.kills;
         this.deaths = player.deaths;
-        if (wasMounted !== isMountedNow) {
+        this.mountedVehicleId = Number(player.mountedVehicleId ?? 0);
+        if (wasMounted !== (this.mountedVehicleId !== 0)) {
           this.vehicleManager.resetLocalPilotSmoothing();
-          if (isMountedNow) {
+          if (this.mountedVehicleId !== 0) {
             const pose = this.vehicleManager.getMountedVehiclePose();
             if (pose) {
               this.vehicleManager.vehiclePilotYaw = pose.yaw;
@@ -1084,8 +995,6 @@ export class Engine {
           } else {
             // Dismounting — reset jet throttle + restore opacity
             this.vehicleManager.jetThrottle = 0;
-            this.camera.position.set(sp.x, sp.y, sp.z);
-            this.controls.resetVelocity();
           }
         }
         if (player.health < oldHealth) {
@@ -1580,18 +1489,16 @@ export class Engine {
     const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
     const sendYaw = this.mountedVehicleId !== 0 ? this.vehicleManager.vehiclePilotYaw : e.y;
     const sendPitch = this.mountedVehicleId !== 0 ? this.vehicleManager.vehiclePilotPitch : e.x;
-    const sentPos = {
-      x: Math.max(-1, Math.min(WORLD_X + 1, px)),
-      y: Math.max(-10, Math.min(100, py)),
-      z: Math.max(-1, Math.min(WORLD_Z + 1, pz)),
-    };
     this.conn.reducers.updatePosition({
-      pos: sentPos,
+      pos: {
+        x: Math.max(-1, Math.min(WORLD_X + 1, px)),
+        y: Math.max(-10, Math.min(100, py)),
+        z: Math.max(-1, Math.min(WORLD_Z + 1, pz)),
+      },
       vel: { x: vel.x, y: vel.y, z: vel.z },
       rot: { yaw: sendYaw, pitch: sendPitch },
       weapon: this.weapons.currentWeapon,
     });
-    this.netDiag.recordPositionSent(sentPos);
 
     if (this.mountedVehicleId !== 0) {
       const entityId = this.findLocalPlayerEntityId();
@@ -1633,15 +1540,6 @@ export class Engine {
       this.frameCount = 0; this.fpsTime = 0;
     }
 
-    // Net diagnostics: record frame delta + speed + mounted state
-    this.netDiag.recordFrame(delta);
-    const _vel = this.controls.getVelocity();
-    this.netDiag.recordSpeed(Math.sqrt(_vel.x * _vel.x + _vel.y * _vel.y + _vel.z * _vel.z));
-    // Log mountedVehicleId per-frame (throttled inside recordMountedId)
-    if (this.netDiag.visible) {
-      this.netDiag.recordMountedId(this.mountedVehicleId);
-    }
-
     const startupLocked = !this.chunkStreamer.startupWorldReady;
     this.updateInputState(delta, startupLocked);
     this.updateGameSystems(delta);
@@ -1650,14 +1548,8 @@ export class Engine {
     // Interpolate remote players every frame
     this.remotePlayers.interpolateAll();
 
-    // Vehicle per-frame update FIRST so positions are current before camera sync.
-    // Old order (camera sync → position update) caused one-frame lag that was
-    // barely noticeable at 60 fps but significant at lower frame rates.
-    this.vehicleManager.updatePerFrame(delta);
-
     if (this.mountedVehicleId !== 0) {
       this.vehicleManager.syncMountedCameraToVehicle(delta);
-      this.vehicleManager.syncVehicleInput(delta);
     }
 
     // Chunk streaming (every N frames to load quickly)
@@ -1665,6 +1557,13 @@ export class Engine {
     if (this.chunkStreamer.chunkLoadFrame % CHUNK_STREAM_INTERVAL_FRAMES === 0) {
       this.chunkStreamer.updateChunkLoading();
     }
+
+    if (this.mountedVehicleId !== 0) {
+      this.vehicleManager.syncVehicleInput(delta);
+    }
+
+    // Vehicle per-frame update (delegated to VehicleManager)
+    this.vehicleManager.updatePerFrame(delta);
 
     this.chunkStreamer.ensureSpawnGroundReady();
 
@@ -1698,8 +1597,6 @@ export class Engine {
     this.sun.target.position.set(sp.x, 0, sp.z);
 
     // Position sync
-    // Always send while alive.  Tying sends to pointer lock causes severe
-    // desync/pushback when lock is dropped but movement still updates locally.
     this.sendPositionUpdate();
 
     // Rebuild dirty chunks with distance-prioritized budget
@@ -1716,7 +1613,6 @@ export class Engine {
 
     this.renderFrame(delta);
     this.pushHudState(startupProgress);
-    this.netDiag.refreshOverlay();
   };
 
   private updateInputState(delta: number, startupLocked: boolean): void {
@@ -2046,7 +1942,6 @@ export class Engine {
     this.sky.dispose();
     this.vfx.dispose();
     this.projectileManager.dispose();
-    this.netDiag.dispose();
     // Clean up grenade visuals
     for (const vis of this.grenadeVisuals.values()) {
       this.scene.remove(vis.mesh);

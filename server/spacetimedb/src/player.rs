@@ -10,19 +10,6 @@ use crate::tables::*;
 use crate::types::*;
 use crate::weapons;
 
-fn sender_connection_is_current(ctx: &ReducerContext, sender: spacetimedb::Identity) -> bool {
-    let Some(conn_id) = ctx.connection_id() else {
-        return false;
-    };
-
-    ctx.db
-        .player_session()
-        .identity()
-        .find(sender)
-        .map(|session| session.connection_id == conn_id)
-        .unwrap_or(false)
-}
-
 #[reducer]
 pub fn set_username(
     ctx: &ReducerContext,
@@ -36,9 +23,6 @@ pub fn set_username(
     let character_preset = normalize_character_preset(character_preset);
 
     let sender = ctx.sender();
-    if !sender_connection_is_current(ctx, sender) {
-        return Ok(());
-    }
     for p in ctx.db.player().iter() {
         if p.username == username && p.identity != sender {
             return Err("Username already taken".to_string());
@@ -106,11 +90,6 @@ pub fn update_position(
     weapon: u8,
 ) -> Result<(), String> {
     let sender = ctx.sender();
-    if !sender_connection_is_current(ctx, sender) {
-        // Ignore stale reducers from old websocket sessions for this identity.
-        return Ok(());
-    }
-
     let player = ctx
         .db
         .player()
@@ -165,55 +144,35 @@ pub fn update_position(
         return Ok(());
     }
 
-    let mut final_pos = clamp_pos(&pos);
+    let clamped_pos = clamp_pos(&pos);
     let admin_bypass = is_admin(&player.username);
 
-    // Anti-teleport validation (distance-per-update, immune to timing jitter).
-    // The old system computed speed = dist / dt which produced false positives
-    // whenever network jitter compressed dt (two packets arriving close together).
-    // Industry-standard approach: check absolute distance per update instead.
-    // maxMovementSpeed (35 units) acts as the max allowed distance per single
-    // reducer call.  At 30 Hz updates that is ~1050 units/sec — only a teleport
-    // hack would ever reach it during legitimate play.
+    // Keep movement history for diagnostics / future validation, but avoid
+    // server-side snapback for normal infantry movement.
     if !admin_bypass {
-        if let Some(mv_state) = ctx.db.player_movement().identity().find(sender) {
-            let max_dist = max_movement_speed();
-            let max_dist_sq = max_dist * max_dist;
-            let d_sq = dist_sq(&final_pos, &mv_state.last_pos);
-
-            if d_sq > max_dist_sq {
-                // Teleport detected: clamp to max allowed distance (direction preserved)
-                let dist = d_sq.sqrt();
-                let ratio = max_dist / dist;
-                final_pos = Vec3 {
-                    x: mv_state.last_pos.x + (final_pos.x - mv_state.last_pos.x) * ratio,
-                    y: mv_state.last_pos.y + (final_pos.y - mv_state.last_pos.y) * ratio,
-                    z: mv_state.last_pos.z + (final_pos.z - mv_state.last_pos.z) * ratio,
-                };
-            }
-
+        if ctx.db.player_movement().identity().find(sender).is_some() {
             ctx.db
                 .player_movement()
                 .identity()
                 .update(PlayerMovementState {
                     identity: sender,
-                    last_pos: final_pos.clone(),
+                    last_pos: clamped_pos.clone(),
                     last_update: ctx.timestamp,
                     violation_count: 0,
                 });
         } else {
-            init_movement_state(ctx, sender, &final_pos);
+            init_movement_state(ctx, sender, &clamped_pos);
         }
     }
 
     let spawn_protected = if player.spawn_protected {
-        !is_grounded(ctx, &final_pos)
+        !is_grounded(ctx, &clamped_pos)
     } else {
         false
     };
 
     let updated = Player {
-        pos: final_pos,
+        pos: clamped_pos,
         vel,
         rot,
         current_weapon: selected_weapon,
@@ -233,10 +192,6 @@ pub fn set_loadout(ctx: &ReducerContext, slot1: u8, slot2: u8, slot3: u8) -> Res
     }
 
     let sender = ctx.sender();
-    if !sender_connection_is_current(ctx, sender) {
-        return Ok(());
-    }
-
     let player = ctx
         .db
         .player()
@@ -286,10 +241,6 @@ pub fn set_loadout(ctx: &ReducerContext, slot1: u8, slot2: u8, slot3: u8) -> Res
 #[reducer]
 pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
     let sender = ctx.sender();
-    if !sender_connection_is_current(ctx, sender) {
-        return Ok(());
-    }
-
     let player = ctx
         .db
         .player()

@@ -206,13 +206,6 @@ export const PlayerMovementState = __t.object("PlayerMovementState", {
 });
 export type PlayerMovementState = __Infer<typeof PlayerMovementState>;
 
-export const PlayerSession = __t.object("PlayerSession", {
-  identity: __t.identity(),
-  connectionId: __t.connectionId(),
-  connectedAt: __t.timestamp(),
-});
-export type PlayerSession = __Infer<typeof PlayerSession>;
-
 export const Rotation = __t.object("Rotation", {
   yaw: __t.f32(),
   pitch: __t.f32(),

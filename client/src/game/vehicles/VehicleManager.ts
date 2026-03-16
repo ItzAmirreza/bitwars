@@ -403,31 +403,11 @@ export default class VehicleManager {
 
     // Local pilot: store latest server snapshot for smooth chase
     if (id === this.engine.mountedVehicleId) {
-      const newPos = { x: Number(entity.pos.x), y: Number(entity.pos.y), z: Number(entity.pos.z) };
-      const newVel = { x: Number(vel.x), y: Number(vel.y), z: Number(vel.z) };
-
-      // Net diagnostics: vehicle server update
-      (this.engine as any).netDiag?.recordVehicleServerUpdate?.(
-        newPos, newVel,
-        { x: this.localSmoothedPos.x, y: this.localSmoothedPos.y, z: this.localSmoothedPos.z },
-      );
-
-      this.localLastServerPos.set(newPos.x, newPos.y, newPos.z);
-      this.localLastServerVel.set(newVel.x, newVel.y, newVel.z);
+      this.localLastServerPos.set(Number(entity.pos.x), Number(entity.pos.y), Number(entity.pos.z));
+      this.localLastServerVel.set(Number(vel.x), Number(vel.y), Number(vel.z));
       this.localLastServerYaw = Number(rot.yaw ?? 0);
       this.localLastServerPitch = Number(rot.pitch ?? 0);
       this.localLastServerTime = performance.now();
-
-      // Initialize smoothed position directly from the first server snapshot.
-      // updatePerFrame also does this, but entity callbacks can fire in bursts
-      // between animation frames, leaving localSmoothedPos at (0,0,0) until
-      // the next frame — which causes the camera to freeze or jump to origin.
-      if (!this.localSmoothedInitialized) {
-        this.localSmoothedPos.set(newPos.x, newPos.y, newPos.z);
-        this.localSmoothedYaw = this.localLastServerYaw;
-        this.localSmoothedPitch = this.localLastServerPitch;
-        this.localSmoothedInitialized = true;
-      }
     }
 
     // Remote vehicles use InterpolationBuffer
@@ -508,7 +488,6 @@ export default class VehicleManager {
       yaw,
       boosting: false,
     });
-    (this.engine as any).netDiag?.recordVehicleInputSent?.();
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -572,36 +551,8 @@ export default class VehicleManager {
   }
 
   syncMountedCameraToVehicle(delta: number): void {
-    let pose = this.getMountedVehiclePose();
-
-    // Diagnostics: log the pipeline state when F3 is open
-    const diag = (this.engine as any).netDiag;
-    if (diag?.visible) {
-      const mesh = this.vehicles.get(this.engine.mountedVehicleId);
-      const entityRow = this.findEntityRow(this.engine.mountedVehicleId);
-      diag.recordMountedCameraState({
-        mountedId: this.engine.mountedVehicleId,
-        hasMesh: !!mesh,
-        hasEntityRow: !!entityRow,
-        poseResult: pose ? (mesh ? 'mesh' : 'entity') : 'null',
-        meshPos: mesh ? { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z } : null,
-        cameraPos: { x: this.engine.camera.position.x, y: this.engine.camera.position.y, z: this.engine.camera.position.z },
-        vehicleCount: this.vehicles.size,
-        localServerTime: this.localLastServerTime,
-      });
-    }
-
-    // Fallback: if normal pose lookup fails, read directly from entity table
-    // or from the raw server player position.  This prevents the camera from
-    // freezing when the vehicle mesh pipeline has a gap.
-    if (!pose) {
-      const raw = this.getMountedVehiclePoseRaw();
-      if (raw) {
-        pose = raw;
-      } else {
-        return;
-      }
-    }
+    const pose = this.getMountedVehiclePose();
+    if (!pose) return;
 
     const vt = this.getMountedVehicleType();
     const camConfig = vt?.getCameraConfig() ?? { distance: 14, height: 5.2, pitchMin: -0.62, pitchMax: 0.42 };
@@ -817,23 +768,11 @@ export default class VehicleManager {
 
       // ── Position / rotation ──
       if (isLocal) {
-        // Smooth server-following with drag-matched prediction.
-        //
-        // The old approach used velocity integration PLUS error correction
-        // toward the prediction.  This double-integration caused oscillation
-        // when player input changed (velocity integration pushes one way,
-        // correction pulls back → "pushback" feeling).
-        //
-        // Industry-standard fix: compute the predicted position from the
-        // last server snapshot, then smoothly lerp the displayed position
-        // toward it.  No separate velocity integration step.  The prediction
-        // naturally advances each frame (timeSinceUpdate grows), so the
-        // vehicle moves continuously without any double-force artifact.
+        // Dead-reckoning with drag-matched prediction (same as old HelicopterManager)
         if (this.localLastServerTime > 0) {
           const now = performance.now();
           const timeSinceUpdate = (now - this.localLastServerTime) / 1000;
 
-          // Drag-matched position prediction (analytical integral)
           const dragPerTick = 0.992;
           const tickDt = 0.033;
           const dragFactor = Math.pow(dragPerTick, timeSinceUpdate / tickDt);
@@ -850,17 +789,26 @@ export default class VehicleManager {
             this.localSmoothedPitch = this.localLastServerPitch;
             this.localSmoothedInitialized = true;
           } else {
-            // Pure smooth follow — frame-rate-independent exponential smoothing.
-            // ~20% correction per frame at 60 fps → 90% converged in ~170 ms.
-            // Fast enough for responsive control, gentle enough to eliminate jitter.
-            const correctionRate = 1 - Math.pow(1e-6, delta);
+            const currentVelX = this.localLastServerVel.x * dragFactor;
+            const currentVelY = this.localLastServerVel.y * dragFactor;
+            const currentVelZ = this.localLastServerVel.z * dragFactor;
+            this.localSmoothedPos.x += currentVelX * delta;
+            this.localSmoothedPos.y += currentVelY * delta;
+            this.localSmoothedPos.z += currentVelZ * delta;
 
-            this.localSmoothedPos.x += (predictedX - this.localSmoothedPos.x) * correctionRate;
-            this.localSmoothedPos.y += (predictedY - this.localSmoothedPos.y) * correctionRate;
-            this.localSmoothedPos.z += (predictedZ - this.localSmoothedPos.z) * correctionRate;
+            const correctionRate = 1 - Math.pow(0.001, delta);
+            const errX = predictedX - this.localSmoothedPos.x;
+            const errY = predictedY - this.localSmoothedPos.y;
+            const errZ = predictedZ - this.localSmoothedPos.z;
+            this.localSmoothedPos.x += errX * correctionRate;
+            this.localSmoothedPos.y += errY * correctionRate;
+            this.localSmoothedPos.z += errZ * correctionRate;
 
-            // Shortest-path yaw wrap handling any accumulated revolutions
             let dyaw = this.localLastServerYaw - this.localSmoothedYaw;
+            // Wrap to [-PI, PI] handling any number of accumulated revolutions.
+            // The single if/else wrap only handles |dyaw| < 3*PI; continuous
+            // rotation can push smoothedYaw arbitrarily far from the server's
+            // wrapped [-PI, PI] range.
             dyaw -= Math.round(dyaw / (2 * Math.PI)) * 2 * Math.PI;
             this.localSmoothedYaw += dyaw * correctionRate;
             this.localSmoothedPitch += (this.localLastServerPitch - this.localSmoothedPitch) * correctionRate;
@@ -868,16 +816,6 @@ export default class VehicleManager {
 
           mesh.position.copy(this.localSmoothedPos);
           mesh.rotation.set(this.localSmoothedPitch, this.localSmoothedYaw, 0);
-
-          // Net diagnostics: prediction error + staleness
-          const predErrX = this.localSmoothedPos.x - this.localLastServerPos.x;
-          const predErrY = this.localSmoothedPos.y - this.localLastServerPos.y;
-          const predErrZ = this.localSmoothedPos.z - this.localLastServerPos.z;
-          const diag = (this.engine as any).netDiag;
-          diag?.recordVehiclePredError?.(
-            Math.sqrt(predErrX * predErrX + predErrY * predErrY + predErrZ * predErrZ),
-          );
-          diag?.recordVehicleStaleness?.(now - this.localLastServerTime);
         } else {
           const entity = this.findEntityRow(id);
           if (entity) {

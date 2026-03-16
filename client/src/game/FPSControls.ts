@@ -496,10 +496,9 @@ export class FPSControls {
     if (!this.onGround && this.spaceHeld && isAgainstWall(world, this.camera.position.x, this.camera.position.z, this.camera.position.y - this.currentEyeHeight, this.isCrouching ? this.crouchHeight : this.standHeight)) {
       this.isClimbing = true;
       this.velocity.y = WALL_CLIMB_SPEED;
-      // Wall friction on horizontal movement (frame-rate independent)
-      const wallFriction = Math.pow(0.9, delta * 60);
-      this.hVelX *= wallFriction;
-      this.hVelZ *= wallFriction;
+      // Wall friction on horizontal movement
+      this.hVelX *= 0.9;
+      this.hVelZ *= 0.9;
     } else {
       this.isClimbing = false;
     }
