@@ -97,7 +97,7 @@ pub struct PlayerLoadout {
 
 /// Normalized ammo storage: one row per (player, weapon) pair.
 /// Adding new weapons requires zero schema changes.
-#[table(accessor = player_ammo, public)]
+#[table(accessor = player_ammo, public, index(accessor = idx_ammo_identity, btree(columns = [identity])))]
 pub struct PlayerAmmo {
     #[primary_key]
     #[auto_inc]
@@ -108,15 +108,17 @@ pub struct PlayerAmmo {
 }
 
 /// Per-player fire timing (shared across all weapons).
-#[table(accessor = player_fire_state, public)]
+/// Private: only needed server-side for fire rate validation.
+#[table(accessor = player_fire_state)]
 pub struct PlayerFireState {
     #[primary_key]
     pub identity: Identity,
     pub last_fire_time: Timestamp,
 }
 
-/// Tracks movement for speed validation.
-#[table(accessor = player_movement, public)]
+/// Tracks movement history for diagnostics / future anti-cheat.
+/// Private: only needed server-side.
+#[table(accessor = player_movement)]
 pub struct PlayerMovementState {
     #[primary_key]
     pub identity: Identity,

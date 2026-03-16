@@ -153,8 +153,8 @@ pub fn get_vehicle_weapon(index: u8) -> &'static VehicleWeaponDef {
 // Adding a new weapon does NOT require changes here.
 
 pub fn get_ammo(ctx: &ReducerContext, identity: Identity, weapon: u8) -> i32 {
-    for row in ctx.db.player_ammo().iter() {
-        if row.identity == identity && row.weapon_index == weapon {
+    for row in ctx.db.player_ammo().idx_ammo_identity().filter(&identity) {
+        if row.weapon_index == weapon {
             return row.ammo;
         }
     }
@@ -162,8 +162,8 @@ pub fn get_ammo(ctx: &ReducerContext, identity: Identity, weapon: u8) -> i32 {
 }
 
 pub fn set_ammo(ctx: &ReducerContext, identity: Identity, weapon: u8, ammo: i32) {
-    for row in ctx.db.player_ammo().iter() {
-        if row.identity == identity && row.weapon_index == weapon {
+    for row in ctx.db.player_ammo().idx_ammo_identity().filter(&identity) {
+        if row.weapon_index == weapon {
             ctx.db.player_ammo().id().update(PlayerAmmo { ammo, ..row });
             return;
         }
@@ -226,8 +226,9 @@ pub fn init_all_ammo(ctx: &ReducerContext, identity: Identity) {
         let has_row = ctx
             .db
             .player_ammo()
-            .iter()
-            .any(|r| r.identity == identity && r.weapon_index == def.index);
+            .idx_ammo_identity()
+            .filter(&identity)
+            .any(|r| r.weapon_index == def.index);
         if !has_row {
             ctx.db.player_ammo().insert(PlayerAmmo {
                 id: 0,

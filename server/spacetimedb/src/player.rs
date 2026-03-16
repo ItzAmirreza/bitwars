@@ -147,8 +147,13 @@ pub fn update_position(
     let clamped_pos = clamp_pos(&pos);
     let admin_bypass = is_admin(&player.username);
 
-    // Keep movement history for diagnostics / future validation, but avoid
-    // server-side snapback for normal infantry movement.
+    // Movement history tracking (no snapback — server never overrides client
+    // infantry position).  Speed-based anti-cheat was removed because
+    // server-side reducer timestamp compression under load (tick_vehicles,
+    // reset_map) produced false speed spikes that caused the server to snap
+    // the player back to an old position, creating the A↔B teleport loop.
+    // Anti-cheat will be re-added using distance-budget-per-second instead of
+    // instantaneous speed once movement is stable.
     if !admin_bypass {
         if ctx.db.player_movement().identity().find(sender).is_some() {
             ctx.db

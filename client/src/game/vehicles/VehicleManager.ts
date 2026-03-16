@@ -14,6 +14,7 @@ import { ENTITY_KINDS, VEHICLE_TYPES } from '../../shared-config';
 import { VEHICLE_WEAPON_DEFINITIONS } from '../WeaponRegistry';
 import type { VehicleWeaponDefinition } from '../WeaponRegistry';
 import type { DynamicLightOptions } from '../Engine';
+import type { NetDiagnostics } from '../NetDiagnostics';
 import type { DbConnection } from '../../module_bindings';
 import type { AudioSystem } from '../AudioSystem';
 import type { VFX } from '../VFX';
@@ -82,6 +83,7 @@ export interface VehicleEngineContext {
   updateDynamicLight(id: string, patch: Partial<DynamicLightOptions>): void;
   applyExplosionCameraEffects(cx: number, cy: number, cz: number, radius: number, damage: number): void;
   disposeObjectMaterials(root: THREE.Object3D): void;
+  netDiag: NetDiagnostics;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -403,11 +405,30 @@ export default class VehicleManager {
 
     // Local pilot: store latest server snapshot for smooth chase
     if (id === this.engine.mountedVehicleId) {
-      this.localLastServerPos.set(Number(entity.pos.x), Number(entity.pos.y), Number(entity.pos.z));
-      this.localLastServerVel.set(Number(vel.x), Number(vel.y), Number(vel.z));
+      const newPos = { x: Number(entity.pos.x), y: Number(entity.pos.y), z: Number(entity.pos.z) };
+      const newVel = { x: Number(vel.x), y: Number(vel.y), z: Number(vel.z) };
+
+      // Record diagnostics before updating (uses old smoothed pos for jump measurement)
+      this.engine.netDiag.recordVehicleServerUpdate(
+        newPos, newVel,
+        { x: this.localSmoothedPos.x, y: this.localSmoothedPos.y, z: this.localSmoothedPos.z },
+      );
+
+      this.localLastServerPos.set(newPos.x, newPos.y, newPos.z);
+      this.localLastServerVel.set(newVel.x, newVel.y, newVel.z);
       this.localLastServerYaw = Number(rot.yaw ?? 0);
       this.localLastServerPitch = Number(rot.pitch ?? 0);
       this.localLastServerTime = performance.now();
+
+      // Snap smoothed position to server reality on every update.
+      // This eliminates prediction drift that caused 3–36u VEH_SNAP_JUMPs.
+      // The camera chase lerp in syncMountedCameraToVehicle provides all
+      // the visual smoothing needed, so the mesh can track the server tightly.
+      if (this.localSmoothedInitialized) {
+        this.localSmoothedPos.copy(this.localLastServerPos);
+        this.localSmoothedYaw = this.localLastServerYaw;
+        this.localSmoothedPitch = this.localLastServerPitch;
+      }
     }
 
     // Remote vehicles use InterpolationBuffer
@@ -579,7 +600,9 @@ export default class VehicleManager {
       this.mountedCameraPosition.copy(desired);
       this.mountedCameraInitialized = true;
     } else {
-      const lerpFactor = 1 - Math.pow(1 - 0.72, delta * 60);
+      // Higher lerp rate (0.88 vs old 0.72) to track the snap-corrected mesh
+      // without visible lag.  At 60fps this reaches 99% in ~3 frames (~50ms).
+      const lerpFactor = 1 - Math.pow(1 - 0.88, delta * 60);
       this.mountedCameraPosition.lerp(desired, lerpFactor);
     }
 

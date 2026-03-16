@@ -22,6 +22,7 @@ import type { VehicleFireContext } from './VehicleFireController';
 import { ENTITY_KINDS } from '../shared-config';
 import type { DbConnection } from '../module_bindings';
 import type { GameSettings } from '../store';
+import { NetDiagnostics } from './NetDiagnostics';
 
 const ENTITY_KIND_VEHICLE = ENTITY_KINDS.Vehicle;
 
@@ -168,6 +169,9 @@ export class Engine {
 
   // Chunk streaming
   private chunkStreamer!: ChunkStreamer;
+
+  // Dev-only networking diagnostics (F3 overlay, F4 download)
+  private netDiag = new NetDiagnostics();
 
   constructor(
     container: HTMLElement,
@@ -956,13 +960,25 @@ export class Engine {
           this.lastWeaponIndex = serverWeapon;
         }
 
-        // Detect server-side teleportation (large position jump)
+        // Server reconciliation for local player:
+        // When MOUNTED: camera is driven by vehicle mesh in syncMountedCameraToVehicle.
+        //   Do NOT move camera here.  player.pos is the seat position which is
+        //   always ~15u from the 3rd-person camera — comparing would be meaningless.
+        // When INFANTRY: client is authoritative.  Only teleport on respawn-level
+        //   jumps (> 100u).
         const sp = player.pos;
-        const cp = this.camera.position;
-        const tdx = sp.x - cp.x, tdy = sp.y - cp.y, tdz = sp.z - cp.z;
-        if (tdx * tdx + tdy * tdy + tdz * tdz > 100) {
-          this.camera.position.set(sp.x, sp.y, sp.z);
-          this.controls.resetVelocity();
+        const isMountedNow = Number(player.mountedVehicleId ?? 0) !== 0;
+        if (!isMountedNow) {
+          const cp = this.camera.position;
+          const tdx = sp.x - cp.x, tdy = sp.y - cp.y, tdz = sp.z - cp.z;
+          const echoDsq = tdx * tdx + tdy * tdy + tdz * tdz;
+          this.netDiag.recordServerEcho(sp, { x: cp.x, y: cp.y, z: cp.z });
+          if (echoDsq > 10000) {
+            // > 100u: respawn, map reset, admin teleport
+            this.netDiag.recordTeleport(sp, { x: cp.x, y: cp.y, z: cp.z });
+            this.camera.position.set(sp.x, sp.y, sp.z);
+            this.controls.resetVelocity();
+          }
         }
 
         const oldHealth = this.health;
@@ -977,6 +993,13 @@ export class Engine {
             if (pose) {
               this.vehicleManager.vehiclePilotYaw = pose.yaw;
               this.vehicleManager.vehiclePilotPitch = Math.max(this.vehicleManager.PILOT_PITCH_MIN, Math.min(this.vehicleManager.PILOT_PITCH_MAX, pose.pitch));
+              // Seed dead-reckoning immediately so the first frame doesn't
+              // show a stale/origin position while waiting for entity.onUpdate
+              this.vehicleManager.localLastServerPos.set(pose.x, pose.y, pose.z);
+              this.vehicleManager.localLastServerVel.set(0, 0, 0);
+              this.vehicleManager.localLastServerYaw = pose.yaw;
+              this.vehicleManager.localLastServerPitch = pose.pitch;
+              this.vehicleManager.localLastServerTime = performance.now();
             }
             // Reset vehicle weapon state on mount
             this.vehicleManager.vehicleWeaponIndex = 0;
@@ -993,7 +1016,10 @@ export class Engine {
               this.vehicleManager.vehicleAmmo[1] = VEHICLE_WEAPONS[1].maxAmmo;
             }
           } else {
-            // Dismounting — reset jet throttle + restore opacity
+            // Dismounting — snap camera to server player position so infantry
+            // controls start from the correct location (not the 3rd-person offset).
+            this.camera.position.set(sp.x, sp.y, sp.z);
+            this.controls.resetVelocity();
             this.vehicleManager.jetThrottle = 0;
           }
         }
@@ -1489,16 +1515,18 @@ export class Engine {
     const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
     const sendYaw = this.mountedVehicleId !== 0 ? this.vehicleManager.vehiclePilotYaw : e.y;
     const sendPitch = this.mountedVehicleId !== 0 ? this.vehicleManager.vehiclePilotPitch : e.x;
+    const sentPos = {
+      x: Math.max(-1, Math.min(WORLD_X + 1, px)),
+      y: Math.max(-10, Math.min(100, py)),
+      z: Math.max(-1, Math.min(WORLD_Z + 1, pz)),
+    };
     this.conn.reducers.updatePosition({
-      pos: {
-        x: Math.max(-1, Math.min(WORLD_X + 1, px)),
-        y: Math.max(-10, Math.min(100, py)),
-        z: Math.max(-1, Math.min(WORLD_Z + 1, pz)),
-      },
+      pos: sentPos,
       vel: { x: vel.x, y: vel.y, z: vel.z },
       rot: { yaw: sendYaw, pitch: sendPitch },
       weapon: this.weapons.currentWeapon,
     });
+    this.netDiag.recordPositionSent(sentPos);
 
     if (this.mountedVehicleId !== 0) {
       const entityId = this.findLocalPlayerEntityId();
@@ -1540,6 +1568,18 @@ export class Engine {
       this.frameCount = 0; this.fpsTime = 0;
     }
 
+    // Net diagnostics frame tracking
+    this.netDiag.recordFrame(delta);
+    const _diagVel = this.controls.getVelocity();
+    this.netDiag.recordSpeed(Math.sqrt(_diagVel.x * _diagVel.x + _diagVel.y * _diagVel.y + _diagVel.z * _diagVel.z));
+    if (this.netDiag.visible) {
+      this.netDiag.recordMountedId(this.mountedVehicleId);
+      if (this.mountedVehicleId !== 0) {
+        const staleness = performance.now() - this.vehicleManager.localLastServerTime;
+        this.netDiag.recordVehicleStaleness(staleness);
+      }
+    }
+
     const startupLocked = !this.chunkStreamer.startupWorldReady;
     this.updateInputState(delta, startupLocked);
     this.updateGameSystems(delta);
@@ -1548,8 +1588,13 @@ export class Engine {
     // Interpolate remote players every frame
     this.remotePlayers.interpolateAll();
 
+    // Vehicle per-frame update FIRST so mesh positions are current before camera sync.
+    // Old order (camera → mesh update) caused one-frame lag on the camera.
+    this.vehicleManager.updatePerFrame(delta);
+
     if (this.mountedVehicleId !== 0) {
       this.vehicleManager.syncMountedCameraToVehicle(delta);
+      this.vehicleManager.syncVehicleInput(delta);
     }
 
     // Chunk streaming (every N frames to load quickly)
@@ -1557,13 +1602,6 @@ export class Engine {
     if (this.chunkStreamer.chunkLoadFrame % CHUNK_STREAM_INTERVAL_FRAMES === 0) {
       this.chunkStreamer.updateChunkLoading();
     }
-
-    if (this.mountedVehicleId !== 0) {
-      this.vehicleManager.syncVehicleInput(delta);
-    }
-
-    // Vehicle per-frame update (delegated to VehicleManager)
-    this.vehicleManager.updatePerFrame(delta);
 
     this.chunkStreamer.ensureSpawnGroundReady();
 
@@ -1596,7 +1634,8 @@ export class Engine {
     this.sun.position.set(sp.x + 50, 80, sp.z + 30);
     this.sun.target.position.set(sp.x, 0, sp.z);
 
-    // Position sync
+    // Position sync — always send while alive (gating on pointer-lock caused
+    // desync when lock dropped but local movement continued)
     this.sendPositionUpdate();
 
     // Rebuild dirty chunks with distance-prioritized budget
@@ -1613,6 +1652,7 @@ export class Engine {
 
     this.renderFrame(delta);
     this.pushHudState(startupProgress);
+    this.netDiag.refreshOverlay();
   };
 
   private updateInputState(delta: number, startupLocked: boolean): void {
@@ -1942,6 +1982,7 @@ export class Engine {
     this.sky.dispose();
     this.vfx.dispose();
     this.projectileManager.dispose();
+    this.netDiag.dispose();
     // Clean up grenade visuals
     for (const vis of this.grenadeVisuals.values()) {
       this.scene.remove(vis.mesh);
