@@ -1,5 +1,6 @@
 /**
  * UIAudio — hover, click, deploy, navigate, error, and type sounds.
+ * All non-spatial — routed through the 'ui' submix bus.
  */
 
 import type { AudioCore } from './AudioCore';
@@ -7,6 +8,7 @@ import type { AudioCore } from './AudioCore';
 export function playUIHover(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
+  const uiBus = core.getBus('ui');
 
   const osc = ctx.createOscillator();
   osc.type = 'sine';
@@ -14,7 +16,7 @@ export function playUIHover(core: AudioCore): void {
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.04, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
-  osc.connect(g).connect(core.master!);
+  osc.connect(g).connect(uiBus);
   osc.start(t);
   osc.stop(t + 0.03);
 }
@@ -22,6 +24,7 @@ export function playUIHover(core: AudioCore): void {
 export function playUIClick(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
+  const uiBus = core.getBus('ui');
 
   const osc = ctx.createOscillator();
   osc.type = 'sine';
@@ -30,7 +33,7 @@ export function playUIClick(core: AudioCore): void {
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.08, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
-  osc.connect(g).connect(core.master!);
+  osc.connect(g).connect(uiBus);
   osc.start(t);
   osc.stop(t + 0.06);
 }
@@ -38,6 +41,7 @@ export function playUIClick(core: AudioCore): void {
 export function playUIDeploy(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
+  const uiBus = core.getBus('ui');
 
   // Rising sweep
   const osc = ctx.createOscillator();
@@ -47,7 +51,7 @@ export function playUIDeploy(core: AudioCore): void {
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.1, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-  osc.connect(g).connect(core.master!);
+  osc.connect(g).connect(uiBus);
   osc.start(t);
   osc.stop(t + 0.15);
 
@@ -59,7 +63,7 @@ export function playUIDeploy(core: AudioCore): void {
   g2.gain.setValueAtTime(0, t);
   g2.gain.setValueAtTime(0.12, t + 0.08);
   g2.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
-  osc2.connect(g2).connect(core.master!);
+  osc2.connect(g2).connect(uiBus);
   osc2.start(t);
   osc2.stop(t + 0.25);
 }
@@ -67,6 +71,7 @@ export function playUIDeploy(core: AudioCore): void {
 export function playUINavigate(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
+  const uiBus = core.getBus('ui');
 
   const osc = ctx.createOscillator();
   osc.type = 'sine';
@@ -75,7 +80,7 @@ export function playUINavigate(core: AudioCore): void {
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.06, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-  osc.connect(g).connect(core.master!);
+  osc.connect(g).connect(uiBus);
   osc.start(t);
   osc.stop(t + 0.1);
 }
@@ -83,6 +88,7 @@ export function playUINavigate(core: AudioCore): void {
 export function playUIError(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
+  const uiBus = core.getBus('ui');
 
   const osc = ctx.createOscillator();
   osc.type = 'square';
@@ -94,7 +100,7 @@ export function playUIError(core: AudioCore): void {
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 800;
-  osc.connect(lp).connect(g).connect(core.master!);
+  osc.connect(lp).connect(g).connect(uiBus);
   osc.start(t);
   osc.stop(t + 0.16);
 }
@@ -102,6 +108,7 @@ export function playUIError(core: AudioCore): void {
 export function playUIType(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
+  const uiBus = core.getBus('ui');
 
   const osc = ctx.createOscillator();
   osc.type = 'sine';
@@ -109,7 +116,7 @@ export function playUIType(core: AudioCore): void {
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.02, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.02);
-  osc.connect(g).connect(core.master!);
+  osc.connect(g).connect(uiBus);
   osc.start(t);
   osc.stop(t + 0.02);
 }

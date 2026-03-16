@@ -8,7 +8,7 @@ import type { AudioCore, SpatialSoundOptions, SpatialBusOptions } from './AudioC
 let stepIndex = 0;
 
 export function playStep(core: AudioCore, sprinting = false, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -21,9 +21,14 @@ export function playStep(core: AudioCore, sprinting = false, spatial?: SpatialSo
       occlusionStrength: 0.95,
       baseLowpass: 3500,
       reverbAmount: 0.08,
+      bus: 'movement',
+      voiceCategory: 'movement',
+      voiceDuration: 0.1,
     },
     0.12,
   );
+  if (!result) return;
+  const { ctx, t, out } = result;
 
   stepIndex++;
   const footPitch = stepIndex % 2 === 0 ? 1.04 : 0.96;
@@ -105,7 +110,7 @@ export function playStep(core: AudioCore, sprinting = false, spatial?: SpatialSo
 }
 
 export function playJump(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -118,9 +123,14 @@ export function playJump(core: AudioCore, spatial?: SpatialSoundOptions): void {
       occlusionStrength: 0.9,
       baseLowpass: 10500,
       reverbAmount: 0.05,
+      bus: 'movement',
+      voiceCategory: 'movement',
+      voiceDuration: 0.12,
     },
     0.1,
   );
+  if (!result) return;
+  const { ctx, t, out } = result;
 
   // ── Ascending frequency sweep ──
   const sweep = ctx.createOscillator();
@@ -180,8 +190,13 @@ export function playLanding(core: AudioCore, intensity: number, spatial?: Spatia
     occlusionStrength: 0.95,
     baseLowpass: 3500,
     reverbAmount: 0.08,
+    bus: 'movement',
+    voiceCategory: 'movement',
+    voiceDuration: 0.2,
   };
-  const { ctx, t, out } = core.resolveOutput(spatial, busOptions, 0.15);
+  const result = core.resolveOutput(spatial, busOptions, 0.15);
+  if (!result) return;
+  const { ctx, t, out } = result;
   const vol = 0.03 + intensity * 0.07;
 
   // ── Boot-slap transient ──
@@ -249,7 +264,7 @@ export function playLanding(core: AudioCore, intensity: number, spatial?: Spatia
 }
 
 export function playSlideStart(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -262,9 +277,14 @@ export function playSlideStart(core: AudioCore, spatial?: SpatialSoundOptions): 
       occlusionStrength: 1,
       baseLowpass: 7600,
       reverbAmount: 0.06,
+      bus: 'movement',
+      voiceCategory: 'movement',
+      voiceDuration: 0.4,
     },
     0.12,
   );
+  if (!result) return;
+  const { ctx, t, out } = result;
 
   // ── Initial skid transient ──
   const skid = ctx.createBufferSource();

@@ -6,7 +6,7 @@
 import type { AudioCore, SpatialSoundOptions, SpatialBusOptions } from './AudioCore';
 
 export function playExplosion(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out, delay } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -19,24 +19,26 @@ export function playExplosion(core: AudioCore, spatial?: SpatialSoundOptions): v
       occlusionStrength: 1.2,
       baseLowpass: 9200,
       reverbAmount: 0.22,
+      bus: 'combat',
+      voiceCategory: 'combat',
+      voiceDuration: 1.0,
     },
     0.35,
   );
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
   // Explosion noise
   const src = ctx.createBufferSource();
   src.buffer = core.noise(0.6, 0.18);
-
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.setValueAtTime(1200, t0);
   lp.frequency.exponentialRampToValueAtTime(80, t0 + 0.6);
-
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.50, t0);
   g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.6);
-
   src.connect(lp).connect(g).connect(out);
   src.start(t0);
   src.stop(t0 + 0.61);
@@ -83,7 +85,7 @@ export function playExplosion(core: AudioCore, spatial?: SpatialSoundOptions): v
 }
 
 export function playBlockBreak(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out, delay } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -96,29 +98,31 @@ export function playBlockBreak(core: AudioCore, spatial?: SpatialSoundOptions): 
       occlusionStrength: 0.75,
       baseLowpass: 12000,
       reverbAmount: 0.03,
+      bus: 'combat',
+      voiceCategory: 'combat',
+      voiceDuration: 0.1,
     },
     0.12,
   );
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
   const src = ctx.createBufferSource();
   src.buffer = core.noise(0.07, 0.25);
-
   const hp = ctx.createBiquadFilter();
   hp.type = 'highpass';
   hp.frequency.value = 2500;
-
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.18, t0);
   g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.07);
-
   src.connect(hp).connect(g).connect(out);
   src.start(t0);
   src.stop(t0 + 0.07);
 }
 
 export function playBlockLand(core: AudioCore, intensity: number = 0.5, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out, delay } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -131,9 +135,14 @@ export function playBlockLand(core: AudioCore, intensity: number = 0.5, spatial?
       occlusionStrength: 1,
       baseLowpass: 7200,
       reverbAmount: 0.08,
+      bus: 'combat',
+      voiceCategory: 'combat',
+      voiceDuration: 0.15,
     },
     0.16,
   );
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
   const t0 = t + delay;
   const vol = 0.15 + intensity * 0.35;
 
@@ -161,7 +170,7 @@ export function playBlockLand(core: AudioCore, intensity: number = 0.5, spatial?
 }
 
 export function playCrumble(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out, delay } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -174,9 +183,14 @@ export function playCrumble(core: AudioCore, spatial?: SpatialSoundOptions): voi
       occlusionStrength: 1.1,
       baseLowpass: 8500,
       reverbAmount: 0.1,
+      bus: 'combat',
+      voiceCategory: 'combat',
+      voiceDuration: 0.3,
     },
     0.18,
   );
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
   const src = ctx.createBufferSource();
@@ -196,6 +210,7 @@ export function playCrumble(core: AudioCore, spatial?: SpatialSoundOptions): voi
 export function playHitMarker(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
+  const uiBus = core.getBus('ui');
 
   // Primary tone
   const o1 = ctx.createOscillator();
@@ -212,7 +227,7 @@ export function playHitMarker(core: AudioCore): void {
   g.gain.setValueAtTime(0.15, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
 
-  o1.connect(g).connect(core.master!);
+  o1.connect(g).connect(uiBus);
   o2.connect(g);
   o1.start(t);
   o1.stop(t + 0.11);
@@ -228,7 +243,7 @@ export function playHitMarker(core: AudioCore): void {
   const cg = ctx.createGain();
   cg.gain.setValueAtTime(0.06, t);
   cg.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
-  crunch.connect(hp).connect(cg).connect(core.master!);
+  crunch.connect(hp).connect(cg).connect(uiBus);
   crunch.start(t);
   crunch.stop(t + 0.04);
 }
@@ -236,6 +251,7 @@ export function playHitMarker(core: AudioCore): void {
 export function playKillConfirm(core: AudioCore): void {
   const ctx = core.ensure();
   const t = ctx.currentTime;
+  const uiBus = core.getBus('ui');
 
   // Three ascending tones
   const freqs = [880, 1175, 1760];
@@ -252,7 +268,7 @@ export function playKillConfirm(core: AudioCore): void {
     g.gain.setValueAtTime(vols[i], t + delays[i]);
     g.gain.exponentialRampToValueAtTime(0.001, t + delays[i] + 0.15);
 
-    osc.connect(g).connect(core.master!);
+    osc.connect(g).connect(uiBus);
     osc.start(t + delays[i]);
     osc.stop(t + delays[i] + 0.15);
   }
@@ -266,13 +282,13 @@ export function playKillConfirm(core: AudioCore): void {
   sg.gain.setValueAtTime(0, t);
   sg.gain.setValueAtTime(0.06, t + 0.12);
   sg.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
-  shimmer.connect(sg).connect(core.master!);
+  shimmer.connect(sg).connect(uiBus);
   shimmer.start(t + 0.12);
   shimmer.stop(t + 0.35);
 }
 
 export function playDeath(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -285,25 +301,27 @@ export function playDeath(core: AudioCore, spatial?: SpatialSoundOptions): void 
       occlusionStrength: 1,
       baseLowpass: 8600,
       reverbAmount: 0.08,
+      bus: 'combat',
+      voiceCategory: 'combat',
+      voiceDuration: 1.3,
     },
     0.16,
   );
+  if (!result) return;
+  const { ctx, t, out } = result;
 
   // Deep descending tone
   const osc = ctx.createOscillator();
   osc.type = 'sawtooth';
   osc.frequency.setValueAtTime(200, t);
   osc.frequency.exponentialRampToValueAtTime(30, t + 0.8);
-
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.setValueAtTime(600, t);
   lp.frequency.exponentialRampToValueAtTime(80, t + 0.8);
-
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.30, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
-
   osc.connect(lp).connect(g).connect(out);
   osc.start(t);
   osc.stop(t + 0.81);
@@ -346,8 +364,13 @@ export function playHeartbeat(core: AudioCore, spatial?: SpatialSoundOptions): v
     occlusionStrength: 0.9,
     baseLowpass: 3800,
     reverbAmount: 0.01,
+    bus: 'combat',
+    voiceCategory: 'combat',
+    voiceDuration: 0.3,
   };
-  const { ctx, t, out } = core.resolveOutput(spatial, busOptions, 0.05);
+  const result = core.resolveOutput(spatial, busOptions, 0.05);
+  if (!result) return;
+  const { ctx, t, out } = result;
 
   // First beat (lub)
   const lub = ctx.createOscillator();
@@ -361,7 +384,7 @@ export function playHeartbeat(core: AudioCore, spatial?: SpatialSoundOptions): v
   lub.start(t);
   lub.stop(t + 0.13);
 
-  // Second beat (dub) - slightly delayed, tracks source
+  // Second beat (dub) — slightly delayed, tracks source
   core.scheduleSpatialLayer(spatial, busOptions, 0.05, 0.15, (lateCtx, lateT, lateOut) => {
     const dub = lateCtx.createOscillator();
     dub.type = 'sine';
@@ -390,7 +413,7 @@ export function playHeartbeat(core: AudioCore, spatial?: SpatialSoundOptions): v
 }
 
 export function playDamage(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -403,9 +426,14 @@ export function playDamage(core: AudioCore, spatial?: SpatialSoundOptions): void
       occlusionStrength: 0.95,
       baseLowpass: 7000,
       reverbAmount: 0.05,
+      bus: 'combat',
+      voiceCategory: 'combat',
+      voiceDuration: 0.2,
     },
     0.08,
   );
+  if (!result) return;
+  const { ctx, t, out } = result;
 
   const src = ctx.createBufferSource();
   src.buffer = core.noise(0.15, 0.2);
@@ -442,8 +470,13 @@ export function playRespawn(core: AudioCore, spatial?: SpatialSoundOptions): voi
     occlusionStrength: 0.9,
     baseLowpass: 12500,
     reverbAmount: 0.1,
+    bus: 'combat',
+    voiceCategory: 'combat',
+    voiceDuration: 0.5,
   };
-  const { ctx, t, out } = core.resolveOutput(spatial, busOptions, 0.15);
+  const result = core.resolveOutput(spatial, busOptions, 0.15);
+  if (!result) return;
+  const { ctx, t, out } = result;
 
   const osc = ctx.createOscillator();
   osc.type = 'sine';

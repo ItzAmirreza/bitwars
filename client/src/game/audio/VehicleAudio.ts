@@ -146,7 +146,7 @@ export function startHelicopterSound(core: AudioCore, id: number): void {
   panner.coneInnerAngle = 360;
   panner.coneOuterAngle = 360;
 
-  mixGain.connect(outputFilter).connect(panner).connect(core.master!);
+  mixGain.connect(outputFilter).connect(panner).connect(core.getBus('vehicle'));
 
   // Start all sources
   chopSrc.start(t);
@@ -369,7 +369,7 @@ export function startJetEngineSound(core: AudioCore, id: number): void {
   panner.coneInnerAngle = 360;
   panner.coneOuterAngle = 360;
 
-  mixGain.connect(outputFilter).connect(panner).connect(core.master!);
+  mixGain.connect(outputFilter).connect(panner).connect(core.getBus('vehicle'));
 
   turbineOsc.start(t);
   roarSrc.start(t);

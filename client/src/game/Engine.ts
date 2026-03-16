@@ -250,7 +250,10 @@ export class Engine {
       world: this.world,
       localIdentity: this.localIdentity,
       scene: this.scene,
-      onChunkLoaded: (cx, cy, cz, decoded) => this.lanterns.syncLanternLightsForChunk(cx, cy, cz, this.getLanternContext(), decoded),
+      onChunkLoaded: (cx, cy, cz, decoded) => {
+        this.lanterns.syncLanternLightsForChunk(cx, cy, cz, this.getLanternContext(), decoded);
+        this.audio?.sendChunkToWorker(packChunkId(cx, cy, cz), decoded);
+      },
       onChunkUnloading: (chunkId) => this.lanterns.clearLanternLightsForChunk(chunkId, this.getLanternContext()),
     });
     this.chunkStreamer.loadWorldFromServer();
@@ -295,6 +298,7 @@ export class Engine {
     this.audio = new AudioSystem();
     this.audio.setOcclusionSampler((x: number, y: number, z: number) => this.world.getBlock(x, y, z) !== 0);
     this.audio.setListenerPose(this.camera.position, { x: 0, y: 0, z: -1 }, { x: 0, y: 1, z: 0 });
+    this.audio.initRayTracer();
 
     // ── VFX ──
     this.vfx = new VFX(this.scene, this.camera);
@@ -827,6 +831,7 @@ export class Engine {
       const decoded = VoxelWorld.rleDecodeChunk(data);
       this.world.loadChunk(cx, cy, cz, decoded);
       this.lanterns.syncLanternLightsForChunk(cx, cy, cz, this.getLanternContext(), decoded);
+      this.audio.sendChunkToWorker(id, decoded);
       this.chunkStreamer.pendingChunkRequests.delete(id);
       this.chunkStreamer.queuedChunkRequests.delete(id);
       this.chunkStreamer.bootstrapQueued.delete(id);
@@ -840,6 +845,7 @@ export class Engine {
       this.chunkStreamer.queuedChunkRequests.delete(id);
       this.chunkStreamer.bootstrapQueued.delete(id);
       this.lanterns.clearLanternLightsForChunk(id, this.getLanternContext());
+      this.audio.removeChunkFromWorker(id);
       this.world.unloadChunk(cx, cy, cz, this.scene);
     });
 
@@ -885,6 +891,7 @@ export class Engine {
       // Apply authoritative chunk data (naturally corrects any rejected predictions)
       this.world.loadChunk(cx, cy, cz, newDecoded);
       this.lanterns.syncLanternLightsForChunk(cx, cy, cz, this.getLanternContext(), newDecoded);
+      this.audio.sendChunkToWorker(id, newDecoded);
       this.chunkStreamer.pendingChunkRequests.delete(id);
     });
   }
@@ -1766,6 +1773,7 @@ export class Engine {
     this.camera.getWorldDirection(this.audioForward);
     this.audioUp.set(0, 1, 0).applyQuaternion(this.camera.quaternion).normalize();
     this.audio.setListenerPose(this.camera.position, this.audioForward, this.audioUp);
+    this.audio.updateAcoustics(delta);
 
     // Landing impact effects
     if (this.controls.justLanded) {

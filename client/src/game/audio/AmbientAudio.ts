@@ -1,5 +1,7 @@
 /**
  * AmbientAudio — menu background ambience.
+ * Fixed race condition: uses a state flag instead of relying on nulling
+ * the oscillator reference inside a delayed setTimeout callback.
  */
 
 import type { AudioCore } from './AudioCore';
@@ -9,12 +11,31 @@ import type { AudioCore } from './AudioCore';
 let ambientOsc: OscillatorNode | null = null;
 let ambientGain: GainNode | null = null;
 let ambientLfo: OscillatorNode | null = null;
+/** Guards against the start-during-stop race condition. */
+let ambientState: 'stopped' | 'playing' | 'stopping' = 'stopped';
+let stopTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function startMenuAmbience(core: AudioCore): void {
+  // If we're in the middle of stopping, cancel the stop and restart.
+  if (ambientState === 'stopping') {
+    if (stopTimer) {
+      clearTimeout(stopTimer);
+      stopTimer = null;
+    }
+    // Kill old oscillators immediately so we can start fresh.
+    try { ambientOsc?.stop(); } catch { /* ok */ }
+    try { ambientLfo?.stop(); } catch { /* ok */ }
+    ambientOsc = null;
+    ambientLfo = null;
+    ambientGain = null;
+    ambientState = 'stopped';
+  }
+
+  if (ambientState === 'playing') return; // already playing
+
   const ctx = core.ensure();
   const t = ctx.currentTime;
-
-  if (ambientOsc) return; // already playing
+  const uiBus = core.getBus('ui');
 
   // Deep pad
   ambientGain = ctx.createGain();
@@ -37,23 +58,29 @@ export function startMenuAmbience(core: AudioCore): void {
   lfoGain.gain.value = 8;
   ambientLfo.connect(lfoGain).connect(ambientOsc.frequency);
 
-  ambientOsc.connect(lp).connect(ambientGain).connect(core.master!);
+  ambientOsc.connect(lp).connect(ambientGain).connect(uiBus);
   ambientOsc.start(t);
   ambientLfo.start(t);
+
+  ambientState = 'playing';
 }
 
 export function stopMenuAmbience(core: AudioCore): void {
-  if (!core.ctx) return;
+  if (ambientState !== 'playing' || !core.ctx) return;
+  ambientState = 'stopping';
   const t = core.ctx.currentTime;
 
   if (ambientGain) {
     ambientGain.gain.linearRampToValueAtTime(0, t + 0.5);
   }
-  setTimeout(() => {
-    ambientOsc?.stop();
-    ambientLfo?.stop();
+
+  stopTimer = setTimeout(() => {
+    stopTimer = null;
+    try { ambientOsc?.stop(); } catch { /* ok */ }
+    try { ambientLfo?.stop(); } catch { /* ok */ }
     ambientOsc = null;
     ambientLfo = null;
     ambientGain = null;
+    ambientState = 'stopped';
   }, 600);
 }

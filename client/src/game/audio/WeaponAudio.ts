@@ -1,5 +1,9 @@
 /**
  * WeaponAudio — weapon firing, reload, empty click, and switch sounds.
+ *
+ * Each function now specifies a VoiceCategory + AudioBusName + voiceDuration
+ * so AudioCore can cull distant sounds, enforce polyphony limits, route
+ * through the correct submix bus, and clean up nodes automatically.
  */
 
 import type { AudioCore, SpatialSoundOptions, SpatialBusOptions } from './AudioCore';
@@ -16,23 +20,25 @@ export function playRifle(core: AudioCore, spatial?: SpatialSoundOptions): void 
     occlusionStrength: 0.9,
     baseLowpass: 14500,
     reverbAmount: 0.1,
+    bus: 'weapon',
+    voiceCategory: 'weapon',
+    voiceDuration: 0.15,
   };
-  const { ctx, t, out, delay } = core.resolveOutput(spatial, busOptions, 0.22);
+  const result = core.resolveOutput(spatial, busOptions, 0.22);
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
   // Initial transient crack
   const src = ctx.createBufferSource();
   src.buffer = core.noise(0.1, 0.12);
-
   const bp = ctx.createBiquadFilter();
   bp.type = 'bandpass';
   bp.frequency.value = 2500;
   bp.Q.value = 1.5;
-
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.35, t0);
   g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.1);
-
   src.connect(bp).connect(g).connect(out);
   src.start(t0);
   src.stop(t0 + 0.11);
@@ -54,11 +60,9 @@ export function playRifle(core: AudioCore, spatial?: SpatialSoundOptions): void 
   osc.type = 'sine';
   osc.frequency.setValueAtTime(4500, t0);
   osc.frequency.exponentialRampToValueAtTime(3000, t0 + 0.06);
-
   const og = ctx.createGain();
   og.gain.setValueAtTime(0.07, t0);
   og.gain.exponentialRampToValueAtTime(0.001, t0 + 0.06);
-
   osc.connect(og).connect(out);
   osc.start(t0);
   osc.stop(t0 + 0.07);
@@ -89,23 +93,25 @@ export function playShotgun(core: AudioCore, spatial?: SpatialSoundOptions): voi
     occlusionStrength: 1,
     baseLowpass: 12500,
     reverbAmount: 0.14,
+    bus: 'weapon',
+    voiceCategory: 'weapon',
+    voiceDuration: 0.3,
   };
-  const { ctx, t, out, delay } = core.resolveOutput(spatial, busOptions, 0.24);
+  const result = core.resolveOutput(spatial, busOptions, 0.24);
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
   // Heavy noise burst
   const src = ctx.createBufferSource();
   src.buffer = core.noise(0.28, 0.1);
-
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 1100;
   lp.Q.value = 1.2;
-
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.42, t0);
   g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.28);
-
   src.connect(lp).connect(g).connect(out);
   src.start(t0);
   src.stop(t0 + 0.29);
@@ -115,11 +121,9 @@ export function playShotgun(core: AudioCore, spatial?: SpatialSoundOptions): voi
   sub.type = 'sine';
   sub.frequency.setValueAtTime(100, t0);
   sub.frequency.exponentialRampToValueAtTime(20, t0 + 0.2);
-
   const sg = ctx.createGain();
   sg.gain.setValueAtTime(0.40, t0);
   sg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.2);
-
   sub.connect(sg).connect(out);
   sub.start(t0);
   sub.stop(t0 + 0.21);
@@ -171,7 +175,7 @@ export function playShotgun(core: AudioCore, spatial?: SpatialSoundOptions): voi
 }
 
 export function playRPGLaunch(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out, delay } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -184,9 +188,14 @@ export function playRPGLaunch(core: AudioCore, spatial?: SpatialSoundOptions): v
       occlusionStrength: 0.95,
       baseLowpass: 9000,
       reverbAmount: 0.12,
+      bus: 'weapon',
+      voiceCategory: 'weapon',
+      voiceDuration: 0.4,
     },
     0.2,
   );
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
   // Whoosh
@@ -194,15 +203,12 @@ export function playRPGLaunch(core: AudioCore, spatial?: SpatialSoundOptions): v
   osc.type = 'sawtooth';
   osc.frequency.setValueAtTime(220, t0);
   osc.frequency.exponentialRampToValueAtTime(60, t0 + 0.35);
-
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.22, t0);
   g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.35);
-
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 600;
-
   osc.connect(lp).connect(g).connect(out);
   osc.start(t0);
   osc.stop(t0 + 0.36);
@@ -219,7 +225,7 @@ export function playRPGLaunch(core: AudioCore, spatial?: SpatialSoundOptions): v
 }
 
 export function playMachineGun(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out, delay } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -232,9 +238,14 @@ export function playMachineGun(core: AudioCore, spatial?: SpatialSoundOptions): 
       occlusionStrength: 0.85,
       baseLowpass: 13000,
       reverbAmount: 0.08,
+      bus: 'weapon',
+      voiceCategory: 'weapon',
+      voiceDuration: 0.08,
     },
     0.16,
   );
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
   const src = ctx.createBufferSource();
@@ -266,7 +277,7 @@ export function playMachineGun(core: AudioCore, spatial?: SpatialSoundOptions): 
 }
 
 export function playGrenadeLaunch(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out, delay } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -279,9 +290,14 @@ export function playGrenadeLaunch(core: AudioCore, spatial?: SpatialSoundOptions
       occlusionStrength: 0.95,
       baseLowpass: 9200,
       reverbAmount: 0.13,
+      bus: 'weapon',
+      voiceCategory: 'weapon',
+      voiceDuration: 0.2,
     },
     0.2,
   );
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
   const thunk = ctx.createOscillator();
@@ -321,28 +337,26 @@ export function playReload(core: AudioCore, spatial?: SpatialSoundOptions): void
     occlusionStrength: 0.75,
     baseLowpass: 11000,
     reverbAmount: 0.04,
+    bus: 'weapon',
+    voiceCategory: 'weapon',
+    voiceDuration: 0.1,
   };
 
-  const emitClick = (offsetSec: number, freq: number, dur: number): void => {
-    const trigger = () => {
-      const { ctx, t, out, delay } = core.resolveOutput(spatial, busOptions, 0.08);
-      core.click(ctx, out, t + delay, freq, dur);
-    };
-    if (offsetSec <= 0) {
-      trigger();
-    } else {
-      window.setTimeout(trigger, offsetSec * 1000);
-    }
-  };
+  // Use Web Audio scheduling instead of setTimeout for timing accuracy.
+  // All 4 clicks share a single resolveOutput call (single voice slot).
+  const result = core.resolveOutput(spatial, busOptions, 0.08);
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
+  const t0 = t + delay;
 
-  emitClick(0, 1100, 0.035);   // mag release
-  emitClick(0.25, 800, 0.04);  // mag out
-  emitClick(0.45, 1400, 0.05); // mag in
-  emitClick(0.6, 2200, 0.03);  // chamber rack
+  core.click(ctx, out, t0, 1100, 0.035);          // mag release
+  core.click(ctx, out, t0 + 0.25, 800, 0.04);     // mag out
+  core.click(ctx, out, t0 + 0.45, 1400, 0.05);    // mag in
+  core.click(ctx, out, t0 + 0.6, 2200, 0.03);     // chamber rack
 }
 
 export function playEmpty(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -355,9 +369,14 @@ export function playEmpty(core: AudioCore, spatial?: SpatialSoundOptions): void 
       occlusionStrength: 0.65,
       baseLowpass: 8500,
       reverbAmount: 0.02,
+      bus: 'weapon',
+      voiceCategory: 'weapon',
+      voiceDuration: 0.05,
     },
     0.05,
   );
+  if (!result) return;
+  const { ctx, t, out } = result;
 
   const osc = ctx.createOscillator();
   osc.type = 'triangle';
@@ -384,11 +403,16 @@ export function playVehicleMinigun(core: AudioCore, spatial?: SpatialSoundOption
     occlusionStrength: 0.7,
     baseLowpass: 14000,
     reverbAmount: 0.12,
+    bus: 'weapon',
+    voiceCategory: 'weapon',
+    voiceDuration: 0.1,
   };
-  const { ctx, t, out, delay } = core.resolveOutput(spatial, busOptions, 0.28);
+  const result = core.resolveOutput(spatial, busOptions, 0.28);
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
-  // Heavy noise burst — much louder and longer than infantry machinegun
+  // Heavy noise burst
   const src = ctx.createBufferSource();
   src.buffer = core.noise(0.08, 0.12);
   const bp = ctx.createBiquadFilter();
@@ -402,7 +426,7 @@ export function playVehicleMinigun(core: AudioCore, spatial?: SpatialSoundOption
   src.start(t0);
   src.stop(t0 + 0.09);
 
-  // Low-end thump (vehicle weapons have more bass)
+  // Low-end thump
   const punch = ctx.createOscillator();
   punch.type = 'sine';
   punch.frequency.setValueAtTime(140, t0);
@@ -442,8 +466,13 @@ export function playVehicleRocket(core: AudioCore, spatial?: SpatialSoundOptions
     occlusionStrength: 0.85,
     baseLowpass: 10000,
     reverbAmount: 0.16,
+    bus: 'weapon',
+    voiceCategory: 'weapon',
+    voiceDuration: 0.5,
   };
-  const { ctx, t, out, delay } = core.resolveOutput(spatial, busOptions, 0.3);
+  const result = core.resolveOutput(spatial, busOptions, 0.3);
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
   // Heavy whoosh
@@ -476,10 +505,10 @@ export function playVehicleRocket(core: AudioCore, spatial?: SpatialSoundOptions
   sub.type = 'sine';
   sub.frequency.setValueAtTime(65, t0);
   sub.frequency.exponentialRampToValueAtTime(25, t0 + 0.18);
-  const sg = ctx.createGain();
-  sg.gain.setValueAtTime(0.30, t0);
-  sg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.18);
-  sub.connect(sg).connect(out);
+  const sGain = ctx.createGain();
+  sGain.gain.setValueAtTime(0.30, t0);
+  sGain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.18);
+  sub.connect(sGain).connect(out);
   sub.start(t0);
   sub.stop(t0 + 0.19);
 }
@@ -502,14 +531,18 @@ export function playProjectileFlyby(
     occlusionStrength: 0.5,
     baseLowpass: 16000,
     reverbAmount: 0.06,
+    bus: 'weapon',
+    voiceCategory: 'flyby',
+    voiceDuration: 0.3,
   };
-  const { ctx, t, out, delay } = core.resolveOutput(spatial, busOptions, 0.1);
+  const result = core.resolveOutput(spatial, busOptions, 0.1);
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
-  // Speed factor: faster projectiles have higher pitch and shorter duration
   const speedFactor = core.clamp(speed / 120, 0.4, 2.0);
 
-  // Main whiz: filtered noise with a quick pitch sweep
+  // Main whiz
   const src = ctx.createBufferSource();
   src.buffer = core.noise(0.25, 0.35);
   const bp = ctx.createBiquadFilter();
@@ -525,7 +558,7 @@ export function playProjectileFlyby(
   src.start(t0);
   src.stop(t0 + 0.25 / speedFactor);
 
-  // Tonal whistle (thin sine that sweeps down — the "zing")
+  // Tonal whistle
   const whistle = ctx.createOscillator();
   whistle.type = 'sine';
   whistle.frequency.setValueAtTime(3200 * speedFactor, t0);
@@ -537,7 +570,7 @@ export function playProjectileFlyby(
   whistle.start(t0);
   whistle.stop(t0 + 0.18 / speedFactor);
 
-  // Air crack (very short transient for fast projectiles)
+  // Air crack for fast projectiles
   if (speed > 60) {
     const crack = ctx.createBufferSource();
     crack.buffer = core.noise(0.02, 0.05);
@@ -554,7 +587,7 @@ export function playProjectileFlyby(
 }
 
 export function playSwitch(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const { ctx, t, out } = core.resolveOutput(
+  const result = core.resolveOutput(
     spatial,
     {
       gain: 1,
@@ -567,23 +600,25 @@ export function playSwitch(core: AudioCore, spatial?: SpatialSoundOptions): void
       occlusionStrength: 0.7,
       baseLowpass: 10000,
       reverbAmount: 0.03,
+      bus: 'weapon',
+      voiceCategory: 'weapon',
+      voiceDuration: 0.1,
     },
     0.06,
   );
+  if (!result) return;
+  const { ctx, t, out } = result;
 
   const osc = ctx.createOscillator();
   osc.type = 'sawtooth';
   osc.frequency.setValueAtTime(600, t);
   osc.frequency.exponentialRampToValueAtTime(1200, t + 0.06);
-
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.06, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
   lp.frequency.value = 2000;
-
   osc.connect(lp).connect(g).connect(out);
   osc.start(t);
   osc.stop(t + 0.08);

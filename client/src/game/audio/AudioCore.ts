@@ -1,8 +1,23 @@
 /**
  * AudioCore — base infrastructure for the procedural audio system.
- * Provides AudioContext management, spatial bus creation, occlusion,
- * listener pose, and shared helper utilities used by all sub-modules.
+ *
+ * Provides:
+ *   - AudioContext management with shared context support
+ *   - Submix buses per category (weapon, combat, movement, vehicle, UI)
+ *   - Dynamic reverb driven by ray-traced acoustic environment data
+ *   - Spatial bus creation with HRTF panning and occlusion
+ *   - Noise buffer pooling via NoisePool
+ *   - Voice management via VoiceManager (polyphony, culling, stealing)
+ *   - Automatic node cleanup for one-shot sounds
+ *   - Listener pose and occlusion sampling
  */
+
+import { NoisePool } from './NoisePool';
+import { VoiceManager } from './VoiceManager';
+import type { VoiceCategory } from './VoiceManager';
+import { AudioRayState } from './AudioRayState';
+// AudioRayState types used by AudioSystem for worker result forwarding
+export type { RayTraceResult } from './AudioRayState';
 
 // ── Shared types ──
 
@@ -16,6 +31,9 @@ export interface SpatialSoundOptions {
   getDirection?: () => Vec3Like;
 }
 
+/** Bus name for routing sounds through category submixes. */
+export type AudioBusName = 'weapon' | 'combat' | 'movement' | 'vehicle' | 'ui';
+
 export interface SpatialBusOptions {
   gain: number;
   minDistance: number;
@@ -28,6 +46,12 @@ export interface SpatialBusOptions {
   occlusionStrength?: number;
   baseLowpass?: number;
   reverbAmount?: number;
+  /** Which submix bus to route through. Defaults to 'weapon'. */
+  bus?: AudioBusName;
+  /** Voice category for polyphony management. */
+  voiceCategory?: VoiceCategory;
+  /** Duration hint for voice tracking (seconds). */
+  voiceDuration?: number;
 }
 
 /** Persistent audio state for a single helicopter's looping sound. */
@@ -64,12 +88,8 @@ type LegacyAudioListener = {
   upZ?: AudioParam;
   setPosition?: (x: number, y: number, z: number) => void;
   setOrientation?: (
-    x: number,
-    y: number,
-    z: number,
-    upX: number,
-    upY: number,
-    upZ: number,
+    x: number, y: number, z: number,
+    upX: number, upY: number, upZ: number,
   ) => void;
 };
 
@@ -84,11 +104,26 @@ type LegacyPanner = {
   setOrientation?: (x: number, y: number, z: number) => void;
 };
 
+// ── Submix bus relative levels (linear gain values) ──
+// These are mixed into the master bus. Weapons are loudest, movement quietest.
+
+const BUS_LEVELS: Record<AudioBusName, number> = {
+  weapon:   0.71, // -3 dB
+  combat:   0.79, // -2 dB
+  vehicle:  0.63, // -4 dB
+  ui:       0.50, // -6 dB
+  movement: 0.40, // -8 dB
+};
+
 // ── Core class ──
 
 export class AudioCore {
   ctx: AudioContext | null = null;
   master: GainNode | null = null;
+
+  /** Submix buses — one per category, all feeding master. */
+  private buses: Record<AudioBusName, GainNode> | null = null;
+
   private compressor: DynamicsCompressorNode | null = null;
   private limiter: DynamicsCompressorNode | null = null;
   private occlusionSampler: OcclusionSampler | null = null;
@@ -96,9 +131,38 @@ export class AudioCore {
   private listenerForward: Vec3Like = { x: 0, y: 0, z: -1 };
   private listenerUp: Vec3Like = { x: 0, y: 1, z: 0 };
 
+  /** Dynamic reverb node driven by ray-traced data. */
+  private reverbSend: GainNode | null = null;
+  private reverbDelay: DelayNode | null = null;
+  private reverbFilter: BiquadFilterNode | null = null;
+  private reverbDecayGain: GainNode | null = null;
+  /** Second tap for wider reverb. */
+  private reverbDelay2: DelayNode | null = null;
+  private reverbFilter2: BiquadFilterNode | null = null;
+  private reverbDecayGain2: GainNode | null = null;
+
+  /** Noise buffer pool — shared across all sound modules. */
+  readonly noisePool = new NoisePool();
+
+  /** Voice manager — polyphony limiter. */
+  readonly voices = new VoiceManager();
+
+  /** Ray-traced acoustic environment state. */
+  readonly rayState = new AudioRayState();
+
+  /**
+   * Accept an external AudioContext (for sharing between menu and game).
+   * If set before `ensure()` is called, that context will be used.
+   */
+  private externalCtx: AudioContext | null = null;
+
+  setExternalContext(ctx: AudioContext): void {
+    this.externalCtx = ctx;
+  }
+
   ensure(): AudioContext {
     if (!this.ctx) {
-      this.ctx = new AudioContext();
+      this.ctx = this.externalCtx ?? new AudioContext();
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.35;
 
@@ -122,11 +186,133 @@ export class AudioCore {
         .connect(this.compressor)
         .connect(this.limiter)
         .connect(this.ctx.destination);
+
+      // ── Submix buses ──
+      this.buses = {} as Record<AudioBusName, GainNode>;
+      for (const name of Object.keys(BUS_LEVELS) as AudioBusName[]) {
+        const bus = this.ctx.createGain();
+        bus.gain.value = BUS_LEVELS[name];
+        bus.connect(this.master);
+        this.buses[name] = bus;
+      }
+
+      // ── Global dynamic reverb (driven by ray-traced data) ──
+      this.setupDynamicReverb(this.ctx);
+
+      // ── Init noise pool ──
+      this.noisePool.init(this.ctx);
+
       this.applyListenerToContext(this.ctx);
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
     return this.ctx;
   }
+
+  /**
+   * Set up the global dynamic reverb effect.
+   * Two delay taps with LP filters, mixed via a send bus.
+   * Parameters are updated every frame from AudioRayState.
+   */
+  private setupDynamicReverb(ctx: AudioContext): void {
+    const t = ctx.currentTime;
+
+    // Reverb send bus — all spatial buses route a wet signal here
+    this.reverbSend = ctx.createGain();
+    this.reverbSend.gain.setValueAtTime(0.12, t);
+
+    // Tap 1 (early reflection)
+    this.reverbDelay = ctx.createDelay(0.2);
+    this.reverbDelay.delayTime.setValueAtTime(0.03, t);
+    this.reverbFilter = ctx.createBiquadFilter();
+    this.reverbFilter.type = 'lowpass';
+    this.reverbFilter.frequency.setValueAtTime(2200, t);
+    this.reverbDecayGain = ctx.createGain();
+    this.reverbDecayGain.gain.setValueAtTime(0.35, t);
+
+    this.reverbSend
+      .connect(this.reverbFilter)
+      .connect(this.reverbDelay)
+      .connect(this.reverbDecayGain)
+      .connect(this.master!);
+
+    // Tap 2 (late reflection — longer delay, more muffled)
+    this.reverbDelay2 = ctx.createDelay(0.4);
+    this.reverbDelay2.delayTime.setValueAtTime(0.07, t);
+    this.reverbFilter2 = ctx.createBiquadFilter();
+    this.reverbFilter2.type = 'lowpass';
+    this.reverbFilter2.frequency.setValueAtTime(1200, t);
+    this.reverbDecayGain2 = ctx.createGain();
+    this.reverbDecayGain2.gain.setValueAtTime(0.18, t);
+
+    this.reverbSend
+      .connect(this.reverbFilter2)
+      .connect(this.reverbDelay2)
+      .connect(this.reverbDecayGain2)
+      .connect(this.master!);
+  }
+
+  /**
+   * Update dynamic reverb parameters from the latest ray-traced data.
+   * Called every frame from AudioSystem.updateAcoustics().
+   */
+  updateReverbFromRayState(delta: number): void {
+    // Step the ray state interpolation
+    this.rayState.update(delta);
+
+    if (!this.ctx || !this.rayState.isReady()) return;
+    const env = this.rayState.getEnvironment();
+    const t = this.ctx.currentTime;
+
+    // Update reverb send level
+    this.reverbSend?.gain.setTargetAtTime(env.reverbWet, t, 0.1);
+
+    // Update tap 1 (early reflection)
+    if (this.reverbDelay) {
+      this.reverbDelay.delayTime.setTargetAtTime(
+        Math.max(0.005, Math.min(0.15, env.reverbDelay)), t, 0.1,
+      );
+    }
+    if (this.reverbFilter) {
+      // Outdoors: brighter early reflections. Indoors: more muffled.
+      const freq = 1400 + (1 - env.indoorFactor) * 1800;
+      this.reverbFilter.frequency.setTargetAtTime(freq, t, 0.15);
+    }
+    if (this.reverbDecayGain) {
+      // Scale with return ratio and room size
+      const gain = Math.min(0.5, 0.2 + env.reverbWet * 1.5);
+      this.reverbDecayGain.gain.setTargetAtTime(gain, t, 0.1);
+    }
+
+    // Update tap 2 (late reflection)
+    if (this.reverbDelay2) {
+      this.reverbDelay2.delayTime.setTargetAtTime(
+        Math.max(0.02, Math.min(0.35, env.reverbDelay * 2.5)), t, 0.1,
+      );
+    }
+    if (this.reverbFilter2) {
+      // Late reflections always more muffled
+      const freq2 = 600 + (1 - env.indoorFactor) * 800;
+      this.reverbFilter2.frequency.setTargetAtTime(freq2, t, 0.15);
+    }
+    if (this.reverbDecayGain2) {
+      // Late reflections quieter, scale with indoor factor
+      const gain2 = Math.min(0.35, 0.08 + env.indoorFactor * 0.2);
+      this.reverbDecayGain2.gain.setTargetAtTime(gain2, t, 0.1);
+    }
+  }
+
+  /** Get the output node for a submix bus, or master as fallback. */
+  getBus(name: AudioBusName): GainNode {
+    this.ensure();
+    return this.buses?.[name] ?? this.master!;
+  }
+
+  /** Get the reverb send node (for spatial buses to route wet signal to). */
+  getReverbSend(): GainNode | null {
+    return this.reverbSend;
+  }
+
+  // ── Listener management ──
 
   private applyListenerToContext(ctx: AudioContext): void {
     const listener = ctx.listener;
@@ -152,15 +338,13 @@ export class AudioCore {
     if (l.setPosition && l.setOrientation) {
       l.setPosition(this.listenerPos.x, this.listenerPos.y, this.listenerPos.z);
       l.setOrientation(
-        this.listenerForward.x,
-        this.listenerForward.y,
-        this.listenerForward.z,
-        this.listenerUp.x,
-        this.listenerUp.y,
-        this.listenerUp.z,
+        this.listenerForward.x, this.listenerForward.y, this.listenerForward.z,
+        this.listenerUp.x, this.listenerUp.y, this.listenerUp.z,
       );
     }
   }
+
+  // ── Utility helpers ──
 
   clamp(v: number, lo: number, hi: number): number {
     return Math.max(lo, Math.min(hi, v));
@@ -174,6 +358,10 @@ export class AudioCore {
 
   distance(a: Vec3Like, b: Vec3Like): number {
     return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+  }
+
+  getListenerPos(): Vec3Like {
+    return this.listenerPos;
   }
 
   setListenerPose(position: Vec3Like, forward?: Vec3Like, up?: Vec3Like): void {
@@ -210,6 +398,8 @@ export class AudioCore {
     }
     p.setOrientation?.(d.x, d.y, d.z);
   }
+
+  // ── Occlusion ──
 
   computeOcclusion(source: Vec3Like): number {
     if (!this.occlusionSampler) return 0;
@@ -261,6 +451,8 @@ export class AudioCore {
     return this.clamp(blockedRatio * (0.45 + distWeight * 0.55), 0, 1);
   }
 
+  // ── Spatial bus creation (with node cleanup + reverb send + bus routing) ──
+
   createSpatialBus(position: Vec3Like, options: SpatialBusOptions): {
     ctx: AudioContext;
     t: number;
@@ -301,29 +493,48 @@ export class AudioCore {
       this.setPannerOrientation(panner, options.directional, t);
     }
 
-    input.connect(lp).connect(dryGain).connect(panner).connect(this.master!);
+    // Route through the appropriate submix bus
+    const busName = options.bus ?? 'weapon';
+    const busNode = this.getBus(busName);
+    input.connect(lp).connect(dryGain).connect(panner).connect(busNode);
 
+    // ── Dynamic reverb send ──
+    // Route a portion of the signal to the global reverb (bypassing panner
+    // so reverb is diffuse/non-directional, which is physically correct).
     const reverbAmount = options.reverbAmount ?? 0;
-    if (reverbAmount > 0.001) {
-      const far = this.clamp(dist / Math.max(1, options.maxDistance), 0, 1);
-      const tail = reverbAmount * (0.35 + 0.65 * far) * (0.25 + 0.75 * occlusion);
-      const tapDelays = [0.05, 0.1, 0.16];
-      for (let i = 0; i < tapDelays.length; i++) {
-        const filter = ctx.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(1400 - i * 300, t);
+    if (reverbAmount > 0.001 && this.reverbSend) {
+      const env = this.rayState.getEnvironment();
+      // Scale reverb send by the ray-traced environment + per-sound amount
+      const envScale = env.ready ? (0.4 + env.indoorFactor * 0.6) : 0.5;
+      const sendLevel = reverbAmount * envScale * (0.3 + 0.7 * occlusion);
+      const sendGain = ctx.createGain();
+      sendGain.gain.setValueAtTime(this.clamp(sendLevel, 0, 0.5), t);
+      input.connect(sendGain).connect(this.reverbSend);
 
-        const delay = ctx.createDelay(0.4);
-        delay.delayTime.setValueAtTime(tapDelays[i] + occlusion * 0.03, t);
-
-        const g = ctx.createGain();
-        g.gain.setValueAtTime(tail * (0.38 / (i + 1)), t);
-
-        input.connect(filter).connect(delay).connect(g).connect(this.master!);
-      }
+      // Schedule cleanup for the send gain node too
+      this.scheduleNodeCleanup(sendGain, options.voiceDuration ?? 1.0);
     }
 
+    // ── Schedule node cleanup ──
+    // Disconnect intermediate nodes after the sound finishes to prevent
+    // orphaned nodes from accumulating in the audio graph.
+    const duration = options.voiceDuration ?? 1.0;
+    this.scheduleNodeCleanup(input, duration);
+    this.scheduleNodeCleanup(lp, duration);
+    this.scheduleNodeCleanup(dryGain, duration);
+    this.scheduleNodeCleanup(panner, duration);
+
     return { ctx, t, input, dist, occlusion };
+  }
+
+  /**
+   * Schedule a node to be disconnected after a sound finishes.
+   * Adds a small buffer (200ms) to account for reverb tails.
+   */
+  private scheduleNodeCleanup(node: AudioNode, durationSec: number): void {
+    setTimeout(() => {
+      try { node.disconnect(); } catch { /* already disconnected */ }
+    }, (durationSec + 0.2) * 1000);
   }
 
   resolveOutput(
@@ -335,20 +546,43 @@ export class AudioCore {
     t: number;
     out: AudioNode;
     delay: number;
-  } {
+  } | null {
     const position = spatial?.getPosition?.() ?? spatial?.position;
     if (position) {
+      const dist = this.distance(position, this.listenerPos);
+
+      // ── Voice management: distance cull + polyphony ──
+      const category = busOptions.voiceCategory;
+      if (category) {
+        if (!this.voices.requestVoice(category, dist, this.listenerPos, position)) {
+          return null; // culled or couldn't steal
+        }
+      }
+
       const direction = spatial?.getDirection?.() ?? spatial?.direction;
       const bus = this.createSpatialBus(position, {
         ...busOptions,
         directional: direction ?? busOptions.directional,
       });
       const delay = maxDelay > 0 ? this.clamp(bus.dist / 95, 0, maxDelay) : 0;
+
+      // Register voice for tracking
+      if (category) {
+        this.voices.registerVoice(
+          category,
+          dist,
+          busOptions.voiceDuration ?? 0.5,
+          [bus.input], // disconnect input to silence entire bus chain
+        );
+      }
+
       return { ctx: bus.ctx, t: bus.t, out: bus.input, delay };
     }
 
+    // Non-spatial (UI sounds, hit marker, etc.)
     const ctx = this.ensure();
-    return { ctx, t: ctx.currentTime, out: this.master!, delay: 0 };
+    const busName = busOptions.bus ?? 'ui';
+    return { ctx, t: ctx.currentTime, out: this.getBus(busName), delay: 0 };
   }
 
   scheduleSpatialLayer(
@@ -359,8 +593,9 @@ export class AudioCore {
     emit: (ctx: AudioContext, t: number, out: AudioNode) => void,
   ): void {
     const trigger = (): void => {
-      const { ctx, t, out, delay } = this.resolveOutput(spatial, busOptions, maxDelay);
-      emit(ctx, t + delay, out);
+      const result = this.resolveOutput(spatial, busOptions, maxDelay);
+      if (!result) return; // voice was culled
+      emit(result.ctx, result.t + result.delay, result.out);
     };
     if (eventDelaySec <= 0) {
       trigger();
@@ -369,15 +604,11 @@ export class AudioCore {
     }
   }
 
+  // ── Noise buffer (delegates to pool) ──
+
   noise(duration: number, decay: number): AudioBuffer {
     const ctx = this.ensure();
-    const len = Math.floor(ctx.sampleRate * duration);
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) {
-      d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (len * decay));
-    }
-    return buf;
+    return this.noisePool.get(ctx, duration, decay);
   }
 
   click(ctx: AudioContext, out: AudioNode, time: number, freq: number, dur: number): void {
@@ -393,6 +624,10 @@ export class AudioCore {
     osc.connect(lp).connect(g).connect(out);
     osc.start(time);
     osc.stop(time + dur + 0.005);
+
+    // Cleanup intermediate nodes
+    this.scheduleNodeCleanup(lp, dur + 0.05);
+    this.scheduleNodeCleanup(g, dur + 0.05);
   }
 
   setMasterVolume(volume: number): void {
@@ -403,12 +638,27 @@ export class AudioCore {
   }
 
   dispose(): void {
+    this.voices.dispose();
+    this.noisePool.dispose();
+    this.rayState.reset();
+
     if (this.ctx) {
-      this.ctx.close();
+      // Only close if we own it (not external)
+      if (!this.externalCtx) {
+        this.ctx.close();
+      }
       this.ctx = null;
       this.master = null;
+      this.buses = null;
       this.compressor = null;
       this.limiter = null;
+      this.reverbSend = null;
+      this.reverbDelay = null;
+      this.reverbFilter = null;
+      this.reverbDecayGain = null;
+      this.reverbDelay2 = null;
+      this.reverbFilter2 = null;
+      this.reverbDecayGain2 = null;
     }
   }
 }
