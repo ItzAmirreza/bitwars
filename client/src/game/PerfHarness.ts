@@ -463,7 +463,7 @@ export function buildPerfHooks(engine: Engine): PerfHarnessHooks {
         vfx?: { particles?: Array<unknown>; tracers?: Array<unknown> };
         physics?: { falling?: Array<unknown>; settled?: Array<unknown> };
         dynamicLights?: Map<string, unknown>;
-        __perfLastState?: { frameMs?: number; playerCount?: number };
+        __perfLastState?: { frameMs?: number; cpuFrameMs?: number; playerCount?: number };
         mountedVehicleId?: number;
       };
 
@@ -476,7 +476,7 @@ export function buildPerfHooks(engine: Engine): PerfHarnessHooks {
       return {
         fps: e.currentFps ?? 0,
         frameMs: state?.frameMs ?? 0,
-        cpuFrameMs: state?.frameMs ?? 0,
+        cpuFrameMs: state?.cpuFrameMs ?? 0,
         serverTps: e.currentServerTps ?? 0,
         drawCalls: info?.render.calls ?? 0,
         triangles: info?.render.triangles ?? 0,

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId } from './VoxelWorld';
+import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, BlockType, BLOCK_COLORS } from './VoxelWorld';
 import { FPSControls } from './FPSControls';
 import { WeaponSystem, WEAPONS } from './Weapons';
 import { AudioSystem } from './AudioSystem';
@@ -175,15 +175,22 @@ export class Engine {
   private sandboxPhaseTime = 0;
   private sandboxTeleportsDone = 0;
   private sandboxExplosionPulse = 0;
-  private readonly sandboxRemoteIds = ['perf-bot-1', 'perf-bot-2', 'perf-bot-3', 'perf-bot-4'];
+  private readonly sandboxRemoteIds = [
+    'perf-bot-1', 'perf-bot-2', 'perf-bot-3', 'perf-bot-4',
+    'perf-bot-5', 'perf-bot-6', 'perf-bot-7', 'perf-bot-8',
+  ];
   private perfBenchmarkSceneEnabled = false;
   private perfSceneVehicleMode: 0 | 1 = 0;
   private sandboxRngState = 0x12345678;
   private perfVehicleSwitchCooldown = 0;
-  private perfEnvironmentPhase = 0;
+  private perfEnvironmentPhase = -1;
   private perfLastMountedVehicleId = 0;
   private perfMountedSince = 0;
-  __perfLastState: { frameMs: number; playerCount: number } = { frameMs: 0, playerCount: 1 };
+  private sandboxWeaponCycleTimer = 0;
+  private sandboxBotMuzzleTimer = 0;
+  private sandboxDamagePulseTimer = 0;
+  private sandboxBlockBreakCount = 0;
+  __perfLastState: { frameMs: number; cpuFrameMs: number; playerCount: number } = { frameMs: 0, cpuFrameMs: 0, playerCount: 1 };
   private lastPositionUpdate = 0;
   private remotePlayers!: RemotePlayerManager;
   private localIdentity: string | null = null;
@@ -636,6 +643,8 @@ export class Engine {
       this.sandboxPhaseTime = 0;
       this.sandboxTeleportsDone = 0;
       this.sandboxExplosionPulse = 0;
+      this.sandboxBotMuzzleTimer = 0;
+      this.sandboxDamagePulseTimer = 0;
       this.sandboxRngState = mode === 'combat-chaos' ? 0x4f1bbcdc : mode === 'mixed-teleport' ? 0x6d2b79f5 : 0x12345678;
       this.removeSandboxRemotePlayers();
     }
@@ -659,9 +668,14 @@ export class Engine {
     if (!enabled) {
       this.perfSceneVehicleMode = 0;
       this.perfVehicleSwitchCooldown = 0;
-      this.perfEnvironmentPhase = 0;
+      this.perfEnvironmentPhase = -1;
       this.perfLastMountedVehicleId = 0;
       this.perfMountedSince = 0;
+      this.sandboxWeaponCycleTimer = 0;
+      this.sandboxBotMuzzleTimer = 0;
+      this.sandboxDamagePulseTimer = 0;
+      this.sandboxBlockBreakCount = 0;
+      this.postfx.resetDamage();
       this.removeSandboxRemotePlayers();
       this.restoreServerWorldAfterPerf();
     }
@@ -702,10 +716,14 @@ export class Engine {
     this.controls.resetVelocity();
     this.orientSandboxLookToward(spawn.x + 12, spawn.y, spawn.z + 10);
 
-    this.perfEnvironmentPhase = 0;
+    this.perfEnvironmentPhase = -1;
     this.sky.setEnvironment({ timeOfDay: 9.5, weather: 0, windSpeed: 0.2, cloudDensity: 0.2, fogDensity: 0.65 });
     this.perfLastMountedVehicleId = 0;
     this.perfMountedSince = 0;
+    this.sandboxWeaponCycleTimer = 0;
+    this.sandboxBotMuzzleTimer = 0;
+    this.sandboxDamagePulseTimer = 0;
+    this.sandboxBlockBreakCount = 0;
 
     this.chunkStreamer.startupWorldReady = false;
     this.chunkStreamer.startupProgressPrev = 0;
@@ -728,24 +746,27 @@ export class Engine {
 
   private ensureSandboxRemotePlayers(time: number): void {
     const base = this.camera.position;
+    // Cycle bot weapons every 4s to stress GPU alloc churn from model disposal/creation
+    const weaponCycle = Math.floor(time / 4);
     for (let i = 0; i < this.sandboxRemoteIds.length; i++) {
       const id = this.sandboxRemoteIds[i]!;
-      const ring = 14 + i * 3;
-      const angle = time * (0.4 + i * 0.12) + i * 1.7;
+      const ring = 12 + i * 2.8;
+      const angle = time * (0.35 + i * 0.1) + i * (Math.PI * 2 / this.sandboxRemoteIds.length);
       const x = base.x + Math.cos(angle) * ring;
       const z = base.z + Math.sin(angle) * ring;
       const y = this.getGroundHeight(x, z) + 1.7;
       const nextAngle = angle + 0.05;
       const nx = base.x + Math.cos(nextAngle) * ring;
       const nz = base.z + Math.sin(nextAngle) * ring;
+      const botWeapon = (weaponCycle + i) % 5;
       this.remotePlayers.updateOtherPlayer(
         id,
         { x, y: y + 1.7, z },
         { x: (nx - x) / 0.05, y: 0, z: (nz - z) / 0.05 },
         { yaw: Math.atan2(nx - x, nz - z), pitch: 0 },
         `BOT-${i + 1}`,
-        i,
         i % 5,
+        botWeapon,
       );
     }
   }
@@ -753,19 +774,89 @@ export class Engine {
   private emitSandboxChaos(delta: number): void {
     this.ensureSandboxRemotePlayers(this.elapsedTime);
 
+    // ── Explosions with actual block destruction + physics debris ──
     this.sandboxExplosionPulse -= delta;
     if (this.sandboxExplosionPulse <= 0) {
-      this.sandboxExplosionPulse = 0.12;
+      this.sandboxExplosionPulse = 0.14;
       const cx = this.camera.position.x + (this.sandboxRand() - 0.5) * 30;
       const cz = this.camera.position.z + (this.sandboxRand() - 0.5) * 30;
       const cy = this.getGroundHeight(cx, cz) + 1;
       const radius = 2 + this.sandboxRand() * 4;
+
+      // VFX + audio
       this.vfx.emitExplosion(cx, cy, cz, radius);
       this.audio.playExplosion({ position: { x: cx, y: cy, z: cz } });
       this.vfx.emitImpact(cx, cy, cz);
+
+      // Screen shake (distance-attenuated)
+      const dist = this.camera.position.distanceTo(new THREE.Vector3(cx, cy, cz));
+      const shakeIntensity = Math.max(0, 1 - dist / 40) * (radius / 4) * 0.4;
+      if (shakeIntensity > 0.02) this.vfx.shake(shakeIntensity);
+
+      // Destroy actual blocks within explosion radius and collect debris
+      const destroyedBlocks: { x: number; y: number; z: number; blockType: number }[] = [];
+      const intRadius = Math.ceil(radius);
+      const bx = Math.floor(cx);
+      const by = Math.floor(cy);
+      const bz = Math.floor(cz);
+      for (let dx = -intRadius; dx <= intRadius; dx++) {
+        for (let dy = -intRadius; dy <= intRadius; dy++) {
+          for (let dz = -intRadius; dz <= intRadius; dz++) {
+            if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
+            const wx = bx + dx, wy = by + dy, wz = bz + dz;
+            const bt = this.world.getBlock(wx, wy, wz);
+            if (bt !== 0) {
+              destroyedBlocks.push({ x: wx, y: wy, z: wz, blockType: bt });
+              this.world.setBlock(wx, wy, wz, 0);
+              this.sandboxBlockBreakCount++;
+            }
+          }
+        }
+      }
+
+      // Physics debris from destroyed blocks
+      if (destroyedBlocks.length > 0) {
+        this.physics.spawnExplosionDebris(destroyedBlocks, cx, cy, cz, radius, radius * 2.5);
+        this.physics.applyExplosionForce(cx, cy, cz, radius * 1.5, radius * 2);
+        // Block debris VFX particles for first N blocks
+        const vfxCount = Math.min(destroyedBlocks.length, 6);
+        for (let i = 0; i < vfxCount; i++) {
+          const b = destroyedBlocks[i]!;
+          const col = BLOCK_COLORS[b.blockType] ?? 0x7a7a78;
+          this.vfx.emitBlockDebris(b.x, b.y, b.z, col);
+        }
+        // Block break audio (throttled — one per explosion)
+        this.audio.playBlockBreak({ position: { x: cx, y: cy, z: cz } });
+      }
     }
 
-    // Local-only projectile spam as deterministic stress load
+    // ── Remote bot muzzle flashes (every 0.08s from random bots) ──
+    this.sandboxBotMuzzleTimer -= delta;
+    if (this.sandboxBotMuzzleTimer <= 0) {
+      this.sandboxBotMuzzleTimer = 0.08;
+      const botIdx = Math.floor(this.sandboxRand() * this.sandboxRemoteIds.length);
+      const id = this.sandboxRemoteIds[botIdx]!;
+      const botGroup = this.remotePlayers.otherPlayers.get(id);
+      if (botGroup) {
+        const pos = new THREE.Vector3();
+        botGroup.getWorldPosition(pos);
+        const dir = new THREE.Vector3(
+          this.camera.position.x - pos.x,
+          0,
+          this.camera.position.z - pos.z,
+        ).normalize();
+        this.vfx.emitMuzzleFlashAt(pos, dir);
+        // Bot weapon audio at spatial position
+        const weaponCycle = Math.floor(this.elapsedTime / 4);
+        const botWeapon = (weaponCycle + botIdx) % 5;
+        const spatial = { position: { x: pos.x, y: pos.y, z: pos.z } };
+        if (botWeapon === 0) this.audio.playRifle(spatial);
+        else if (botWeapon === 1) this.audio.playShotgun(spatial);
+        else if (botWeapon === 3) this.audio.playMachineGun(spatial);
+      }
+    }
+
+    // ── Diverse projectile spam: cycle RPG (2) and grenade launcher (4) ──
     for (let i = 0; i < 2; i++) {
       const origin = this.camera.position.clone().add(new THREE.Vector3(
         (this.sandboxRand() - 0.5) * 2,
@@ -777,7 +868,16 @@ export class Engine {
         -0.05 + this.sandboxRand() * 0.25,
         -1,
       ).normalize();
-      this.projectileManager.spawnRemote(2, origin, dir, performance.now(), this.sandboxRemoteIds[i % this.sandboxRemoteIds.length]!);
+      const weaponIdx = (i + this.sandboxTeleportsDone) % 2 === 0 ? 2 : 4;
+      this.projectileManager.spawnRemote(weaponIdx, origin, dir, performance.now(), this.sandboxRemoteIds[i % this.sandboxRemoteIds.length]!);
+    }
+
+    // ── Damage vignette pulse (every 3s, simulates taking damage) ──
+    this.sandboxDamagePulseTimer -= delta;
+    if (this.sandboxDamagePulseTimer <= 0) {
+      this.sandboxDamagePulseTimer = 3.0;
+      this.postfx.triggerDamage(0.25);
+      this.audio.playDamage(this.localAudioSource(-0.2));
     }
   }
 
@@ -815,35 +915,47 @@ export class Engine {
     return segments[step % segments.length]!;
   }
 
-  private ensurePerfAmmoAndVehicle(): void {
+  /** Runs every frame during perf benchmark regardless of mount state.
+   *  Drives environment phase sweep, ammo refill, weapon cycling, and vehicle phases. */
+  private updatePerfBenchmarkState(delta: number): void {
     if (!this.perfBenchmarkSceneEnabled) return;
 
-    // Keep deterministic fire pressure active for full run duration.
+    // ── Keep deterministic fire pressure active for full run duration ──
     if (this.weapons.getAmmo() <= 2) {
       for (let i = 0; i < WEAPONS.length; i++) {
         this.weapons.setAmmo(i, WEAPONS[i].maxAmmo);
       }
     }
 
-    // Deterministic environment phase sweep so tests include multiple light/weather regimes.
-    const envPhase = Math.floor(this.sandboxMotionTime / 20) % 4;
+    // ── Weapon cycling: switch to next weapon every 5s ──
+    this.sandboxWeaponCycleTimer -= delta;
+    if (this.sandboxWeaponCycleTimer <= 0) {
+      this.sandboxWeaponCycleTimer = 5.0;
+      const next = (this.weapons.currentWeapon + 1) % WEAPONS.length;
+      this.weapons.setCurrentWeapon(next);
+    }
+
+    // ── Environment phase sweep: 5 phases x 12s = 60s total ──
+    // Runs unconditionally so it doesn't stall when vehicle-mounted.
+    const envPhase = Math.floor(this.sandboxMotionTime / 12) % 5;
     if (envPhase !== this.perfEnvironmentPhase) {
       this.perfEnvironmentPhase = envPhase;
       if (envPhase === 0) this.sky.setEnvironment({ timeOfDay: 9.5, weather: 0, windSpeed: 0.2, cloudDensity: 0.2, fogDensity: 0.65 });
       else if (envPhase === 1) this.sky.setEnvironment({ timeOfDay: 13.5, weather: 1, windSpeed: 0.25, cloudDensity: 0.45, fogDensity: 0.72 });
       else if (envPhase === 2) this.sky.setEnvironment({ timeOfDay: 18.7, weather: 2, windSpeed: 0.35, cloudDensity: 0.74, fogDensity: 0.88 });
-      else this.sky.setEnvironment({ timeOfDay: 22.4, weather: 3, windSpeed: 0.5, cloudDensity: 0.95, fogDensity: 1.08 });
+      else if (envPhase === 3) this.sky.setEnvironment({ timeOfDay: 22.4, weather: 3, windSpeed: 0.5, cloudDensity: 0.95, fogDensity: 1.08 });
+      else this.sky.setEnvironment({ timeOfDay: 4.5, weather: 4, windSpeed: 0.6, cloudDensity: 1.0, fogDensity: 1.2 });
     }
 
-    this.perfVehicleSwitchCooldown = Math.max(0, this.perfVehicleSwitchCooldown - 1 / 60);
+    // ── Vehicle mount/dismount cycling ──
+    this.perfVehicleSwitchCooldown = Math.max(0, this.perfVehicleSwitchCooldown - delta);
 
     if (this.mountedVehicleId !== this.perfLastMountedVehicleId) {
       this.perfLastMountedVehicleId = this.mountedVehicleId;
       this.perfMountedSince = this.sandboxMotionTime;
     }
 
-    // Keep vehicle phases moving: dismount after a fixed mounted window,
-    // then remount target type from current benchmark slot.
+    // Dismount after a fixed mounted window
     if (this.mountedVehicleId !== 0) {
       const mountedFor = this.sandboxMotionTime - this.perfMountedSince;
       if (mountedFor > 6.8 && this.perfVehicleSwitchCooldown <= 0 && this.conn) {
@@ -853,6 +965,7 @@ export class Engine {
       return;
     }
 
+    // Try mounting a vehicle
     if (this.perfVehicleSwitchCooldown > 0) return;
     const slot = (Math.floor(this.sandboxMotionTime / 14) % 2) as 0 | 1;
     const previousMode = this.perfSceneVehicleMode;
@@ -878,14 +991,18 @@ export class Engine {
   }
 
   private applySandboxMotion(delta: number): void {
-    if (!this.sandboxMotionEnabled || this.mountedVehicleId !== 0 || this.health <= 0 || !this.controls.inputEnabled) {
+    if (!this.sandboxMotionEnabled) return;
+
+    // Always advance motion time and run benchmark state (env phase, ammo, vehicles)
+    // even when mounted, dead, or input-locked. This prevents environment phase stall.
+    this.sandboxMotionTime += delta;
+    this.updatePerfBenchmarkState(delta);
+
+    if (this.mountedVehicleId !== 0 || this.health <= 0 || !this.controls.inputEnabled) {
       return;
     }
     if (!this.perfBenchmarkSceneEnabled) return;
 
-    this.ensurePerfAmmoAndVehicle();
-
-    this.sandboxMotionTime += delta;
     this.sandboxPhaseTime += delta;
     let fwd = false;
     let back = false;
@@ -2408,6 +2525,10 @@ export class Engine {
         this.currentShadowCastRadiusChunks,
       );
     }
+
+    // Measure CPU time = everything before the render pass (game logic, scene graph, chunk rebuilds)
+    const preRenderMs = performance.now();
+    this.__perfLastState.cpuFrameMs = preRenderMs - frameStartMs;
 
     this.renderFrame(delta);
     this.pushHudState(startupProgress);

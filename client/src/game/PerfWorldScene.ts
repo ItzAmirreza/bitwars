@@ -86,6 +86,27 @@ function placeStressStructures(chunk: Uint8Array, ox: number, oy: number, oz: nu
             chunk[chunkLocalIndex(lx, wyWin - oy, lz)] = 0;
           }
         }
+
+        // Lantern blocks on building rooftops and inside for light stress testing
+        const roofY = y0 + height - 1;
+        if (inCellX === 14 && inCellZ === 14 && roofY >= oy && roofY < oy + CHUNK) {
+          chunk[chunkLocalIndex(lx, roofY - oy, lz)] = BlockType.Lantern;
+        }
+        // Interior lantern on wall at y0+2
+        if (inCellX === 7 && inCellZ === 14) {
+          const intY = y0 + 2;
+          if (intY >= oy && intY < oy + CHUNK) {
+            chunk[chunkLocalIndex(lx, intY - oy, lz)] = BlockType.Lantern;
+          }
+        }
+      }
+
+      // Street-level lanterns along the road band every ~20 blocks
+      if (roadBand && wx % 20 === 0 && Math.abs(wz - WORLD_Z * 0.5) < 2) {
+        const lanternY = h + 1;
+        if (lanternY >= oy && lanternY < oy + CHUNK) {
+          chunk[chunkLocalIndex(lx, lanternY - oy, lz)] = BlockType.Lantern;
+        }
       }
     }
   }

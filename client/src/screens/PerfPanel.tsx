@@ -31,6 +31,10 @@ type MetricKey =
   | 'pendingChunkRequests'
   | 'activeProjectiles'
   | 'activeVfxParticles'
+  | 'activeFallingDebris'
+  | 'activeSettledDebris'
+  | 'activeRemotePlayers'
+  | 'dynamicLights'
   | 'jsHeapUsedMB';
 
 const METRICS: Array<{ key: MetricKey; label: string }> = [
@@ -43,6 +47,10 @@ const METRICS: Array<{ key: MetricKey; label: string }> = [
   { key: 'pendingChunkRequests', label: 'Pending chunk requests' },
   { key: 'activeProjectiles', label: 'Projectiles' },
   { key: 'activeVfxParticles', label: 'VFX particles' },
+  { key: 'activeFallingDebris', label: 'Falling debris' },
+  { key: 'activeSettledDebris', label: 'Settled debris' },
+  { key: 'activeRemotePlayers', label: 'Remote players' },
+  { key: 'dynamicLights', label: 'Dynamic lights' },
   { key: 'jsHeapUsedMB', label: 'JS heap MB' },
 ];
 
