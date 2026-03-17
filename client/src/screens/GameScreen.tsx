@@ -179,10 +179,17 @@ export function GameScreen() {
     const container = canvasRef.current;
     if (!container || engineRef.current) return;
 
-    engineRef.current = new Engine(container, connection, setState, identity, username || null);
-    engineRef.current.updateSettings(settings);
+    let disposed = false;
+    const engineInitFrame = requestAnimationFrame(() => {
+      if (disposed || engineRef.current) return;
+      const engine = new Engine(container, connection, setState, identity, username || null);
+      engine.updateSettings(settings);
+      engineRef.current = engine;
+    });
 
     return () => {
+      disposed = true;
+      cancelAnimationFrame(engineInitFrame);
       if (engineRef.current) {
         engineRef.current.destroy();
         engineRef.current = null;

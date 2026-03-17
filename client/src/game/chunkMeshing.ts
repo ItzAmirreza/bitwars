@@ -36,6 +36,17 @@ export interface ChunkMeshData {
   color: Float32Array;
 }
 
+interface FaceRunBuffers {
+  key: Uint32Array;
+  ao: Uint8Array;
+  blockType: Uint8Array;
+  cr: Float32Array;
+  cg: Float32Array;
+  cb: Float32Array;
+}
+
+const MAX_GREEDY_SPAN = 2;
+
 // ── Block colors ──
 
 const BLOCK_COLORS: Record<number, number> = {
@@ -68,13 +79,13 @@ const LANTERN_NEAR_BOOST_OFFSETS: Array<[number, number, number]> = [
 
 const FACE_SHADING = [0.85, 0.85, 1.0, 0.7, 0.9, 0.9];
 const FACE_NORMALS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
-const FACE_VERTS = [
-  [[0, 0, 0], [0, 1, 0], [0, 1, 1], [0, 0, 0], [0, 1, 1], [0, 0, 1]],  // +X
-  [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 1], [0, 1, 0], [0, 0, 0]],  // -X
-  [[0, 0, 0], [0, 0, 1], [1, 0, 1], [0, 0, 0], [1, 0, 1], [1, 0, 0]],  // +Y
-  [[1, 0, 0], [1, 0, 1], [0, 0, 1], [1, 0, 0], [0, 0, 1], [0, 0, 0]],  // -Y
-  [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 0, 0], [1, 1, 0], [0, 1, 0]],  // +Z
-  [[0, 1, 0], [1, 1, 0], [1, 0, 0], [0, 1, 0], [1, 0, 0], [0, 0, 0]],  // -Z
+const FACE_UNIT_CORNERS = [
+  [[0, 0, 0], [0, 1, 0], [0, 1, 1], [0, 0, 1]],  // +X
+  [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]],  // -X
+  [[0, 0, 0], [0, 0, 1], [1, 0, 1], [1, 0, 0]],  // +Y
+  [[1, 0, 0], [1, 0, 1], [0, 0, 1], [0, 0, 0]],  // -Y
+  [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],  // +Z
+  [[0, 1, 0], [1, 1, 0], [1, 0, 0], [0, 0, 0]],  // -Z
 ];
 
 // ── Per-vertex Ambient Occlusion ──
@@ -157,28 +168,92 @@ function lanternNeighborBoost(
   return 1.24;
 }
 
-// ── Face builder ──
+function packAo(ao: [number, number, number, number]): number {
+  return (ao[0] & 3) | ((ao[1] & 3) << 2) | ((ao[2] & 3) << 4) | ((ao[3] & 3) << 6);
+}
 
-function addFace(
+// ── Face builder (greedy quads) ──
+
+function addQuad(
   pos: number[], nrm: number[], col: number[],
   cr: number, cg: number, cb: number,
-  x: number, y: number, z: number, face: number,
-  ao: [number, number, number, number],
+  x: number, y: number, z: number,
+  uSpan: number,
+  vSpan: number,
+  face: number,
+  aoPacked: number,
   blockType: number,
 ): void {
-  const verts = FACE_VERTS[face]!;
   const n = FACE_NORMALS[face]!;
   const s = FACE_SHADING[face]!;
-  const corners = [verts[0]!, verts[1]!, verts[2]!, verts[5]!];
-  const aoMul = [AO_CURVE[ao[0]]! * s, AO_CURVE[ao[1]]! * s, AO_CURVE[ao[2]]! * s, AO_CURVE[ao[3]]! * s];
-  const flip = ao[0] + ao[2] < ao[1] + ao[3];
+  const ao0 = aoPacked & 3;
+  const ao1 = (aoPacked >> 2) & 3;
+  const ao2 = (aoPacked >> 4) & 3;
+  const ao3 = (aoPacked >> 6) & 3;
+  const aoMul = [AO_CURVE[ao0]! * s, AO_CURVE[ao1]! * s, AO_CURVE[ao2]! * s, AO_CURVE[ao3]! * s];
+  const flip = ao0 + ao2 < ao1 + ao3;
   const idx = flip ? [0, 1, 3, 1, 2, 3] : [0, 1, 2, 0, 2, 3];
+
+  let corners: Array<[number, number, number]>;
+  switch (face) {
+    case 0:
+      corners = [
+        [x, y, z],
+        [x, y + uSpan, z],
+        [x, y + uSpan, z + vSpan],
+        [x, y, z + vSpan],
+      ];
+      break;
+    case 1:
+      corners = [
+        [x, y, z + vSpan],
+        [x, y + uSpan, z + vSpan],
+        [x, y + uSpan, z],
+        [x, y, z],
+      ];
+      break;
+    case 2:
+      corners = [
+        [x, y, z],
+        [x, y, z + vSpan],
+        [x + uSpan, y, z + vSpan],
+        [x + uSpan, y, z],
+      ];
+      break;
+    case 3:
+      corners = [
+        [x + uSpan, y, z],
+        [x + uSpan, y, z + vSpan],
+        [x, y, z + vSpan],
+        [x, y, z],
+      ];
+      break;
+    case 4:
+      corners = [
+        [x, y, z],
+        [x + uSpan, y, z],
+        [x + uSpan, y + vSpan, z],
+        [x, y + vSpan, z],
+      ];
+      break;
+    default:
+      corners = [
+        [x, y + vSpan, z],
+        [x + uSpan, y + vSpan, z],
+        [x + uSpan, y, z],
+        [x, y, z],
+      ];
+      break;
+  }
+
+  const unitCorners = FACE_UNIT_CORNERS[face]!;
   for (let i = 0; i < 6; i++) {
     const ci = idx[i]!;
     const v = corners[ci]!;
-    const lanternBoost = blockType === BlockType.Lantern ? lanternLocalBoost(face, v[0]!, v[1]!, v[2]!) : 1;
+    const uv = unitCorners[ci]!;
+    const lanternBoost = blockType === BlockType.Lantern ? lanternLocalBoost(face, uv[0]!, uv[1]!, uv[2]!) : 1;
     const m = Math.min(1.85, aoMul[ci]! * lanternBoost);
-    pos.push(x + v[0]!, y + v[1]!, z + v[2]!);
+    pos.push(v[0], v[1], v[2]);
     nrm.push(n[0]!, n[1]!, n[2]!);
     col.push(cr * m, cg * m, cb * m);
   }
@@ -206,6 +281,9 @@ function hexToLinearRgb(hex: number): [number, number, number] {
 export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
   const { cx, cy, cz, chunkData, neighbors } = input;
   const x0 = cx * CHUNK, y0 = cy * CHUNK, z0 = cz * CHUNK;
+  const voxelCount = CHUNK * CHUNK * CHUNK;
+  const faceMaskSize = CHUNK * CHUNK;
+  const EMPTY_KEY = 0xffffffff;
 
   // Build neighbor lookup
   const neighborMap = new Map<number, Uint8Array>();
@@ -244,46 +322,301 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
   const nrm: number[] = [];
   const col: number[] = [];
 
-  for (let lz = 0; lz < CHUNK; lz++) {
-    for (let ly = 0; ly < CHUNK; ly++) {
-      for (let lx = 0; lx < CHUNK; lx++) {
-        const b = chunkData[lx + ly * CHUNK + lz * CHUNK * CHUNK]!;
-        if (b === 0) continue;
+  const colorReady = new Uint8Array(voxelCount);
+  const colorR = new Float32Array(voxelCount);
+  const colorG = new Float32Array(voxelCount);
+  const colorB = new Float32Array(voxelCount);
+  const colorKey = new Uint32Array(voxelCount);
 
-        const x = x0 + lx;
-        const y = y0 + ly;
-        const z = z0 + lz;
+  const mask: FaceRunBuffers = {
+    key: new Uint32Array(faceMaskSize),
+    ao: new Uint8Array(faceMaskSize),
+    blockType: new Uint8Array(faceMaskSize),
+    cr: new Float32Array(faceMaskSize),
+    cg: new Float32Array(faceMaskSize),
+    cb: new Float32Array(faceMaskSize),
+  };
 
-        const hexColor = BLOCK_COLORS[b] ?? 0x808080;
-        let [cr, cg, cb] = hexToLinearRgb(hexColor);
+  const getVoxelColor = (
+    localIndex: number,
+    blockType: number,
+    wx: number,
+    wy: number,
+    wz: number,
+  ): [number, number, number, number] => {
+    if (colorReady[localIndex] === 0) {
+      const hexColor = BLOCK_COLORS[blockType] ?? 0x808080;
+      let [cr, cg, cb] = hexToLinearRgb(hexColor);
 
-        if (b === BlockType.Lantern) {
-          cr = Math.min(1, cr * 1.45 + 0.2);
-          cg = Math.min(1, cg * 1.45 + 0.12);
-          cb = cb * 1.45;
-        } else {
-          const nearBoost = lanternNeighborBoost(gb, x, y, z);
-          if (nearBoost > 1) {
-            cr = Math.min(1, cr * nearBoost + 0.02 * (nearBoost - 1) * 10);
-            cg = Math.min(1, cg * nearBoost + 0.015 * (nearBoost - 1) * 10);
-            cb = cb * nearBoost;
-          }
+      if (blockType === BlockType.Lantern) {
+        cr = Math.min(1, cr * 1.45 + 0.2);
+        cg = Math.min(1, cg * 1.45 + 0.12);
+        cb = cb * 1.45;
+      } else {
+        const nearBoost = lanternNeighborBoost(gb, wx, wy, wz);
+        if (nearBoost > 1) {
+          cr = Math.min(1, cr * nearBoost + 0.02 * (nearBoost - 1) * 10);
+          cg = Math.min(1, cg * nearBoost + 0.015 * (nearBoost - 1) * 10);
+          cb = cb * nearBoost;
+        }
+      }
+
+      // Keep the original fine-grained variation profile for visual richness.
+      const variation = (hash2d(wx * 7 + wy, wz * 13 + wy) - 0.5) * 0.06;
+      cr = Math.max(0, Math.min(1, cr + variation));
+      cg = Math.max(0, Math.min(1, cg + variation));
+      cb = Math.max(0, Math.min(1, cb + variation));
+
+      // Quantize to 8-bit channels for deterministic merge keys while
+      // keeping the visual result effectively identical to the pre-greedy path.
+      const qr = Math.max(0, Math.min(255, Math.round(cr * 255)));
+      const qg = Math.max(0, Math.min(255, Math.round(cg * 255)));
+      const qb = Math.max(0, Math.min(255, Math.round(cb * 255)));
+      cr = qr / 255;
+      cg = qg / 255;
+      cb = qb / 255;
+
+      colorR[localIndex] = cr;
+      colorG[localIndex] = cg;
+      colorB[localIndex] = cb;
+
+      colorKey[localIndex] = (((blockType & 0xff) << 24) | (qr << 16) | (qg << 8) | qb) >>> 0;
+
+      colorReady[localIndex] = 1;
+    }
+
+    return [colorR[localIndex]!, colorG[localIndex]!, colorB[localIndex]!, colorKey[localIndex]!];
+  };
+
+  const emitMaskGreedy = (
+    face: number,
+    fixed: number,
+    fixedIs: 'x' | 'y' | 'z',
+  ): void => {
+    const { key, ao, blockType, cr, cg, cb } = mask;
+
+    for (let v = 0; v < CHUNK; v++) {
+      for (let u = 0; u < CHUNK; u++) {
+        const idx = u + v * CHUNK;
+        const cellKey = key[idx]!;
+        if (cellKey === EMPTY_KEY) continue;
+
+        const cellAo = ao[idx]!;
+
+        let width = 1;
+        while (u + width < CHUNK && width < MAX_GREEDY_SPAN) {
+          const n = idx + width;
+          if (key[n] !== cellKey || ao[n] !== cellAo) break;
+          width++;
         }
 
-        // Subtle per-block color variation
-        const variation = (hash2d(x * 7 + y, z * 13 + y) - 0.5) * 0.06;
-        cr = Math.max(0, Math.min(1, cr + variation));
-        cg = Math.max(0, Math.min(1, cg + variation));
-        cb = Math.max(0, Math.min(1, cb + variation));
+        let height = 1;
+        rowLoop:
+        while (v + height < CHUNK && height < MAX_GREEDY_SPAN) {
+          const row = (v + height) * CHUNK + u;
+          for (let k = 0; k < width; k++) {
+            const n = row + k;
+            if (key[n] !== cellKey || ao[n] !== cellAo) break rowLoop;
+          }
+          height++;
+        }
 
-        if (gb(x + 1, y, z) === 0) addFace(pos, nrm, col, cr, cg, cb, x + 1, y, z, 0, computeFaceAO(gb, x, y, z, 0), b);
-        if (gb(x - 1, y, z) === 0) addFace(pos, nrm, col, cr, cg, cb, x, y, z, 1, computeFaceAO(gb, x, y, z, 1), b);
-        if (gb(x, y + 1, z) === 0) addFace(pos, nrm, col, cr, cg, cb, x, y + 1, z, 2, computeFaceAO(gb, x, y, z, 2), b);
-        if (gb(x, y - 1, z) === 0) addFace(pos, nrm, col, cr, cg, cb, x, y, z, 3, computeFaceAO(gb, x, y, z, 3), b);
-        if (gb(x, y, z + 1) === 0) addFace(pos, nrm, col, cr, cg, cb, x, y, z + 1, 4, computeFaceAO(gb, x, y, z, 4), b);
-        if (gb(x, y, z - 1) === 0) addFace(pos, nrm, col, cr, cg, cb, x, y, z, 5, computeFaceAO(gb, x, y, z, 5), b);
+        if (fixedIs === 'x') {
+          addQuad(
+            pos, nrm, col,
+            cr[idx]!, cg[idx]!, cb[idx]!,
+            x0 + fixed,
+            y0 + u,
+            z0 + v,
+            width,
+            height,
+            face,
+            cellAo,
+            blockType[idx]!,
+          );
+        } else if (fixedIs === 'y') {
+          addQuad(
+            pos, nrm, col,
+            cr[idx]!, cg[idx]!, cb[idx]!,
+            x0 + u,
+            y0 + fixed,
+            z0 + v,
+            width,
+            height,
+            face,
+            cellAo,
+            blockType[idx]!,
+          );
+        } else {
+          addQuad(
+            pos, nrm, col,
+            cr[idx]!, cg[idx]!, cb[idx]!,
+            x0 + u,
+            y0 + v,
+            z0 + fixed,
+            width,
+            height,
+            face,
+            cellAo,
+            blockType[idx]!,
+          );
+        }
+
+        for (let dv = 0; dv < height; dv++) {
+          const row = (v + dv) * CHUNK + u;
+          for (let du = 0; du < width; du++) {
+            key[row + du] = EMPTY_KEY;
+          }
+        }
       }
     }
+  };
+
+  // +X and -X faces (u=Y, v=Z)
+  for (let lx = 0; lx < CHUNK; lx++) {
+    mask.key.fill(EMPTY_KEY);
+    for (let lz = 0; lz < CHUNK; lz++) {
+      for (let ly = 0; ly < CHUNK; ly++) {
+        const localIndex = lx + ly * CHUNK + lz * CHUNK * CHUNK;
+        const b = chunkData[localIndex]!;
+        if (b === 0) continue;
+        const wx = x0 + lx;
+        const wy = y0 + ly;
+        const wz = z0 + lz;
+        if (gb(wx + 1, wy, wz) !== 0) continue;
+
+        const m = ly + lz * CHUNK;
+        const [cr, cg, cb, k] = getVoxelColor(localIndex, b, wx, wy, wz);
+        mask.key[m] = k;
+        mask.ao[m] = packAo(computeFaceAO(gb, wx, wy, wz, 0));
+        mask.blockType[m] = b;
+        mask.cr[m] = cr;
+        mask.cg[m] = cg;
+        mask.cb[m] = cb;
+      }
+    }
+    emitMaskGreedy(0, lx + 1, 'x');
+
+    mask.key.fill(EMPTY_KEY);
+    for (let lz = 0; lz < CHUNK; lz++) {
+      for (let ly = 0; ly < CHUNK; ly++) {
+        const localIndex = lx + ly * CHUNK + lz * CHUNK * CHUNK;
+        const b = chunkData[localIndex]!;
+        if (b === 0) continue;
+        const wx = x0 + lx;
+        const wy = y0 + ly;
+        const wz = z0 + lz;
+        if (gb(wx - 1, wy, wz) !== 0) continue;
+
+        const m = ly + lz * CHUNK;
+        const [cr, cg, cb, k] = getVoxelColor(localIndex, b, wx, wy, wz);
+        mask.key[m] = k;
+        mask.ao[m] = packAo(computeFaceAO(gb, wx, wy, wz, 1));
+        mask.blockType[m] = b;
+        mask.cr[m] = cr;
+        mask.cg[m] = cg;
+        mask.cb[m] = cb;
+      }
+    }
+    emitMaskGreedy(1, lx, 'x');
+  }
+
+  // +Y and -Y faces (u=X, v=Z)
+  for (let ly = 0; ly < CHUNK; ly++) {
+    mask.key.fill(EMPTY_KEY);
+    for (let lz = 0; lz < CHUNK; lz++) {
+      for (let lx = 0; lx < CHUNK; lx++) {
+        const localIndex = lx + ly * CHUNK + lz * CHUNK * CHUNK;
+        const b = chunkData[localIndex]!;
+        if (b === 0) continue;
+        const wx = x0 + lx;
+        const wy = y0 + ly;
+        const wz = z0 + lz;
+        if (gb(wx, wy + 1, wz) !== 0) continue;
+
+        const m = lx + lz * CHUNK;
+        const [cr, cg, cb, k] = getVoxelColor(localIndex, b, wx, wy, wz);
+        mask.key[m] = k;
+        mask.ao[m] = packAo(computeFaceAO(gb, wx, wy, wz, 2));
+        mask.blockType[m] = b;
+        mask.cr[m] = cr;
+        mask.cg[m] = cg;
+        mask.cb[m] = cb;
+      }
+    }
+    emitMaskGreedy(2, ly + 1, 'y');
+
+    mask.key.fill(EMPTY_KEY);
+    for (let lz = 0; lz < CHUNK; lz++) {
+      for (let lx = 0; lx < CHUNK; lx++) {
+        const localIndex = lx + ly * CHUNK + lz * CHUNK * CHUNK;
+        const b = chunkData[localIndex]!;
+        if (b === 0) continue;
+        const wx = x0 + lx;
+        const wy = y0 + ly;
+        const wz = z0 + lz;
+        if (gb(wx, wy - 1, wz) !== 0) continue;
+
+        const m = lx + lz * CHUNK;
+        const [cr, cg, cb, k] = getVoxelColor(localIndex, b, wx, wy, wz);
+        mask.key[m] = k;
+        mask.ao[m] = packAo(computeFaceAO(gb, wx, wy, wz, 3));
+        mask.blockType[m] = b;
+        mask.cr[m] = cr;
+        mask.cg[m] = cg;
+        mask.cb[m] = cb;
+      }
+    }
+    emitMaskGreedy(3, ly, 'y');
+  }
+
+  // +Z and -Z faces (u=X, v=Y)
+  for (let lz = 0; lz < CHUNK; lz++) {
+    mask.key.fill(EMPTY_KEY);
+    for (let ly = 0; ly < CHUNK; ly++) {
+      for (let lx = 0; lx < CHUNK; lx++) {
+        const localIndex = lx + ly * CHUNK + lz * CHUNK * CHUNK;
+        const b = chunkData[localIndex]!;
+        if (b === 0) continue;
+        const wx = x0 + lx;
+        const wy = y0 + ly;
+        const wz = z0 + lz;
+        if (gb(wx, wy, wz + 1) !== 0) continue;
+
+        const m = lx + ly * CHUNK;
+        const [cr, cg, cb, k] = getVoxelColor(localIndex, b, wx, wy, wz);
+        mask.key[m] = k;
+        mask.ao[m] = packAo(computeFaceAO(gb, wx, wy, wz, 4));
+        mask.blockType[m] = b;
+        mask.cr[m] = cr;
+        mask.cg[m] = cg;
+        mask.cb[m] = cb;
+      }
+    }
+    emitMaskGreedy(4, lz + 1, 'z');
+
+    mask.key.fill(EMPTY_KEY);
+    for (let ly = 0; ly < CHUNK; ly++) {
+      for (let lx = 0; lx < CHUNK; lx++) {
+        const localIndex = lx + ly * CHUNK + lz * CHUNK * CHUNK;
+        const b = chunkData[localIndex]!;
+        if (b === 0) continue;
+        const wx = x0 + lx;
+        const wy = y0 + ly;
+        const wz = z0 + lz;
+        if (gb(wx, wy, wz - 1) !== 0) continue;
+
+        const m = lx + ly * CHUNK;
+        const [cr, cg, cb, k] = getVoxelColor(localIndex, b, wx, wy, wz);
+        mask.key[m] = k;
+        mask.ao[m] = packAo(computeFaceAO(gb, wx, wy, wz, 5));
+        mask.blockType[m] = b;
+        mask.cr[m] = cr;
+        mask.cg[m] = cg;
+        mask.cb[m] = cb;
+      }
+    }
+    emitMaskGreedy(5, lz, 'z');
   }
 
   return {

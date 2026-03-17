@@ -82,7 +82,9 @@ export class ChunkStreamer {
   loadWorldFromServer(): void {
     if (!this.ctx.conn) return;
     const count = this.rehydrateSubscribedChunks();
-    console.log(`[BitWars] Loaded ${count} world chunks from server`);
+    if (count > 0) {
+      console.log(`[BitWars] Loaded ${count} world chunks from server`);
+    }
   }
 
   rehydrateSubscribedChunks(maxNewChunks = Number.POSITIVE_INFINITY): number {

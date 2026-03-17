@@ -31,6 +31,7 @@ export interface InfantryFireContext {
   projectileManager: ProjectileManager;
   controls: FPSControls;
   world: VoxelWorld;
+  spawnPredictedGrenade(origin: THREE.Vector3, direction: THREE.Vector3): boolean;
   localAudioSource(heightOffset?: number): {
     position: { x: number; y: number; z: number };
     direction: { x: number; y: number; z: number };
@@ -83,8 +84,12 @@ export class InfantryFireController {
     if (result.isProjectile) {
       // ── PROJECTILE PATH ──
       if (result.weaponIndex === 4) {
-        // Grenade launcher: server-authoritative. Don't spawn local projectile.
-        // Just sync fire to server; the GrenadeProjectile table row will render it.
+        // Grenade launcher: instant local ghost + server-authoritative reconciliation.
+        const spawned = ctx.spawnPredictedGrenade(result.origin, result.direction);
+        if (!spawned) {
+          ctx.weapons.restoreAmmo(result.weaponIndex);
+          return;
+        }
         this.syncFireToServer(result);
         return;
       }
@@ -357,26 +362,15 @@ export class InfantryFireController {
     const conn = this.ctx.conn;
     if (!conn) return;
 
-    // Convert hex player IDs to Identity objects
-    const hitPlayerIdentities: any[] = [];
-    for (const hexId of impact.hitPlayerIds) {
-      for (const p of conn.db.player.iter()) {
-        if ((p as any).identity.toHexString() === hexId) {
-          hitPlayerIdentities.push((p as any).identity);
-          break;
-        }
-      }
-    }
-
     conn.reducers.projectileImpact({
       shotOrigin: { x: impact.origin.x, y: impact.origin.y, z: impact.origin.z },
       impactPos: { x: impact.hitPos.x, y: impact.hitPos.y, z: impact.hitPos.z },
       direction: { x: impact.direction.x, y: impact.direction.y, z: impact.direction.z },
       weapon: impact.weaponIndex,
       travelTimeMs: Math.round(impact.travelTimeMs),
-      hitPlayers: hitPlayerIdentities,
-      hitVehicles: impact.hitVehicleIds.map((id) => BigInt(id)),
-      hitBlocks: impact.destroyedBlocks.map((b) => ({ x: b.x, y: b.y, z: b.z })),
+      hitPlayers: [],
+      hitVehicles: [],
+      hitBlocks: [],
     });
   }
 
@@ -384,26 +378,15 @@ export class InfantryFireController {
     const conn = this.ctx.conn;
     if (!conn) return;
 
-    // Convert hex player IDs to Identity objects
-    const hitPlayerIdentities: any[] = [];
-    for (const hexId of impact.hitPlayerIds) {
-      for (const p of conn.db.player.iter()) {
-        if ((p as any).identity.toHexString() === hexId) {
-          hitPlayerIdentities.push((p as any).identity);
-          break;
-        }
-      }
-    }
-
     conn.reducers.vehicleProjectileImpact({
       shotOrigin: { x: impact.origin.x, y: impact.origin.y, z: impact.origin.z },
       impactPos: { x: impact.hitPos.x, y: impact.hitPos.y, z: impact.hitPos.z },
       direction: { x: impact.direction.x, y: impact.direction.y, z: impact.direction.z },
       vehicleWeapon: impact.vehicleWeaponIndex,
       travelTimeMs: Math.round(impact.travelTimeMs),
-      hitPlayers: hitPlayerIdentities,
-      hitVehicles: impact.hitVehicleIds.map((id) => BigInt(id)),
-      hitBlocks: impact.destroyedBlocks.map((b) => ({ x: b.x, y: b.y, z: b.z })),
+      hitPlayers: [],
+      hitVehicles: [],
+      hitBlocks: [],
       sourceVehicleId: BigInt(impact.sourceVehicleId),
     });
   }

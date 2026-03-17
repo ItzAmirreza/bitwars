@@ -10,4 +10,4 @@ pub mod projectile;
 pub use blocks::{destroy_blocks_physics, sync_entity_transform};
 pub use damage::*;
 pub use fire::{fire_weapon, reload_weapon};
-pub use projectile::projectile_impact;
+pub use projectile::*;

@@ -217,10 +217,10 @@ pub fn vehicle_projectile_impact(
     impact_pos: Vec3,
     _direction: Vec3,
     vehicle_weapon: u8,
-    travel_time_ms: u32,
-    hit_players: Vec<Identity>,
-    hit_vehicles: Vec<u64>,
-    hit_blocks: Vec<Vec3>,
+    _travel_time_ms: u32,
+    _hit_players: Vec<Identity>,
+    _hit_vehicles: Vec<u64>,
+    _hit_blocks: Vec<Vec3>,
     source_vehicle_id: u64,
 ) -> Result<(), String> {
     let sender = ctx.sender();
@@ -239,20 +239,52 @@ pub fn vehicle_projectile_impact(
         return Err("Not a projectile weapon".to_string());
     }
 
-    // Shared travel time validation
-    weapons::validate_travel_time(
-        &shot_origin,
-        &impact_pos,
-        def.projectile_speed,
-        travel_time_ms,
-    );
-
-    let max_range = def.max_range + 10.0;
-    if dist_sq(&shot_origin, &impact_pos) > max_range * max_range {
-        return Err("Impact too far from origin".to_string());
+    if source_vehicle_id == 0 {
+        return Err("Invalid source vehicle".to_string());
+    }
+    let source_vehicle = ctx
+        .db
+        .vehicle()
+        .entity_id()
+        .find(&source_vehicle_id)
+        .ok_or("Source vehicle not found")?;
+    if source_vehicle.pilot_identity != Some(sender) {
+        return Err("Not pilot of source vehicle".to_string());
     }
 
     let weapon_code = 100 + vehicle_weapon;
+    let Some(shot) = find_matching_projectile_shot(
+        ctx,
+        sender,
+        weapon_code,
+        def.projectile_speed,
+        def.max_range,
+        &impact_pos,
+        &shot_origin,
+        Some(source_vehicle_id),
+        true,
+    ) else {
+        log::debug!(
+            "Ignoring unmatched vehicle projectile impact (player={:?}, weapon={}, vehicle={}, pos=({:.2},{:.2},{:.2}))",
+            sender,
+            vehicle_weapon,
+            source_vehicle_id,
+            impact_pos.x,
+            impact_pos.y,
+            impact_pos.z
+        );
+        return Ok(());
+    };
+
+    let max_range = def.max_range + 10.0;
+    if dist_sq(&shot.origin, &impact_pos) > max_range * max_range {
+        return Err("Impact too far from origin".to_string());
+    }
+
+    consume_projectile_shot(ctx, shot, &impact_pos);
+
+    let hit_players = collect_all_player_ids(ctx);
+    let hit_vehicles = collect_all_vehicle_ids(ctx);
     apply_splash_player_damage(
         ctx,
         sender,
@@ -274,7 +306,7 @@ pub fn vehicle_projectile_impact(
     );
 
     let actually_destroyed =
-        destroy_and_check_blocks(ctx, &impact_pos, &hit_blocks, def.radius + 5.0);
+        destroy_spherical_blocks(ctx, &impact_pos, def.radius, (def.radius * 0.5).max(0.1));
 
     if def.radius > 0.0 {
         emit_explosion(

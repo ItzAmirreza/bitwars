@@ -441,26 +441,88 @@ export class VoxelWorld {
     return applied;
   }
 
-  private applyMesh(scene: THREE.Scene, id: number, meshData: ChunkMeshData): void {
-    const old = this.chunkMeshes.get(id);
-    if (old) {
-      scene.remove(old);
-      old.geometry.dispose();
-      this.chunkMeshes.delete(id);
+  private getReusableAttribute(
+    geometry: THREE.BufferGeometry,
+    name: 'position' | 'normal' | 'color',
+    requiredComponents: number,
+    itemSize: number,
+  ): THREE.BufferAttribute {
+    const existing = geometry.getAttribute(name);
+    if (
+      existing instanceof THREE.BufferAttribute
+      && existing.itemSize === itemSize
+      && existing.array instanceof Float32Array
+      && existing.array.length >= requiredComponents
+    ) {
+      return existing;
     }
 
-    if (meshData.position.length === 0) return;
+    const existingLength =
+      existing instanceof THREE.BufferAttribute && existing.array instanceof Float32Array
+        ? existing.array.length
+        : 0;
+    const rawCapacity = Math.max(
+      requiredComponents,
+      existingLength > 0 ? Math.floor(existingLength * 1.5) : itemSize * 256,
+    );
+    const capacity = Math.ceil(rawCapacity / itemSize) * itemSize;
+    const attr = new THREE.BufferAttribute(new Float32Array(capacity), itemSize);
+    attr.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute(name, attr);
+    return attr;
+  }
 
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(meshData.position, 3));
-    geo.setAttribute('normal', new THREE.BufferAttribute(meshData.normal, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(meshData.color, 3));
+  private writeAttributeData(attribute: THREE.BufferAttribute, data: Float32Array): void {
+    const target = attribute.array as Float32Array;
+    target.set(data, 0);
+    attribute.clearUpdateRanges();
+    attribute.addUpdateRange(0, data.length);
+    attribute.needsUpdate = true;
+  }
 
-    const mesh = new THREE.Mesh(geo, this.mat);
-    mesh.castShadow = false;
-    mesh.receiveShadow = true;
-    scene.add(mesh);
-    this.chunkMeshes.set(id, mesh);
+  private applyMesh(scene: THREE.Scene, id: number, meshData: ChunkMeshData): void {
+    const vertexCount = meshData.position.length / 3;
+    const existing = this.chunkMeshes.get(id);
+
+    if (vertexCount === 0) {
+      if (existing) {
+        scene.remove(existing);
+        existing.geometry.dispose();
+        this.chunkMeshes.delete(id);
+      }
+      return;
+    }
+
+    if (!existing) {
+      const geo = new THREE.BufferGeometry();
+      const positionAttr = this.getReusableAttribute(geo, 'position', meshData.position.length, 3);
+      const normalAttr = this.getReusableAttribute(geo, 'normal', meshData.normal.length, 3);
+      const colorAttr = this.getReusableAttribute(geo, 'color', meshData.color.length, 3);
+      this.writeAttributeData(positionAttr, meshData.position);
+      this.writeAttributeData(normalAttr, meshData.normal);
+      this.writeAttributeData(colorAttr, meshData.color);
+      geo.setDrawRange(0, vertexCount);
+
+      const mesh = new THREE.Mesh(geo, this.mat);
+      mesh.castShadow = false;
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+      this.chunkMeshes.set(id, mesh);
+      return;
+    }
+
+    const geometry = existing.geometry as THREE.BufferGeometry;
+    const positionAttr = this.getReusableAttribute(geometry, 'position', meshData.position.length, 3);
+    const normalAttr = this.getReusableAttribute(geometry, 'normal', meshData.normal.length, 3);
+    const colorAttr = this.getReusableAttribute(geometry, 'color', meshData.color.length, 3);
+
+    this.writeAttributeData(positionAttr, meshData.position);
+    this.writeAttributeData(normalAttr, meshData.normal);
+    this.writeAttributeData(colorAttr, meshData.color);
+    geometry.setDrawRange(0, vertexCount);
+    geometry.boundingSphere = null;
+    geometry.boundingBox = null;
+    existing.visible = true;
   }
 
   updateChunkShadowCasting(anchorX: number, anchorZ: number, castRadiusChunks: number): void {

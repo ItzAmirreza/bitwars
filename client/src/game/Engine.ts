@@ -20,6 +20,7 @@ import type { InfantryFireContext } from './InfantryFireController';
 import { VehicleFireController } from './VehicleFireController';
 import type { VehicleFireContext } from './VehicleFireController';
 import { ENTITY_KINDS } from '../shared-config';
+import { GRENADE } from '../shared-config';
 import type { DbConnection } from '../module_bindings';
 import type { GameSettings } from '../store';
 import { NetDiagnostics } from './NetDiagnostics';
@@ -107,6 +108,19 @@ export class Engine {
     trailTimer: number;    // accumulated time since last trail particle
   }> = new Map();
 
+  // Local-predicted grenade ghosts for instant shooter feedback.
+  private predictedGrenadeGhosts: Array<{
+    mesh: THREE.Mesh;
+    light: THREE.PointLight | null;
+    pos: THREE.Vector3;
+    vel: THREE.Vector3;
+    age: number;
+    ttl: number;
+    trailTimer: number;
+  }> = [];
+  private readonly MAX_PREDICTED_GRENADE_GHOSTS = 8;
+  private readonly PREDICTED_GRENADE_TTL = 0.9;
+
   // Lighting & Sky
   private sun: THREE.DirectionalLight;
   private moon: THREE.DirectionalLight;
@@ -134,7 +148,7 @@ export class Engine {
   private vehicleFire!: VehicleFireController;
 
   // State
-  private clock: THREE.Clock;
+  private clock: THREE.Timer;
   private container: HTMLElement;
   private conn: DbConnection | null;
   private onStateChange: (state: EngineState) => void;
@@ -146,6 +160,10 @@ export class Engine {
   private tpsWindowStartMs = 0;
   private tpsWindowStartTick = 0n;
   private currentServerTps = 0;
+  private cachedMaxSimTick = 0n;
+  private nextSimTickSampleAt = 0;
+  private cachedPlayerCount = 1;
+  private nextPlayerCountSampleAt = 0;
   private animationId = 0;
   private mouseDown = false;
   private lastPositionUpdate = 0;
@@ -189,7 +207,8 @@ export class Engine {
     this.onStateChange = onStateChange;
     this.localIdentity = localIdentity;
     this.username = username;
-    this.clock = new THREE.Clock();
+    this.clock = new THREE.Timer();
+    this.clock.connect(document);
 
     const w = container.clientWidth;
     const h = container.clientHeight;
@@ -199,7 +218,7 @@ export class Engine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setClearColor(0x5a5856);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
@@ -1389,6 +1408,16 @@ export class Engine {
 
         // ── Projectiles + Grenades ──
         this.projectileManager.clearAll();
+        for (const ghost of this.predictedGrenadeGhosts) {
+          this.scene.remove(ghost.mesh);
+          ghost.mesh.geometry.dispose();
+          (ghost.mesh.material as THREE.Material).dispose();
+          if (ghost.light) {
+            this.scene.remove(ghost.light);
+            ghost.light.dispose();
+          }
+        }
+        this.predictedGrenadeGhosts.length = 0;
         for (const vis of this.grenadeVisuals.values()) {
           this.scene.remove(vis.mesh);
           vis.mesh.geometry.dispose();
@@ -1465,6 +1494,12 @@ export class Engine {
     const grenadeTable = (this.conn.db as any).grenade_projectile;
     if (grenadeTable) {
       grenadeTable.onInsert((_ctx: unknown, g: any) => {
+        // Reconcile local grenade ghosts when authoritative row appears.
+        this.consumePredictedGrenadeGhostNear(
+          new THREE.Vector3(g.pos.x, g.pos.y, g.pos.z),
+          new THREE.Vector3(g.vel.x, g.vel.y, g.vel.z),
+        );
+
         const id = BigInt(g.id);
         if (this.grenadeVisuals.has(id)) return;
 
@@ -1556,6 +1591,123 @@ export class Engine {
     const idx = row.weaponIndex;
     if (idx >= 0 && idx < WEAPONS.length) {
       this.weapons.setAmmo(idx, row.ammo);
+    }
+  }
+
+  spawnPredictedGrenade(origin: THREE.Vector3, direction: THREE.Vector3): boolean {
+    if (this.predictedGrenadeGhosts.length >= this.MAX_PREDICTED_GRENADE_GHOSTS) {
+      const oldest = this.predictedGrenadeGhosts.shift();
+      if (oldest) {
+        this.scene.remove(oldest.mesh);
+        oldest.mesh.geometry.dispose();
+        (oldest.mesh.material as THREE.Material).dispose();
+        if (oldest.light) {
+          this.scene.remove(oldest.light);
+          oldest.light.dispose();
+        }
+      }
+    }
+
+    const cfg = WEAPONS[4].projectile;
+    const dir = direction.clone().normalize();
+    if (!Number.isFinite(dir.x) || !Number.isFinite(dir.y) || !Number.isFinite(dir.z)) {
+      return false;
+    }
+
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(cfg.size, 8, 6),
+      new THREE.MeshBasicMaterial({ color: cfg.lightColor }),
+    );
+    mesh.position.copy(origin);
+    this.scene.add(mesh);
+
+    let light: THREE.PointLight | null = null;
+    if (cfg.lightIntensity > 0) {
+      light = new THREE.PointLight(cfg.lightColor, cfg.lightIntensity, cfg.lightRange);
+      light.position.copy(origin);
+      this.scene.add(light);
+    }
+
+    const speed = WEAPONS[4].projectile.speed;
+    this.predictedGrenadeGhosts.push({
+      mesh,
+      light,
+      pos: origin.clone(),
+      vel: dir.multiplyScalar(speed),
+      age: 0,
+      ttl: this.PREDICTED_GRENADE_TTL,
+      trailTimer: 0,
+    });
+
+    return true;
+  }
+
+  private consumePredictedGrenadeGhostNear(serverPos: THREE.Vector3, serverVel: THREE.Vector3): void {
+    let bestIdx = -1;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (let i = 0; i < this.predictedGrenadeGhosts.length; i++) {
+      const ghost = this.predictedGrenadeGhosts[i];
+      const posDistSq = ghost.pos.distanceToSquared(serverPos);
+      if (posDistSq > 100) continue;
+      const velDir = ghost.vel.clone().normalize();
+      const serverDir = serverVel.clone().normalize();
+      const dirDot = velDir.dot(serverDir);
+      if (Number.isFinite(dirDot) && dirDot < 0.45) continue;
+
+      const score = posDistSq + ghost.age * 6;
+      if (score < bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+
+    if (bestIdx >= 0) {
+      const ghost = this.predictedGrenadeGhosts[bestIdx];
+      this.scene.remove(ghost.mesh);
+      ghost.mesh.geometry.dispose();
+      (ghost.mesh.material as THREE.Material).dispose();
+      if (ghost.light) {
+        this.scene.remove(ghost.light);
+        ghost.light.dispose();
+      }
+      this.predictedGrenadeGhosts.splice(bestIdx, 1);
+    }
+  }
+
+  private updatePredictedGrenadeGhosts(delta: number): void {
+    if (this.predictedGrenadeGhosts.length === 0) return;
+    const cfg = WEAPONS[4].projectile;
+
+    for (let i = this.predictedGrenadeGhosts.length - 1; i >= 0; i--) {
+      const ghost = this.predictedGrenadeGhosts[i];
+      ghost.age += delta;
+      if (ghost.age >= ghost.ttl) {
+        this.scene.remove(ghost.mesh);
+        ghost.mesh.geometry.dispose();
+        (ghost.mesh.material as THREE.Material).dispose();
+        if (ghost.light) {
+          this.scene.remove(ghost.light);
+          ghost.light.dispose();
+        }
+        this.predictedGrenadeGhosts.splice(i, 1);
+        continue;
+      }
+
+      ghost.vel.y -= GRENADE.gravity * delta;
+      ghost.pos.addScaledVector(ghost.vel, delta);
+
+      ghost.mesh.position.copy(ghost.pos);
+      if (ghost.light) ghost.light.position.copy(ghost.pos);
+
+      const speed = ghost.vel.length();
+      if (speed > 1) {
+        ghost.trailTimer += delta;
+        if (ghost.trailTimer >= 0.35 / speed) {
+          ghost.trailTimer = 0;
+          this.vfx.emitProjectileTrail(ghost.pos.x, ghost.pos.y, ghost.pos.z, cfg.trailColor);
+        }
+      }
     }
   }
 
@@ -1651,8 +1803,9 @@ export class Engine {
 
   // ── ANIMATION LOOP ──
 
-  private animate = (): void => {
+  private animate = (timestamp?: DOMHighResTimeStamp): void => {
     this.animationId = requestAnimationFrame(this.animate);
+    this.clock.update(timestamp);
     const delta = Math.min(this.clock.getDelta(), 0.1);
     this.elapsedTime += delta;
 
@@ -1668,16 +1821,21 @@ export class Engine {
     this.netDiag.recordFrame(delta);
 
     if (this.conn) {
-      let sampledSimTick = 0n;
-      // Use max simTick across vehicles so HUD TPS doesn't drop to 0 when one
-      // tracked vehicle stream briefly stalls (e.g. mount switches / cache churn).
-      for (const row of (this.conn.db as any).vehicle.iter()) {
-        const tick = this.toU64BigInt((row as any).simTick);
-        if (tick > sampledSimTick) sampledSimTick = tick;
+      const nowMs = performance.now();
+      if (nowMs >= this.nextSimTickSampleAt) {
+        this.nextSimTickSampleAt = nowMs + 100;
+        let sampledSimTick = 0n;
+        // Use max simTick across vehicles so HUD TPS doesn't drop to 0 when one
+        // tracked vehicle stream briefly stalls (e.g. mount switches / cache churn).
+        for (const row of (this.conn.db as any).vehicle.iter()) {
+          const tick = this.toU64BigInt((row as any).simTick);
+          if (tick > sampledSimTick) sampledSimTick = tick;
+        }
+        this.cachedMaxSimTick = sampledSimTick;
       }
 
+      const sampledSimTick = this.cachedMaxSimTick;
       if (sampledSimTick > 0n) {
-        const nowMs = performance.now();
         if (
           this.tpsWindowStartTick === 0n
           || sampledSimTick < this.tpsWindowStartTick
@@ -1883,6 +2041,7 @@ export class Engine {
 
     // Projectiles
     this.projectileManager.update(delta);
+    this.updatePredictedGrenadeGhosts(delta);
 
     // Server-authoritative grenade interpolation: extrapolate positions between server ticks
     for (const vis of this.grenadeVisuals.values()) {
@@ -2008,8 +2167,19 @@ export class Engine {
   private pushHudState(startupProgress: number): void {
     // Push state to HUD (use tracked ammo for current weapon)
     const wp = WEAPONS[this.weapons.currentWeapon];
-    const pc = this.conn
-      ? Array.from(this.conn.db.player.iter()).filter((p: any) => p.online).length : 1;
+    let pc = 1;
+    if (this.conn) {
+      const now = performance.now();
+      if (now >= this.nextPlayerCountSampleAt) {
+        this.nextPlayerCountSampleAt = now + 250;
+        let count = 0;
+        for (const p of this.conn.db.player.iter() as Iterable<any>) {
+          if (p.online) count++;
+        }
+        this.cachedPlayerCount = count;
+      }
+      pc = this.cachedPlayerCount;
+    }
     // Compute heading from camera yaw (0-360 degrees, 0=North)
     const camEuler = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
     const headingRad = camEuler.y;
@@ -2106,6 +2276,7 @@ export class Engine {
 
   destroy(): void {
     cancelAnimationFrame(this.animationId);
+    this.clock.dispose();
     this.container.removeEventListener('mousedown', this.onMouseDown);
     this.container.removeEventListener('mouseup', this.onMouseUp);
     document.removeEventListener('keydown', this.onKeyDown);
@@ -2117,6 +2288,16 @@ export class Engine {
     this.vfx.dispose();
     this.projectileManager.dispose();
     this.netDiag.dispose();
+    for (const ghost of this.predictedGrenadeGhosts) {
+      this.scene.remove(ghost.mesh);
+      ghost.mesh.geometry.dispose();
+      (ghost.mesh.material as THREE.Material).dispose();
+      if (ghost.light) {
+        this.scene.remove(ghost.light);
+        ghost.light.dispose();
+      }
+    }
+    this.predictedGrenadeGhosts.length = 0;
     // Clean up grenade visuals
     for (const vis of this.grenadeVisuals.values()) {
       this.scene.remove(vis.mesh);
