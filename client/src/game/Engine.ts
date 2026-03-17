@@ -192,6 +192,24 @@ export class Engine {
   // Chunk streaming
   private chunkStreamer!: ChunkStreamer;
 
+  // Adaptive graphics scaling
+  private graphicsQuality: GameSettings['graphicsQuality'] = 'high';
+  private userShadowsEnabled = true;
+  private userPostFxEnabled = true;
+  private adaptiveTier = 0;
+  private adaptiveFrameMsEma = 16.7;
+  private adaptiveSampleTimer = 0;
+  private adaptivePressureTime = 0;
+  private adaptiveReliefTime = 0;
+  private appliedPixelRatio = -1;
+  private appliedShadowMapSize = 0;
+  private shadowsActive = true;
+  private currentShadowCastRadiusChunks = 7;
+  private currentRebuildBudgetMoving = CHUNK_REBUILD_BUDGET_MOVING;
+  private currentRebuildBudgetIdle = CHUNK_REBUILD_BUDGET_IDLE;
+  private currentChunkStreamIntervalFrames = CHUNK_STREAM_INTERVAL_FRAMES;
+  private shadowRefreshTimer = 0;
+
   // Dev-only networking diagnostics (F3 overlay, F4 download)
   private netDiag = new NetDiagnostics();
 
@@ -344,6 +362,9 @@ export class Engine {
     // ── PostFX ──
     this.postfx = new PostFX();
 
+    // Apply initial quality profile before first frame.
+    this.applyGraphicsTier(true);
+
     // ── Vehicle manager ──
     this.vehicleManager = new VehicleManager(this as unknown as VehicleEngineContext);
     this.weapons.setVehicles(this.vehicleManager.vehicles);
@@ -374,21 +395,120 @@ export class Engine {
     this.camera.fov = settings.fov;
     this.camera.updateProjectionMatrix();
     this.audio.setMasterVolume(settings.masterVolume);
-    this.sun.castShadow = settings.shadowsEnabled;
-    this.moon.castShadow = false;
-    this.postfx.enabled = settings.postFXEnabled;
     this.controls.setSprintToggle(settings.sprintToggle);
+    this.graphicsQuality = settings.graphicsQuality;
+    this.userShadowsEnabled = settings.shadowsEnabled;
+    this.userPostFxEnabled = settings.postFXEnabled;
 
-    // Graphics quality presets
-    if (settings.graphicsQuality === 'low') {
-      this.renderer.setPixelRatio(1);
-      this.sun.shadow.mapSize.set(512, 512);
-    } else if (settings.graphicsQuality === 'medium') {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-      this.sun.shadow.mapSize.set(1024, 1024);
+    // Reset adaptive scaler when user changes settings, then let it ramp again.
+    this.adaptiveTier = 0;
+    this.adaptiveFrameMsEma = 16.7;
+    this.adaptiveSampleTimer = 0;
+    this.adaptivePressureTime = 0;
+    this.adaptiveReliefTime = 0;
+    this.applyGraphicsTier(true);
+  }
+
+  private roundShadowMapSize(size: number): number {
+    if (size >= 1536) return 2048;
+    if (size >= 768) return 1024;
+    if (size >= 384) return 512;
+    return 256;
+  }
+
+  private applyGraphicsTier(force = false): void {
+    const baseDpr = this.graphicsQuality === 'low' ? 1 : this.graphicsQuality === 'medium' ? 1.5 : 2;
+    const baseShadowMap = this.graphicsQuality === 'low' ? 512 : this.graphicsQuality === 'medium' ? 1024 : 2048;
+    const baseCastRadius = this.graphicsQuality === 'low' ? 4 : this.graphicsQuality === 'medium' ? 6 : 8;
+
+    const dprScale = [1.0, 0.9, 0.78, 0.66][this.adaptiveTier] ?? 1.0;
+    const shadowScale = [1.0, 0.75, 0.5, 0.25][this.adaptiveTier] ?? 1.0;
+    const budgetScale = [1.0, 0.85, 0.7, 0.55][this.adaptiveTier] ?? 1.0;
+
+    const wantedDpr = Math.max(0.6, Math.min(window.devicePixelRatio, baseDpr * dprScale));
+    const shadowMapSize = this.roundShadowMapSize(baseShadowMap * shadowScale);
+    const shadowsActive = this.userShadowsEnabled && this.adaptiveTier < 3;
+    const postFxActive = this.userPostFxEnabled && this.adaptiveTier < 2;
+
+    this.currentShadowCastRadiusChunks = shadowsActive
+      ? Math.max(2, baseCastRadius - this.adaptiveTier)
+      : 0;
+    this.currentRebuildBudgetMoving = Math.max(4, Math.round(CHUNK_REBUILD_BUDGET_MOVING * budgetScale));
+    this.currentRebuildBudgetIdle = Math.max(8, Math.round(CHUNK_REBUILD_BUDGET_IDLE * budgetScale));
+
+    const nextStreamInterval = this.adaptiveTier >= 3 ? 4 : this.adaptiveTier >= 2 ? 3 : CHUNK_STREAM_INTERVAL_FRAMES;
+    if (force || this.currentChunkStreamIntervalFrames !== nextStreamInterval) {
+      this.currentChunkStreamIntervalFrames = nextStreamInterval;
+      this.chunkStreamer.chunkLoadFrame = 0;
+    }
+
+    if (force || Math.abs(this.appliedPixelRatio - wantedDpr) > 0.01) {
+      this.renderer.setPixelRatio(wantedDpr);
+      this.appliedPixelRatio = wantedDpr;
+      this.onResize();
+    }
+
+    if (force || this.appliedShadowMapSize !== shadowMapSize) {
+      this.sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+      this.sun.shadow.map?.dispose();
+      this.appliedShadowMapSize = shadowMapSize;
+    }
+
+    if (force || this.shadowsActive !== shadowsActive) {
+      this.shadowsActive = shadowsActive;
+      this.renderer.shadowMap.enabled = shadowsActive;
+      this.sun.castShadow = shadowsActive;
+      this.renderer.shadowMap.needsUpdate = true;
+      this.shadowRefreshTimer = 0;
+    }
+
+    this.moon.castShadow = false;
+    this.postfx.enabled = postFxActive;
+  }
+
+  private refreshAdaptiveScaling(delta: number): void {
+    const frameMs = delta * 1000;
+    const emaLerp = 1 - Math.pow(0.001, delta);
+    this.adaptiveFrameMsEma += (frameMs - this.adaptiveFrameMsEma) * emaLerp;
+
+    this.adaptiveSampleTimer += delta;
+    if (this.adaptiveSampleTimer < 0.5) return;
+
+    const elapsed = this.adaptiveSampleTimer;
+    this.adaptiveSampleTimer = 0;
+
+    const targetMs = this.graphicsQuality === 'low' ? 22 : this.graphicsQuality === 'medium' ? 18.5 : 16.7;
+    const hardPressure = this.adaptiveFrameMsEma > targetMs + 8;
+    const pressure = this.adaptiveFrameMsEma > targetMs + 3;
+    const relief = this.adaptiveFrameMsEma < targetMs - 2.2;
+
+    if (hardPressure) {
+      this.adaptivePressureTime += elapsed * 1.8;
+      this.adaptiveReliefTime = 0;
+    } else if (pressure) {
+      this.adaptivePressureTime += elapsed;
+      this.adaptiveReliefTime = 0;
+    } else if (relief) {
+      this.adaptiveReliefTime += elapsed;
+      this.adaptivePressureTime = 0;
     } else {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      this.sun.shadow.mapSize.set(2048, 2048);
+      this.adaptivePressureTime = Math.max(0, this.adaptivePressureTime - elapsed * 0.5);
+      this.adaptiveReliefTime = Math.max(0, this.adaptiveReliefTime - elapsed * 0.5);
+    }
+
+    if (this.adaptivePressureTime >= 1.2 && this.adaptiveTier < 3) {
+      this.adaptiveTier++;
+      this.adaptivePressureTime = 0;
+      this.adaptiveReliefTime = 0;
+      this.applyGraphicsTier();
+      return;
+    }
+
+    if (this.adaptiveReliefTime >= 5 && this.adaptiveTier > 0) {
+      this.adaptiveTier--;
+      this.adaptivePressureTime = 0;
+      this.adaptiveReliefTime = 0;
+      this.applyGraphicsTier();
     }
   }
 
@@ -1861,6 +1981,8 @@ export class Engine {
 
     const _diagVel = this.controls.getVelocity();
     this.netDiag.recordSpeed(Math.sqrt(_diagVel.x * _diagVel.x + _diagVel.y * _diagVel.y + _diagVel.z * _diagVel.z));
+
+    this.refreshAdaptiveScaling(delta);
     if (this.netDiag.visible) {
       this.netDiag.recordMountedId(this.mountedVehicleId);
       if (this.mountedVehicleId !== 0) {
@@ -1891,7 +2013,7 @@ export class Engine {
 
     // Chunk streaming (every N frames to load quickly)
     this.chunkStreamer.chunkLoadFrame++;
-    if (this.chunkStreamer.chunkLoadFrame % CHUNK_STREAM_INTERVAL_FRAMES === 0) {
+    if (this.chunkStreamer.chunkLoadFrame % this.currentChunkStreamIntervalFrames === 0) {
       this.chunkStreamer.updateChunkLoading();
     }
 
@@ -1939,8 +2061,18 @@ export class Engine {
     const isMoving = this.controls.moveForward || this.controls.moveBackward
       || this.controls.moveLeft || this.controls.moveRight
       || this.controls.isSliding || !this.controls.onGround;
-    const baseBudget = isMoving ? CHUNK_REBUILD_BUDGET_MOVING : CHUNK_REBUILD_BUDGET_IDLE;
+    const baseBudget = isMoving ? this.currentRebuildBudgetMoving : this.currentRebuildBudgetIdle;
     this.world.rebuildDirtyChunks(this.scene, baseBudget);
+
+    this.shadowRefreshTimer -= delta;
+    if (this.shadowRefreshTimer <= 0) {
+      this.shadowRefreshTimer = 0.25;
+      this.world.updateChunkShadowCasting(
+        this.camera.position.x,
+        this.camera.position.z,
+        this.currentShadowCastRadiusChunks,
+      );
+    }
 
     this.renderFrame(delta);
     this.pushHudState(startupProgress);
