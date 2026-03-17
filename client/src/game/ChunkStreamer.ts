@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, unpackChunkId } from './VoxelWorld';
 import type { DbConnection } from '../module_bindings';
+import { updateWorldChunkSubscriptionAoi } from '../db';
 
 // ── Chunk streaming config ──
 const VIEW_DISTANCE = 10; // chunks (160 blocks)
@@ -16,6 +17,7 @@ export const CHUNK_REBUILD_BUDGET_BOOTSTRAP = 40;
 const CHUNK_REQUEST_TIMEOUT_MS = 2000;
 const NUM_CHUNKS_Y = Math.ceil(WORLD_Y / CHUNK);
 const STARTUP_READY_RADIUS = 2;
+const WORLD_CHUNK_AOI_RADIUS = VIEW_DISTANCE + UNLOAD_BUFFER + 5;
 
 type ChunkOffset = { dx: number; dz: number; d2: number };
 
@@ -123,6 +125,7 @@ export class ChunkStreamer {
     this.reapPendingChunkRequests();
 
     const [cx, cz] = this.getLoadAnchorChunk();
+    updateWorldChunkSubscriptionAoi(cx, cz, WORLD_CHUNK_AOI_RADIUS);
 
     const playerMoved = cx !== this.lastPlayerCx || cz !== this.lastPlayerCz;
     if (playerMoved) {
