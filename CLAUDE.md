@@ -40,7 +40,7 @@ bitwars/
 │   │   ├── mod.rs                 generate_chunk + RLE
 │   │   ├── noise.rs, biomes.rs, roads.rs, structural.rs
 │   │   └── structures/            1 file per structure type
-│   ├── helpers/                   math.rs, entity_ops.rs, player_state.rs, vehicle_helpers.rs
+│   ├── helpers/                   math.rs, entity_ops.rs, player_state.rs, vehicle_helpers.rs, vehicle_input.rs
 │   ├── grenades.rs, player.rs, admin.rs, chat.rs
 │   ├── lifecycle.rs, environment.rs, cleanup.rs, map.rs
 │   └── (50 files total, all under 420 lines)
@@ -55,11 +55,15 @@ bitwars/
 │   │   │   ├── VehicleBase.ts     Abstract VehicleType interface
 │   │   │   ├── VehicleManager.ts  Universal vehicle manager with type registry
 │   │   │   └── HelicopterType.ts  Helicopter model + animation + breakup
-│   │   ├── audio/                 7 per-category audio modules
-│   │   │   ├── AudioCore.ts       Base infrastructure (spatialization, occlusion)
+│   │   ├── audio/                 Ray-traced procedural audio system
+│   │   │   ├── AudioCore.ts       Submix buses, dynamic reverb, spatial bus, voice mgmt
+│   │   │   ├── AudioRayTracer.worker.ts  Web Worker: DDA voxel raycasting for acoustics
+│   │   │   ├── AudioRayState.ts   Main-thread store for ray-traced environment + propagation
+│   │   │   ├── NoisePool.ts       Pre-allocated noise buffer pool (round-robin reuse)
+│   │   │   ├── VoiceManager.ts    Polyphony limiter, distance culling, voice stealing
 │   │   │   ├── WeaponAudio.ts, CombatAudio.ts, MovementAudio.ts
 │   │   │   ├── UIAudio.ts, VehicleAudio.ts, AmbientAudio.ts
-│   │   │   └── (AudioSystem.ts is a thin facade)
+│   │   │   └── (AudioSystem.ts is the facade + worker lifecycle)
 │   │   ├── ChunkStreamer.ts       Chunk loading/streaming/bootstrap
 │   │   ├── LanternSystem.ts       Lantern lights + glow sprites
 │   │   ├── RemotePlayerManager.ts Remote player models + interpolation
@@ -232,6 +236,30 @@ For features where instant feedback matters:
 5. If server disagrees, the authoritative table update naturally corrects the client state
 6. Skip redundant VFX for already-predicted changes (avoid double particles)
 
+### 9. Vehicle Netcode Contract (Critical)
+
+Vehicle prediction/reconciliation depends on a strict tick contract. Do not change this casually.
+
+- **Server consumes exactly one queued vehicle input command per physics tick**
+  - Inputs are queued in `VehicleInputCmd` rows (server-private table)
+  - `tick_vehicles` pops at most one command per vehicle per tick
+  - `acked_input_seq` MUST represent the last command actually consumed by physics, not just received
+- **Coherent snapshot requirement**
+  - Local reconcile MUST use Entity + Vehicle data from the same simulation tick
+  - Use `sim_tick` for coherence checks (not wall-clock heuristics)
+- **Client replay history is tick-aligned**
+  - One history entry per local simulation tick
+  - Never let replay logic assume packet-count == tick-count
+- **Render-only correction**
+  - Correction offsets may affect rendered pose only
+  - Never mutate simulation state as part of visual smoothing
+- **Mounted camera rule**
+  - Do not add extra positional lerp on local mounted camera; vehicle mesh is already smooth
+  - Extra camera lag re-introduces visible oscillation
+- **Vehicle fire origin rule**
+  - Use server-authoritative mounted pose (`getMountedVehiclePoseRaw`) when sending vehicle fire origin
+  - Predicted pose can fail server range validation (`Shot origin too far from vehicle`)
+
 ---
 
 ## Architecture — When to Refactor
@@ -307,6 +335,9 @@ When implementing ANY new feature:
 - **Forgetting to add new tables to `db.ts` subscription list** — callbacks will silently never fire
 - Hardcoding a value that belongs in `game-constants.json`
 - Duplicating weapon/vehicle data instead of using the registry
+- Updating vehicle prediction without preserving the `sim_tick` + `acked_input_seq` coherence contract
+- Reconciling local vehicle from stale cross-table snapshots (Entity tick must match Vehicle tick)
+- Reintroducing mounted camera positional lerp (causes model-vs-camera oscillation)
 
 ---
 
@@ -342,7 +373,33 @@ Engine.animate() → assembles EngineState → onStateChange callback → React 
 ```
 
 ### Audio System
-All sounds are procedurally generated (zero audio files). Each category is a separate module in `client/src/game/audio/`. `AudioSystem.ts` is a thin facade. When adding new sounds, add them to the appropriate category module.
+All sounds are procedurally generated (zero audio files). The system has three layers:
+
+**Layer 1 — Infrastructure (`AudioCore.ts`)**:
+- 5 submix buses: `weapon` (-3dB), `combat` (-2dB), `vehicle` (-4dB), `ui` (-6dB), `movement` (-8dB)
+- `VoiceManager`: polyphony limits per category (weapon:12, combat:8, movement:8, flyby:6, ui:4), distance culling, voice stealing
+- `NoisePool`: pre-allocated noise buffers (30 templates, 3 copies each), round-robin reuse — eliminates per-sound GC pressure
+- Dynamic reverb: 2 delay taps driven by ray-traced room data
+- Automatic node cleanup: `scheduleNodeCleanup()` disconnects orphaned spatial bus nodes after sound duration
+
+**Layer 2 — Ray-Traced Acoustics (Web Worker)**:
+- `AudioRayTracer.worker.ts`: runs on a background thread, receives chunk data, casts 48 DDA rays every ~60ms
+- Computes: room reverb (from bounce distances), echo volume (return ratio), indoor/outdoor factor (escaped rays)
+- **Sound propagation**: for each registered persistent source (vehicles), traces which rays' bounce points can "see" the source. The average initial direction of reaching rays = apparent sound direction (the "sound through doorway" effect)
+- `AudioRayState.ts`: stores smoothed results, lerps direction (10x speed) and occlusion (6x speed) between worker updates
+
+**Layer 3 — Sound Modules** (per-category files):
+- Each play function specifies `bus`, `voiceCategory`, `voiceDuration` in its `SpatialBusOptions`
+- `resolveOutput()` returns `null` when a voice is culled — all functions must handle this
+- When adding new sounds, add them to the appropriate category module
+- Vehicle sounds automatically use propagation data for apparent panner positioning
+
+**Key rules for audio code:**
+- Every `resolveOutput()` call can return `null` — always check before creating nodes
+- One-shot sounds need `voiceDuration` for proper cleanup scheduling
+- Persistent sounds (vehicle engines) must be registered/unregistered as sources via `AudioSystem.registerSoundSource()` / `unregisterSoundSource()`
+- Chunk data is automatically sent to the worker on load/update/unload from `Engine.ts`
+- Never allocate AudioBuffers per-sound — use `core.noise(duration, decay)` which returns from the pool
 
 ### Vehicle System
 `VehicleManager` uses a type registry. Each vehicle type implements the `VehicleType` interface from `VehicleBase.ts`. The manager handles entity tracking, interpolation, camera, and input generically — type-specific logic (model, animation, breakup) lives in the type implementation.
@@ -384,7 +441,7 @@ Read `server/CLAUDE.md` before modifying server code. Key points:
 - **Lighting**: Dynamic day/night cycle via `SkySystem`. Lanterns via `LanternSystem`
 - **Post-processing**: Bloom, color grading, damage vignette via `PostFX`
 - **VFX**: Particle-based effects via instanced meshes in `VFX.ts` (MAX_PARTICLES = 2000)
-- **Audio**: 100% procedural spatial audio via `AudioSystem` + 7 sub-modules
+- **Audio**: 100% procedural spatial audio via `AudioSystem` + 7 sub-modules + ray-traced acoustics worker
 - **Screen shake**: Distance-attenuated, in `InfantryFireController`
 - **Physics debris**: Falling blocks via `PhysicsSystem` (MAX_FALLING = 500)
 - **Player models**: Box-based (body + head + nametag) via `RemotePlayerManager`
