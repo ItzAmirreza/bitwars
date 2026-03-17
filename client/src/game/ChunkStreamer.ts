@@ -3,12 +3,13 @@ import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, unpackChunkI
 import type { DbConnection } from '../module_bindings';
 
 // ── Chunk streaming config ──
-const VIEW_DISTANCE = 18; // chunks (288 blocks)
+const VIEW_DISTANCE = 10; // chunks (160 blocks)
 const UNLOAD_BUFFER = 3; // extra chunks before unloading
-const CHUNKS_PER_REQUEST = 16; // keep network saturated without violating server cap
+const CHUNKS_PER_REQUEST = 4; // smoother server load under fast movement
 const MAX_QUEUE_PROCESS_PER_TICK = 64; // hard cap to avoid long frame stalls
+const MAX_PENDING_CHUNK_REQUESTS = 12; // backpressure: avoid reducer floods
 export const ACTIVE_CHUNK_RADIUS = VIEW_DISTANCE + UNLOAD_BUFFER;
-export const CHUNK_STREAM_INTERVAL_FRAMES = 1;
+export const CHUNK_STREAM_INTERVAL_FRAMES = 2;
 export const CHUNK_REBUILD_BUDGET_MOVING = 10;
 export const CHUNK_REBUILD_BUDGET_IDLE = 20;
 export const CHUNK_REBUILD_BUDGET_BOOTSTRAP = 40;
@@ -148,9 +149,11 @@ export class ChunkStreamer {
 
     // Request missing chunks in small batches to spread decode/meshing cost across frames
     const batch: number[] = [];
+    const remainingPendingBudget = Math.max(0, MAX_PENDING_CHUNK_REQUESTS - this.pendingChunkRequests.size);
     let processed = 0;
     while (
       batch.length < CHUNKS_PER_REQUEST
+      && batch.length < remainingPendingBudget
       && processed < MAX_QUEUE_PROCESS_PER_TICK
       && (this.bootstrapRequestQueue.length > 0 || this.chunkRequestQueue.length > 0)
     ) {
@@ -359,20 +362,11 @@ export class ChunkStreamer {
   }
 
   getLoadAnchorChunk(): [number, number] {
+    // Always anchor chunk streaming to local rendered position. Using
+    // server-replicated player rows while mounted can make streaming trail
+    // behind the local predicted vehicle under jitter.
     let x = this.ctx.camera.position.x;
     let z = this.ctx.camera.position.z;
-
-    if (this.ctx.conn && this.ctx.localIdentity) {
-      for (const player of this.ctx.conn.db.player.iter()) {
-        const p = player as any;
-        if (p.identity.toHexString() !== this.ctx.localIdentity) continue;
-        if (Number.isFinite(p.pos?.x) && Number.isFinite(p.pos?.z)) {
-          x = p.pos.x;
-          z = p.pos.z;
-        }
-        break;
-      }
-    }
 
     if (!Number.isFinite(x) || !Number.isFinite(z)) {
       x = WORLD_X * 0.5;

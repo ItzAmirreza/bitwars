@@ -1,11 +1,19 @@
 import { DbConnection } from './module_bindings';
 import type { SubscriptionEventContext, ErrorContext } from './module_bindings';
+import { ENTITY_KINDS, VEHICLE_TYPES } from './shared-config';
 
 const SPACETIMEDB_URI = import.meta.env.VITE_SPACETIMEDB_URI || 'wss://maincloud.spacetimedb.com';
 const MODULE_NAME = import.meta.env.VITE_MODULE_NAME || 'bitwars';
-
 let connection: DbConnection | null = null;
 let connecting = false;
+let baselineSubscription: { unsubscribe: () => void; isEnded: () => boolean } | null = null;
+
+function disposeSubscription(handle: { unsubscribe: () => void; isEnded: () => boolean } | null): void {
+  if (!handle) return;
+  if (!handle.isEnded()) {
+    handle.unsubscribe();
+  }
+}
 
 export function getConnection(): DbConnection | null {
   return connection;
@@ -31,7 +39,7 @@ export function connect(
         connection = conn;
         connecting = false;
 
-        conn.subscriptionBuilder()
+        baselineSubscription = conn.subscriptionBuilder()
           .onApplied((_subCtx: SubscriptionEventContext) => {
             console.log('[BitWars] Subscriptions applied');
             onConnect(conn, identity.toHexString(), token);
@@ -47,25 +55,32 @@ export function connect(
             "SELECT * FROM player_ammo",
             // player_fire_state and player_movement are server-private
             // (not needed client-side, reduces subscription scan load)
-            "SELECT * FROM world_environment",
-            "SELECT * FROM world_config",
+            "SELECT * FROM world_environment WHERE id = 1",
+            "SELECT * FROM world_config WHERE id = 1",
             "SELECT * FROM chat_message",
             "SELECT * FROM explosion_event",
-            "SELECT * FROM world_chunk",
-            "SELECT * FROM entity",
-            "SELECT * FROM vehicle",
             "SELECT * FROM grenade_projectile",
             "SELECT * FROM kill_event",
             "SELECT * FROM vehicle_destroy_event",
-          ]);
+            "SELECT * FROM world_chunk",
+            // Keep vehicle/entity streams stable for prediction + fire origin.
+            // These must not churn with AOI chunk resubscriptions.
+            `SELECT * FROM entity WHERE kind = ${ENTITY_KINDS.Vehicle}`,
+            `SELECT * FROM vehicle WHERE vehicle_type = ${VEHICLE_TYPES.Helicopter}`,
+            `SELECT * FROM vehicle WHERE vehicle_type = ${VEHICLE_TYPES.FighterJet}`,
+          ]) as { unsubscribe: () => void; isEnded: () => boolean };
       })
       .onConnectError((_ctx: ErrorContext, err: Error) => {
         console.error('[BitWars] Connection error:', err);
         connecting = false;
+        disposeSubscription(baselineSubscription);
+        baselineSubscription = null;
         onError(err);
       })
       .onDisconnect((_ctx: ErrorContext) => {
         console.log('[BitWars] Disconnected');
+        disposeSubscription(baselineSubscription);
+        baselineSubscription = null;
         connection = null;
         connecting = false;
       })

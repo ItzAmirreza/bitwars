@@ -15,6 +15,8 @@ pub mod weapons;
 pub use fighter_jet::tick_fighter_jet;
 pub use helicopter::tick_helicopter;
 pub use interaction::{interact_vehicle, update_vehicle_input};
+pub use spawning::spawn_fighter_jet;
+pub use spawning::spawn_helicopter;
 pub use spawning::spawn_jets_at_airstrips;
 pub use spawning::spawn_sandbox_helicopters;
 pub use weapons::{
@@ -36,6 +38,7 @@ pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
     let vehicle_ids: Vec<u64> = ctx.db.vehicle().iter().map(|v| v.entity_id).collect();
 
     let mut mounted_updates: Vec<Player> = Vec::new();
+    let mut terrain = TerrainSampler::new();
 
     for entity_id in vehicle_ids {
         let Some(vehicle) = ctx.db.vehicle().entity_id().find(&entity_id) else {
@@ -50,9 +53,9 @@ pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
 
         // Dispatch to per-vehicle-type physics
         if vehicle.vehicle_type == vehicle_type_helicopter() {
-            tick_helicopter(ctx, vehicle, entity, &mut mounted_updates);
+            tick_helicopter(ctx, vehicle, entity, &mut mounted_updates, &mut terrain);
         } else if vehicle.vehicle_type == vehicle_type_fighter_jet() {
-            tick_fighter_jet(ctx, vehicle, entity, &mut mounted_updates);
+            tick_fighter_jet(ctx, vehicle, entity, &mut mounted_updates, &mut terrain);
         }
     }
 

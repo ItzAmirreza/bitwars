@@ -9,7 +9,7 @@ use crate::tables::*;
 use crate::types::*;
 
 const ADMIN_USERNAME: &str = "amir";
-const ADMIN_HELP_TEXT: &str = "Admin commands:\n/tp <player> or /tp <x> <y> <z>\n/tphere <player>\n/kill <player>\n/heal [player]\n/god\n/fly\n/ammo\n/weather <0-4>\n/time <0-24>\n/announce <message>\n/killall\n/respawnall";
+const ADMIN_HELP_TEXT: &str = "Admin commands:\n/tp <player> or /tp <x> <y> <z>\n/tphere <player>\n/kill <player>\n/heal [player]\n/god\n/fly\n/ammo\n/spawn <heli|jet>\n/weather <0-4>\n/time <0-24>\n/announce <message>\n/killall\n/respawnall";
 
 pub fn is_admin(username: &str) -> bool {
     username.to_lowercase() == ADMIN_USERNAME
@@ -229,6 +229,47 @@ pub fn process_admin_command(
         "/ammo" => {
             crate::weapons::set_all_ammo_value(ctx, sender, 999);
             insert_system_message(ctx, "Infinite ammo granted");
+            Ok(())
+        }
+
+        "/spawn" => {
+            if parts.len() != 2 {
+                insert_command_help(ctx, "Usage: /spawn <heli|jet>");
+                return Ok(());
+            }
+            let admin = ctx
+                .db
+                .player()
+                .identity()
+                .find(sender)
+                .ok_or("Not registered")?;
+            let yaw = admin.rot.yaw;
+            // Spawn 8 blocks in front of the player, 2 blocks above
+            let spawn_pos = Vec3 {
+                x: admin.pos.x + yaw.sin() * 8.0,
+                y: admin.pos.y + 2.0,
+                z: admin.pos.z + yaw.cos() * 8.0,
+            };
+            match parts[1].to_lowercase().as_str() {
+                "heli" | "helicopter" => {
+                    let eid = crate::vehicles::spawn_helicopter(ctx, spawn_pos, yaw);
+                    insert_system_message(
+                        ctx,
+                        &format!("Spawned helicopter (entity {})", eid),
+                    );
+                }
+                "jet" | "fighterjet" | "fighter_jet" => {
+                    let eid = crate::vehicles::spawn_fighter_jet(ctx, spawn_pos, yaw);
+                    insert_system_message(
+                        ctx,
+                        &format!("Spawned fighter jet (entity {})", eid),
+                    );
+                }
+                _ => {
+                    insert_command_help(ctx, "Unknown vehicle. Available: heli, jet");
+                    return Ok(());
+                }
+            }
             Ok(())
         }
 

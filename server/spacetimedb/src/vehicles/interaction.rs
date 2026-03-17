@@ -130,17 +130,19 @@ pub fn update_vehicle_input(
         .find(sender)
         .ok_or("Not registered")?;
     if player.mounted_vehicle_id == 0 {
-        return Err("Not mounted".to_string());
+        return Ok(());
     }
 
-    let mut vehicle = ctx
-        .db
-        .vehicle()
-        .entity_id()
-        .find(&player.mounted_vehicle_id)
-        .ok_or("Vehicle not found")?;
+    // Ignore stale/duplicate commands to avoid unnecessary queue churn.
+    if input_seq <= 1 {
+        return Ok(());
+    }
+
+    let Some(mut vehicle) = ctx.db.vehicle().entity_id().find(&player.mounted_vehicle_id) else {
+        return Ok(());
+    };
     if vehicle.pilot_identity != Some(sender) {
-        return Err("Not pilot".to_string());
+        return Ok(());
     }
 
     // Monotonic guard: ignore stale/out-of-order input packets.

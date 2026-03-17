@@ -150,7 +150,7 @@ export class VehicleFireController {
       }
 
       // Sync to server
-      this.syncVehicleFireToServer(origin, dir, [], [], []);
+      this.syncVehicleFireToServer(dir, [], [], []);
 
       // Audio + VFX
       ctx.audio.playVehicleRocket(ctx.localAudioSource(-0.1));
@@ -234,7 +234,6 @@ export class VehicleFireController {
 
     // Sync to server
     this.syncVehicleFireToServer(
-      origin,
       dir,
       hitPlayerIds,
       hitVehicleIds,
@@ -249,7 +248,6 @@ export class VehicleFireController {
 
   /** Sync vehicle weapon fire to server */
   private syncVehicleFireToServer(
-    origin: THREE.Vector3,
     direction: THREE.Vector3,
     hitPlayerIds: string[],
     hitVehicleIds: number[],
@@ -270,7 +268,6 @@ export class VehicleFireController {
     }
 
     conn.reducers.fireVehicleWeapon({
-      origin: { x: origin.x, y: origin.y, z: origin.z },
       direction: { x: direction.x, y: direction.y, z: direction.z },
       hitPlayers: hitPlayerIdentities,
       hitVehicles: hitVehicleIds.map((id) => BigInt(id)),

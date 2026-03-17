@@ -10,7 +10,7 @@
 
 import * as THREE from 'three';
 import { InterpolationBuffer } from '../InterpolationBuffer';
-import { ENTITY_KINDS, VEHICLE_TYPES, VEHICLE_TICK_INTERVAL_MS } from '../../shared-config';
+import { ENTITY_KINDS, VEHICLE_TYPES } from '../../shared-config';
 import { VEHICLE_WEAPON_DEFINITIONS } from '../WeaponRegistry';
 import type { VehicleWeaponDefinition } from '../WeaponRegistry';
 import type { DynamicLightOptions } from '../Engine';
@@ -36,8 +36,6 @@ import type { PhysicsInput } from './VehiclePhysics';
 
 // ── Constants ──
 const ENTITY_KIND_VEHICLE = ENTITY_KINDS.Vehicle;
-/** Send vehicle input at server tick rate — sending faster is wasted. */
-const VEHICLE_INPUT_INTERVAL_MS = VEHICLE_TICK_INTERVAL_MS;
 
 // ── Vehicle weapon info (re-exported for Engine / VehicleFireController) ──
 export interface VehicleWeaponInfo {
@@ -133,8 +131,6 @@ export default class VehicleManager {
   vehicleReloadingUntil: [number, number] = [0, 0];
   vehicleCameraDistance = 14;
   jetThrottle = 0; // 0..1 persistent throttle level
-
-  private lastVehicleInputUpdate = 0;
 
   // ── Light rig scratch vectors ──
   private lightRigs = new Map<number, {
@@ -529,31 +525,11 @@ export default class VehicleManager {
         boosting: false,
         inputSeq: packet.seq,
       });
-      this.lastVehicleInputUpdate = performance.now();
       this.engine.netDiag.recordVehicleInputSent();
     }
 
-    // Fallback path: if no local tick ran recently (very high FPS), send the
-    // latest sampled input at the server tick rate so the server still sees
-    // fresh controls.
-    // Avoid synthetic fallback packets while there is no prediction history;
-    // this prevents introducing sequence entries the local sim never stepped.
-    if (!this.prediction) return;
-
-    const now = performance.now();
-    if (now - this.lastVehicleInputUpdate < VEHICLE_INPUT_INTERVAL_MS) return;
-    this.lastVehicleInputUpdate = now;
-
-    const seq = this.nextVehicleInputSeq++;
-    this.engine.conn.reducers.updateVehicleInput({
-      forward: this.currentInput.forward,
-      strafe: this.currentInput.strafe,
-      lift: this.currentInput.lift,
-      yaw: this.currentInput.yaw,
-      boosting: false,
-      inputSeq: seq,
-    });
-    this.engine.netDiag.recordVehicleInputSent();
+    // No synthetic fallback packets: sequence numbers must stay tick-aligned
+    // with local prediction (one seq per local vehicle sim tick).
   }
 
   private sampleCurrentInput(delta: number): void {
@@ -851,7 +827,6 @@ export default class VehicleManager {
     this.lastAckedInputSeq = 0;
     this.lastReconciledSimTick = 0;
     this.pendingInputPackets = [];
-    this.lastVehicleInputUpdate = 0;
     this.localLastServerTime = 0;
   }
 

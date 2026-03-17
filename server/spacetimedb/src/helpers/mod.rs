@@ -5,6 +5,7 @@
 pub mod entity_ops;
 pub mod math;
 pub mod player_state;
+pub mod terrain_cache;
 pub mod vehicle_helpers;
 pub mod vehicle_input;
 
@@ -12,5 +13,6 @@ pub mod vehicle_input;
 pub use entity_ops::*;
 pub use math::*;
 pub use player_state::*;
+pub use terrain_cache::*;
 pub use vehicle_helpers::*;
 pub use vehicle_input::*;

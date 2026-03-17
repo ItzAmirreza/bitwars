@@ -15,9 +15,6 @@ import {
 } from "./types";
 
 export default {
-  get origin() {
-    return Vec3;
-  },
   get direction() {
     return Vec3;
   },

@@ -41,7 +41,11 @@ pub struct Player {
 
 /// Abstract entity root shared by all world objects (player, vehicle, item, ...).
 #[derive(Clone)]
-#[table(accessor = entity, public)]
+#[table(
+    accessor = entity,
+    public,
+    index(accessor = idx_entity_kind, btree(columns = [kind]))
+)]
 pub struct Entity {
     #[primary_key]
     #[auto_inc]
@@ -63,7 +67,11 @@ pub struct Entity {
 
 /// Vehicle entity component attached to an Entity row.
 #[derive(Clone)]
-#[table(accessor = vehicle, public)]
+#[table(
+    accessor = vehicle,
+    public,
+    index(accessor = idx_vehicle_type, btree(columns = [vehicle_type]))
+)]
 pub struct Vehicle {
     #[primary_key]
     pub entity_id: u64,
@@ -169,7 +177,12 @@ pub struct PlayerMovementState {
 // ── World ──
 
 /// Server-authoritative world chunk. RLE-compressed 16x16x16 block data.
-#[table(accessor = world_chunk, public)]
+#[table(
+    accessor = world_chunk,
+    public,
+    index(accessor = idx_world_chunk_cx, btree(columns = [cx])),
+    index(accessor = idx_world_chunk_cz, btree(columns = [cz]))
+)]
 pub struct WorldChunk {
     #[primary_key]
     pub chunk_id: u32,

@@ -145,7 +145,6 @@ export class Engine {
   private currentFps = 0;
   private tpsWindowStartMs = 0;
   private tpsWindowStartTick = 0n;
-  private tpsTrackEntityId = 0;
   private currentServerTps = 0;
   private animationId = 0;
   private mouseDown = false;
@@ -1578,6 +1577,9 @@ export class Engine {
   private sendPositionUpdate(): void {
     if (!this.conn) return;
     if (this.health <= 0) return; // Dead — don't send position updates
+    // While mounted, vehicle input already carries look direction at high rate.
+    // Extra updatePosition calls only add load and can delay input processing.
+    if (this.mountedVehicleId !== 0) return;
     const now = performance.now();
     // Adaptive rate:
     //   Mounted: 50ms (~20Hz) — only sending aim direction + weapon; server
@@ -1586,11 +1588,10 @@ export class Engine {
     //   Active infantry: 33ms (~30Hz)
     //   Idle infantry: 100ms (~10Hz)
     const vel = this.controls.getVelocity();
-    const isActive = this.mountedVehicleId !== 0
-      || this.controls.horizontalSpeed > 0.5
+    const isActive = this.controls.horizontalSpeed > 0.5
       || Math.abs(vel.y) > 0.5
       || this.mouseDown;
-    const interval = this.mountedVehicleId !== 0 ? 50 : (isActive ? 33 : 100);
+    const interval = isActive ? 33 : 100;
     if (now - this.lastPositionUpdate < interval) return;
     this.lastPositionUpdate = now;
 
@@ -1614,21 +1615,16 @@ export class Engine {
     });
     this.netDiag.recordPositionSent(sentPos);
 
-    // Skip syncEntityTransform while mounted — the server's tick_vehicles
-    // already syncs the player entity position to the vehicle every 33ms.
-    // Sending it from the client was redundant and wasted bandwidth.
-    if (this.mountedVehicleId === 0) {
-      // Infantry entity sync (unchanged)
-      const entityId = this.findLocalPlayerEntityId();
-      if (entityId !== 0n && now - this.vehicleManager.lastVehicleSyncAt >= 80) {
-        this.vehicleManager.lastVehicleSyncAt = now;
-        this.conn.reducers.syncEntityTransform({
-          entityId,
-          pos: { x: px, y: py, z: pz },
-          vel: { x: vel.x, y: vel.y, z: vel.z },
-          rot: { yaw: sendYaw, pitch: sendPitch },
-        });
-      }
+    // Infantry entity sync
+    const entityId = this.findLocalPlayerEntityId();
+    if (entityId !== 0n && now - this.vehicleManager.lastVehicleSyncAt >= 80) {
+      this.vehicleManager.lastVehicleSyncAt = now;
+      this.conn.reducers.syncEntityTransform({
+        entityId,
+        pos: { x: px, y: py, z: pz },
+        vel: { x: vel.x, y: vel.y, z: vel.z },
+        rot: { yaw: sendYaw, pitch: sendPitch },
+      });
     }
   }
 
@@ -1672,33 +1668,20 @@ export class Engine {
     this.netDiag.recordFrame(delta);
 
     if (this.conn) {
-      let tpsEntityId = 0;
-      if (this.mountedVehicleId !== 0) {
-        tpsEntityId = this.mountedVehicleId;
-      } else {
-        for (const row of (this.conn.db as any).vehicle.iter()) {
-          const id = Number((row as any).entityId ?? 0);
-          if (id > 0) {
-            tpsEntityId = id;
-            break;
-          }
-        }
-      }
-
       let sampledSimTick = 0n;
-      if (tpsEntityId > 0) {
-        const vehicle = this.vehicleManager.getVehicleRow(tpsEntityId);
-        sampledSimTick = this.toU64BigInt(vehicle?.simTick);
+      // Use max simTick across vehicles so HUD TPS doesn't drop to 0 when one
+      // tracked vehicle stream briefly stalls (e.g. mount switches / cache churn).
+      for (const row of (this.conn.db as any).vehicle.iter()) {
+        const tick = this.toU64BigInt((row as any).simTick);
+        if (tick > sampledSimTick) sampledSimTick = tick;
       }
 
       if (sampledSimTick > 0n) {
         const nowMs = performance.now();
         if (
-          this.tpsTrackEntityId !== tpsEntityId
-          || this.tpsWindowStartTick === 0n
+          this.tpsWindowStartTick === 0n
           || sampledSimTick < this.tpsWindowStartTick
         ) {
-          this.tpsTrackEntityId = tpsEntityId;
           this.tpsWindowStartTick = sampledSimTick;
           this.tpsWindowStartMs = nowMs;
           this.currentServerTps = 0;
@@ -1712,7 +1695,6 @@ export class Engine {
           }
         }
       } else {
-        this.tpsTrackEntityId = 0;
         this.currentServerTps = 0;
         this.tpsWindowStartTick = 0n;
         this.tpsWindowStartMs = 0;

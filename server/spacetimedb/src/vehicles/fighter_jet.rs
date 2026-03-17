@@ -17,6 +17,7 @@ pub fn tick_fighter_jet(
     mut vehicle: Vehicle,
     mut entity: Entity,
     mounted_updates: &mut Vec<Player>,
+    terrain: &mut TerrainSampler,
 ) {
     let dt = HELI_TICK_INTERVAL_MS as f32 / 1000.0;
     let next_sim_tick = entity.sim_tick.saturating_add(VEHICLE_SIM_TICK_INCREMENT);
@@ -137,7 +138,7 @@ pub fn tick_fighter_jet(
 
     // Pitch: Space = pull up (positive pitch_input), Shift = push down
     let on_ground = entity.pos.y
-        < fighter_jet_ground_height(ctx, entity.pos.x, entity.pos.z) + jet_min_altitude() + 1.0;
+        < terrain.fighter_jet_ground_height(ctx, entity.pos.x, entity.pos.z) + jet_min_altitude() + 1.0;
     let pitch_target = if has_pilot {
         pitch_input * 0.7 * stall_factor // Pitch authority scales with speed
     } else if on_ground || current_speed < 2.0 {
@@ -219,7 +220,7 @@ pub fn tick_fighter_jet(
     }
 
     // ── Ground collision ──
-    let ground = fighter_jet_ground_height(ctx, next_pos.x, next_pos.z);
+    let ground = terrain.fighter_jet_ground_height(ctx, next_pos.x, next_pos.z);
     let min_alt = ground + jet_min_altitude();
     if next_pos.y < min_alt {
         next_pos.y = min_alt;
@@ -279,20 +280,4 @@ pub fn tick_fighter_jet(
             });
         }
     }
-}
-
-fn fighter_jet_ground_height(ctx: &ReducerContext, x: f32, z: f32) -> f32 {
-    use crate::worldgen::{AIR, WORLD_SIZE_X, WORLD_SIZE_Y, WORLD_SIZE_Z};
-
-    let sx = x.floor() as i32;
-    let sz = z.floor() as i32;
-    if sx < 0 || sx >= WORLD_SIZE_X as i32 || sz < 0 || sz >= WORLD_SIZE_Z as i32 {
-        return 3.0;
-    }
-    for y in (0..WORLD_SIZE_Y as i32).rev() {
-        if matches!(get_block_type(ctx, sx, y, sz), Some(bt) if bt != AIR) {
-            return y as f32 + 1.0;
-        }
-    }
-    3.0
 }

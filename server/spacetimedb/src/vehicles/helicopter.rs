@@ -19,6 +19,7 @@ pub fn tick_helicopter(
     mut vehicle: Vehicle,
     mut entity: Entity,
     mounted_updates: &mut Vec<Player>,
+    terrain: &mut TerrainSampler,
 ) {
     let dt = HELI_TICK_INTERVAL_MS as f32 / 1000.0;
     let next_sim_tick = entity.sim_tick.saturating_add(VEHICLE_SIM_TICK_INCREMENT);
@@ -166,7 +167,7 @@ pub fn tick_helicopter(
     }
 
     // ── Ground collision ──
-    let ground = helicopter_ground_rest_height(ctx, next_pos.x, next_pos.z);
+    let ground = terrain.helicopter_ground_rest_height(ctx, next_pos.x, next_pos.z);
     let min_alt = ground + heli_min_altitude_from_ground();
     if next_pos.y < min_alt {
         next_pos.y = min_alt;

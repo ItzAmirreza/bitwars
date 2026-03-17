@@ -4,7 +4,6 @@
 use spacetimedb::{reducer, Identity, ReducerContext, Table};
 
 use crate::combat::*;
-use crate::constants::*;
 use crate::helpers::*;
 use crate::tables::*;
 use crate::types::*;
@@ -44,7 +43,6 @@ pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(
 #[reducer]
 pub fn fire_vehicle_weapon(
     ctx: &ReducerContext,
-    origin: Vec3,
     direction: Vec3,
     hit_players: Vec<Identity>,
     hit_vehicles: Vec<u64>,
@@ -103,9 +101,17 @@ pub fn fire_vehicle_weapon(
         .id()
         .find(&player.mounted_vehicle_id)
         .ok_or("Vehicle entity not found")?;
-    if dist_sq(&origin, &entity.pos) > max_vehicle_shot_origin_dist_sq() {
-        return Err("Shot origin too far from vehicle".to_string());
+    let (normalized_dir, dir_len) = normalize_direction(&direction);
+    if dir_len <= 0.01 {
+        return Err("Invalid shot direction".to_string());
     }
+
+    // Server-authoritative muzzle origin: never trust client pose for mounted fire.
+    let origin = Vec3 {
+        x: entity.pos.x + normalized_dir.x * 3.5,
+        y: entity.pos.y + 1.0,
+        z: entity.pos.z + normalized_dir.z * 3.5,
+    };
 
     // Deduct ammo
     let new_ammo_primary = if vehicle.weapon_type == 0 {
@@ -145,8 +151,6 @@ pub fn fire_vehicle_weapon(
     }
 
     // Hitscan path
-    let (normalized_dir, dir_len) = normalize_direction(&direction);
-
     apply_hitscan_player_damage(
         ctx,
         sender,
