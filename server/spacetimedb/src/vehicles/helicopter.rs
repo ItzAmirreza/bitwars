@@ -21,6 +21,7 @@ pub fn tick_helicopter(
     mounted_updates: &mut Vec<Player>,
 ) {
     let dt = HELI_TICK_INTERVAL_MS as f32 / 1000.0;
+    let next_sim_tick = entity.sim_tick.saturating_add(VEHICLE_SIM_TICK_INCREMENT);
     let entity_id = vehicle.entity_id;
 
     // Eject dead/offline pilots
@@ -48,6 +49,18 @@ pub fn tick_helicopter(
     }
 
     let has_pilot = vehicle.pilot_identity.is_some();
+
+    // Consume exactly one queued command per simulation tick.
+    if has_pilot {
+        if let Some(cmd) = pop_next_vehicle_input(ctx, entity_id) {
+            vehicle.input_forward = clamp_vehicle_axis(cmd.forward);
+            vehicle.input_strafe = clamp_vehicle_axis(cmd.strafe);
+            vehicle.input_lift = clamp_vehicle_axis(cmd.lift);
+            vehicle.input_yaw = clamp_vehicle_axis(cmd.yaw);
+            vehicle.boosting = cmd.boosting;
+            vehicle.acked_input_seq = cmd.seq;
+        }
+    }
 
     // ── Input Processing ──
     let yaw_input = if has_pilot {
@@ -174,6 +187,7 @@ pub fn tick_helicopter(
     }
 
     entity.pos = next_pos;
+    entity.sim_tick = next_sim_tick;
     entity.updated_at = ctx.timestamp;
 
     // ── Rotor spin visual ──
@@ -183,6 +197,11 @@ pub fn tick_helicopter(
         2.4
     };
     vehicle.rotor_spin = (vehicle.rotor_spin + spin_target * dt) % TAU;
+
+    // Stamp the current input sequence consumed by this physics tick.
+    // If no new command arrived, this remains the last consumed sequence.
+    vehicle.sim_tick = next_sim_tick;
+    vehicle.sim_updated_at = ctx.timestamp;
 
     // ── Commit ──
     ctx.db.entity().id().update(entity.clone());

@@ -122,7 +122,48 @@ export class AudioSystem {
       worldSizeX: WORLD.sizeX,
       worldSizeY: WORLD.sizeY,
       worldSizeZ: WORLD.sizeZ,
+      sources: this.core.rayState.getSourcesForWorker(),
     });
+  }
+
+  // ── Sound source propagation registration ──
+
+  /**
+   * Register a persistent sound source for ray-traced propagation.
+   * The worker will compute the apparent direction and occlusion for this
+   * source every trace cycle (~60ms). Used for vehicles, looping sounds, etc.
+   */
+  registerSoundSource(id: number, position: Vec3Like): void {
+    this.core.rayState.registerSource(id, position);
+  }
+
+  /**
+   * Update a registered sound source's position (call every frame for moving sources).
+   */
+  updateSoundSourcePosition(id: number, position: Vec3Like): void {
+    this.core.rayState.updateSourcePosition(id, position);
+  }
+
+  /**
+   * Unregister a sound source (vehicle destroyed, sound stopped).
+   */
+  unregisterSoundSource(id: number): void {
+    this.core.rayState.unregisterSource(id);
+  }
+
+  /**
+   * Get the smoothed apparent direction and occlusion for a sound source.
+   * Returns null if the source hasn't been traced yet.
+   * Used by VehicleAudio to reposition PannerNodes.
+   */
+  getSourcePropagation(id: number): {
+    apparentDirX: number;
+    apparentDirY: number;
+    apparentDirZ: number;
+    occlusion: number;
+    directLOS: boolean;
+  } | null {
+    return this.core.rayState.getSourcePropagation(id);
   }
 
   // ── Weapons ──
@@ -261,6 +302,9 @@ export class AudioSystem {
 
   startHelicopterSound(id: number): void {
     VehicleAudio.startHelicopterSound(this.core, id);
+    // Register as a persistent sound source for propagation tracing.
+    // Position will be set on the first updateHelicopterSound call.
+    this.core.rayState.registerSource(id, { x: 0, y: 0, z: 0 });
   }
 
   updateHelicopterSound(
@@ -270,17 +314,28 @@ export class AudioSystem {
     speed: number,
     isLocal: boolean,
   ): void {
-    VehicleAudio.updateHelicopterSound(this.core, id, position, spinRate, speed, isLocal);
+    // Update the source position for the ray tracer
+    this.core.rayState.updateSourcePosition(id, position);
+
+    // Compute apparent position from propagation data
+    const { apparentPos, occlusion } = this.computeApparentPosition(id, position);
+
+    VehicleAudio.updateHelicopterSound(
+      this.core, id, position, spinRate, speed, isLocal,
+      apparentPos, occlusion,
+    );
   }
 
   stopHelicopterSound(id: number, destroyed?: boolean): void {
     VehicleAudio.stopHelicopterSound(this.core, id, destroyed);
+    this.core.rayState.unregisterSource(id);
   }
 
   // ── Vehicle (Fighter Jet) ──
 
   startJetEngineSound(id: number): void {
     VehicleAudio.startJetEngineSound(this.core, id);
+    this.core.rayState.registerSource(id, { x: 0, y: 0, z: 0 });
   }
 
   updateJetEngineSound(
@@ -289,11 +344,52 @@ export class AudioSystem {
     speed: number,
     isLocal: boolean,
   ): void {
-    VehicleAudio.updateJetEngineSound(this.core, id, position, speed, isLocal);
+    this.core.rayState.updateSourcePosition(id, position);
+
+    const { apparentPos, occlusion } = this.computeApparentPosition(id, position);
+
+    VehicleAudio.updateJetEngineSound(
+      this.core, id, position, speed, isLocal,
+      apparentPos, occlusion,
+    );
   }
 
   stopJetEngineSound(id: number, destroyed?: boolean): void {
     VehicleAudio.stopJetEngineSound(this.core, id, destroyed);
+    this.core.rayState.unregisterSource(id);
+  }
+
+  /**
+   * Compute the apparent position for a sound source based on ray-traced
+   * propagation data. If the source has direct LOS, returns the real position.
+   * Otherwise, places the sound along the apparent direction at the same distance.
+   */
+  private computeApparentPosition(
+    sourceId: number,
+    realPosition: Vec3Like,
+  ): { apparentPos: Vec3Like | undefined; occlusion: number } {
+    const prop = this.core.rayState.getSourcePropagation(sourceId);
+    if (!prop || prop.directLOS) {
+      // Direct line-of-sight or no data yet — use real position
+      return { apparentPos: undefined, occlusion: 0 };
+    }
+
+    // Place the sound at distance along the apparent direction from listener.
+    // This preserves the distance-based volume rolloff but changes the
+    // perceived direction to come from the opening/doorway.
+    const listener = this.core.getListenerPos();
+    const dx = realPosition.x - listener.x;
+    const dy = realPosition.y - listener.y;
+    const dz = realPosition.z - listener.z;
+    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    const apparentPos: Vec3Like = {
+      x: listener.x + prop.apparentDirX * dist,
+      y: listener.y + prop.apparentDirY * dist,
+      z: listener.z + prop.apparentDirZ * dist,
+    };
+
+    return { apparentPos, occlusion: prop.occlusion };
   }
 
   // ── Ambient ──

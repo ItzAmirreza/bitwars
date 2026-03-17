@@ -85,6 +85,7 @@ export interface TopHudBarProps {
   roundTimer: string;
   playerCount: number;
   fps: number;
+  serverTps: number;
   heading: number;
   locked: boolean;
   handleLeave: () => void;
@@ -100,6 +101,7 @@ export function TopHudBar({
   roundTimer,
   playerCount,
   fps,
+  serverTps,
   heading,
   locked,
   handleLeave,
@@ -295,7 +297,7 @@ export function TopHudBar({
               fontSize: '10px',
               color: 'var(--c-muted2)',
             }}>
-              {fps} FPS
+              {fps} FPS / {serverTps} TPS
             </span>
           </div>
         </div>

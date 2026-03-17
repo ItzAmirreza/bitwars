@@ -79,6 +79,7 @@ export const Entity = __t.object("Entity", {
   },
   scale: __t.f32(),
   active: __t.bool(),
+  simTick: __t.u64(),
   createdAt: __t.timestamp(),
   updatedAt: __t.timestamp(),
 });
@@ -255,6 +256,9 @@ export const Vehicle = __t.object("Vehicle", {
   inputYaw: __t.f32(),
   boosting: __t.bool(),
   inputSeq: __t.u32(),
+  ackedInputSeq: __t.u32(),
+  simTick: __t.u64(),
+  simUpdatedAt: __t.timestamp(),
   rotorSpin: __t.f32(),
   health: __t.i32(),
   weaponType: __t.u8(),
@@ -279,6 +283,19 @@ export const VehicleDestroyEvent = __t.object("VehicleDestroyEvent", {
   createdAt: __t.timestamp(),
 });
 export type VehicleDestroyEvent = __Infer<typeof VehicleDestroyEvent>;
+
+export const VehicleInputCmd = __t.object("VehicleInputCmd", {
+  id: __t.u64(),
+  vehicleId: __t.u64(),
+  seq: __t.u32(),
+  forward: __t.f32(),
+  strafe: __t.f32(),
+  lift: __t.f32(),
+  yaw: __t.f32(),
+  boosting: __t.bool(),
+  receivedAt: __t.timestamp(),
+});
+export type VehicleInputCmd = __Infer<typeof VehicleInputCmd>;
 
 export const VehicleTick = __t.object("VehicleTick", {
   scheduledId: __t.u64(),

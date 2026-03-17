@@ -50,6 +50,7 @@ export interface EngineState {
   weaponName: string;
   weaponColor: string;
   fps: number;
+  serverTps: number;
   locked: boolean;
   playerCount: number;
   health: number;
@@ -142,6 +143,10 @@ export class Engine {
   private frameCount = 0;
   private fpsTime = 0;
   private currentFps = 0;
+  private tpsWindowStartMs = 0;
+  private tpsWindowStartTick = 0n;
+  private tpsTrackEntityId = 0;
+  private currentServerTps = 0;
   private animationId = 0;
   private mouseDown = false;
   private lastPositionUpdate = 0;
@@ -468,6 +473,9 @@ export class Engine {
   private onKeyDown = (e: KeyboardEvent): void => {
     if (this.chatOpen || this.loadoutMenuOpen) return;
     if (e.code === 'KeyF') {
+      if (this.mountedVehicleId !== 0) {
+        this.vehicleManager.resetLocalPilotSmoothing();
+      }
       if (this.conn) this.conn.reducers.interactVehicle({});
       return;
     }
@@ -1258,11 +1266,15 @@ export class Engine {
     if (db.entity) {
       db.entity.onInsert((_ctx: unknown, entity: any) => {
         if (Number(entity.kind) !== ENTITY_KIND_VEHICLE) return;
-        this.vehicleManager.updateVehicleEntity(entity);
+        // Local reconcile is driven by vehicle-table updates so pose + acked
+        // input sequence come from the same server tick snapshot.
+        this.vehicleManager.updateVehicleEntity(entity, false);
       });
       db.entity.onUpdate((_ctx: unknown, _old: unknown, entity: any) => {
         if (Number(entity.kind) !== ENTITY_KIND_VEHICLE) return;
-        this.vehicleManager.updateVehicleEntity(entity);
+        // Local reconcile is driven by vehicle-table updates so pose + acked
+        // input sequence come from the same server tick snapshot.
+        this.vehicleManager.updateVehicleEntity(entity, false);
       });
       db.entity.onDelete((_ctx: unknown, entity: any) => {
         const id = Number(entity.id);
@@ -1280,8 +1292,10 @@ export class Engine {
       const refresh = (_ctx: unknown, row: any) => {
         const id = Number(row.entityId);
         const entity = this.vehicleManager.findEntityRow(id);
-        if (entity && Number(entity.kind) === ENTITY_KIND_VEHICLE) {
-          this.vehicleManager.updateVehicleEntity(entity);
+        if (entity && Number(entity.kind) === ENTITY_KIND_VEHICLE && id === this.mountedVehicleId) {
+          // Reconcile local mounted vehicle on vehicle stream so ackedInputSeq
+          // and pose are read coherently from the same server tick.
+          this.vehicleManager.updateVehicleEntity(entity, true);
         }
       };
       db.vehicle.onInsert(refresh);
@@ -1628,6 +1642,17 @@ export class Engine {
     return 0n;
   }
 
+  private toU64BigInt(value: unknown): bigint {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      return BigInt(Math.floor(value));
+    }
+    if (typeof value === 'string' && /^\d+$/.test(value)) {
+      return BigInt(value);
+    }
+    return 0n;
+  }
+
   // ── ANIMATION LOOP ──
 
   private animate = (): void => {
@@ -1645,6 +1670,55 @@ export class Engine {
 
     // Net diagnostics frame tracking
     this.netDiag.recordFrame(delta);
+
+    if (this.conn) {
+      let tpsEntityId = 0;
+      if (this.mountedVehicleId !== 0) {
+        tpsEntityId = this.mountedVehicleId;
+      } else {
+        for (const row of (this.conn.db as any).vehicle.iter()) {
+          const id = Number((row as any).entityId ?? 0);
+          if (id > 0) {
+            tpsEntityId = id;
+            break;
+          }
+        }
+      }
+
+      let sampledSimTick = 0n;
+      if (tpsEntityId > 0) {
+        const vehicle = this.vehicleManager.getVehicleRow(tpsEntityId);
+        sampledSimTick = this.toU64BigInt(vehicle?.simTick);
+      }
+
+      if (sampledSimTick > 0n) {
+        const nowMs = performance.now();
+        if (
+          this.tpsTrackEntityId !== tpsEntityId
+          || this.tpsWindowStartTick === 0n
+          || sampledSimTick < this.tpsWindowStartTick
+        ) {
+          this.tpsTrackEntityId = tpsEntityId;
+          this.tpsWindowStartTick = sampledSimTick;
+          this.tpsWindowStartMs = nowMs;
+          this.currentServerTps = 0;
+        } else {
+          const elapsedSec = (nowMs - this.tpsWindowStartMs) / 1000;
+          if (elapsedSec >= 0.5) {
+            const deltaTicks = sampledSimTick - this.tpsWindowStartTick;
+            this.currentServerTps = elapsedSec > 0 ? Math.round(Number(deltaTicks) / elapsedSec) : 0;
+            this.tpsWindowStartTick = sampledSimTick;
+            this.tpsWindowStartMs = nowMs;
+          }
+        }
+      } else {
+        this.tpsTrackEntityId = 0;
+        this.currentServerTps = 0;
+        this.tpsWindowStartTick = 0n;
+        this.tpsWindowStartMs = 0;
+      }
+    }
+
     const _diagVel = this.controls.getVelocity();
     this.netDiag.recordSpeed(Math.sqrt(_diagVel.x * _diagVel.x + _diagVel.y * _diagVel.y + _diagVel.z * _diagVel.z));
     if (this.netDiag.visible) {
@@ -1668,8 +1742,8 @@ export class Engine {
     this.vehicleManager.updatePerFrame(delta);
 
     if (this.mountedVehicleId !== 0) {
-      this.vehicleManager.syncMountedCameraToVehicle(delta);
-      this.vehicleManager.syncVehicleInput(delta);
+      this.vehicleManager.syncMountedCameraToVehicle();
+      this.vehicleManager.syncVehicleInput();
     }
 
     // Chunk streaming (every N frames to load quickly)
@@ -2007,7 +2081,7 @@ export class Engine {
       loadout: this.weapons.loadout,
       ammo: this.weapons.getAmmo(), maxAmmo: wp.maxAmmo,
       weaponName: wp.name, weaponColor: wp.color,
-      fps: this.currentFps, locked: this.controls.locked,
+      fps: this.currentFps, serverTps: this.currentServerTps, locked: this.controls.locked,
       playerCount: pc, health: this.health,
       kills: this.kills, deaths: this.deaths,
       hitMarker: this.hitMarkerTimer > 0,

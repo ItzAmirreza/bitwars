@@ -30,6 +30,7 @@ export default __t.row({
   },
   scale: __t.f32(),
   active: __t.bool(),
+  simTick: __t.u64().name("sim_tick"),
   createdAt: __t.timestamp().name("created_at"),
   updatedAt: __t.timestamp().name("updated_at"),
 });

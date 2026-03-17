@@ -176,6 +176,8 @@ export function updateHelicopterSound(
   spinRate: number,
   speed: number,
   isLocal: boolean,
+  apparentPosition?: Vec3Like,
+  propagationOcclusion?: number,
 ): void {
   const nodes = heliSounds.get(id);
   if (!nodes || nodes.stopping || !core.ctx) return;
@@ -218,8 +220,20 @@ export function updateHelicopterSound(
     nodes.mixGain.gain.setTargetAtTime(vol, t, 0.3);
   }
 
-  // ── Panner position ──
-  core.setPannerPosition(nodes.panner, position, t);
+  // ── Panner position: use apparent position if available (sound propagation) ──
+  core.setPannerPosition(nodes.panner, apparentPosition ?? position, t);
+
+  // ── Propagation occlusion: muffle the sound when it travels through walls ──
+  if (propagationOcclusion !== undefined && propagationOcclusion > 0.01) {
+    // Lower the output filter cutoff to simulate muffling through walls/openings
+    const baseCutoff = nodes.wasLocal ? 1800 : 4500;
+    const occludedCutoff = baseCutoff * (1 - propagationOcclusion * 0.7);
+    nodes.outputFilter.frequency.setTargetAtTime(Math.max(200, occludedCutoff), t, 0.1);
+    // Reduce volume slightly for heavily occluded sources
+    const baseVol = nodes.wasLocal ? 0.10 : 0.13;
+    const occludedVol = baseVol * (1 - propagationOcclusion * 0.4);
+    nodes.mixGain.gain.setTargetAtTime(occludedVol, t, 0.15);
+  }
 }
 
 export function stopHelicopterSound(core: AudioCore, id: number, destroyed = false): void {
@@ -396,6 +410,8 @@ export function updateJetEngineSound(
   position: Vec3Like,
   speed: number,
   isLocal: boolean,
+  apparentPosition?: Vec3Like,
+  propagationOcclusion?: number,
 ): void {
   const nodes = jetSounds.get(id);
   if (!nodes || nodes.stopping || !core.ctx) return;
@@ -425,8 +441,18 @@ export function updateJetEngineSound(
     nodes.mixGain.gain.setTargetAtTime(vol, t, 0.3);
   }
 
-  // ── Panner position ──
-  core.setPannerPosition(nodes.panner, position, t);
+  // ── Panner position: use apparent position if available (sound propagation) ──
+  core.setPannerPosition(nodes.panner, apparentPosition ?? position, t);
+
+  // ── Propagation occlusion ──
+  if (propagationOcclusion !== undefined && propagationOcclusion > 0.01) {
+    const baseCutoff = nodes.wasLocal ? 2200 : 5000;
+    const occludedCutoff = baseCutoff * (1 - propagationOcclusion * 0.7);
+    nodes.outputFilter.frequency.setTargetAtTime(Math.max(200, occludedCutoff), t, 0.1);
+    const baseVol = nodes.wasLocal ? 0.09 : 0.12;
+    const occludedVol = baseVol * (1 - propagationOcclusion * 0.4);
+    nodes.mixGain.gain.setTargetAtTime(occludedVol, t, 0.15);
+  }
 }
 
 export function stopJetEngineSound(core: AudioCore, id: number, destroyed = false): void {

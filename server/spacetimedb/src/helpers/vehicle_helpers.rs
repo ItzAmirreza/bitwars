@@ -105,6 +105,14 @@ pub fn dismount_player_internal(
     let mut dismount_pos = next.pos.clone();
     if let Some(entity) = ctx.db.entity().id().find(&next.mounted_vehicle_id) {
         if let Some(vehicle) = ctx.db.vehicle().entity_id().find(&next.mounted_vehicle_id) {
+            for row in ctx
+                .db
+                .vehicle_input_cmd()
+                .idx_vehicle_input_by_vehicle()
+                .filter(&next.mounted_vehicle_id)
+            {
+                ctx.db.vehicle_input_cmd().id().delete(&row.id);
+            }
             ctx.db.vehicle().entity_id().update(Vehicle {
                 pilot_identity: None,
                 input_forward: 0.0,
@@ -112,6 +120,10 @@ pub fn dismount_player_internal(
                 input_lift: 0.0,
                 input_yaw: 0.0,
                 boosting: false,
+                input_seq: 0,
+                acked_input_seq: 0,
+                sim_tick: 0,
+                sim_updated_at: ctx.timestamp,
                 ..vehicle
             });
         }
@@ -181,6 +193,14 @@ pub fn apply_vehicle_damage(
     }
 
     let pilot = vehicle.pilot_identity;
+    for row in ctx
+        .db
+        .vehicle_input_cmd()
+        .idx_vehicle_input_by_vehicle()
+        .filter(&vehicle_id)
+    {
+        ctx.db.vehicle_input_cmd().id().delete(&row.id);
+    }
     ctx.db.vehicle().entity_id().update(Vehicle {
         pilot_identity: None,
         input_forward: 0.0,
@@ -188,6 +208,10 @@ pub fn apply_vehicle_damage(
         input_lift: 0.0,
         input_yaw: 0.0,
         boosting: false,
+        input_seq: 0,
+        acked_input_seq: 0,
+        sim_tick: 0,
+        sim_updated_at: ctx.timestamp,
         health: 0,
         ..vehicle
     });

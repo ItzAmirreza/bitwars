@@ -54,6 +54,9 @@ pub struct Entity {
     pub rot: Rotation,
     pub scale: f32,
     pub active: bool,
+    /// Monotonic server simulation tick id for vehicle entities.
+    /// Non-vehicle entities may keep this at 0.
+    pub sim_tick: u64,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
 }
@@ -72,10 +75,21 @@ pub struct Vehicle {
     pub input_lift: f32,
     pub input_yaw: f32,
     pub boosting: bool,
-    /// Monotonic sequence number of the last input received from the pilot.
-    /// Used by the client's rewind-and-replay prediction system to know
-    /// which inputs the server has processed.
+    /// Monotonic sequence number of the last input packet received from
+    /// the pilot via `update_vehicle_input`.
     pub input_seq: u32,
+    /// Monotonic sequence number of the last input packet that has actually
+    /// been consumed by vehicle physics in `tick_vehicles`.
+    ///
+    /// This is the authoritative ack used by the client's rewind-and-replay
+    /// prediction system.
+    pub acked_input_seq: u32,
+    /// Monotonic server simulation tick id when this row was last updated by
+    /// vehicle physics.
+    pub sim_tick: u64,
+    /// Timestamp of the last vehicle physics tick that consumed input and
+    /// updated this row.
+    pub sim_updated_at: Timestamp,
     pub rotor_spin: f32,
     pub health: i32,
     pub weapon_type: u8,
@@ -84,6 +98,27 @@ pub struct Vehicle {
     pub weapon_last_fire: Timestamp,
     pub created_at: Timestamp,
     pub last_input_at: Timestamp,
+}
+
+/// Small FIFO queue of pilot inputs to guarantee deterministic one-command-
+/// per-tick processing on the server.
+#[derive(Clone)]
+#[table(
+    accessor = vehicle_input_cmd,
+    index(accessor = idx_vehicle_input_by_vehicle, btree(columns = [vehicle_id]))
+)]
+pub struct VehicleInputCmd {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub vehicle_id: u64,
+    pub seq: u32,
+    pub forward: f32,
+    pub strafe: f32,
+    pub lift: f32,
+    pub yaw: f32,
+    pub boosting: bool,
+    pub received_at: Timestamp,
 }
 
 // ── Player State ──

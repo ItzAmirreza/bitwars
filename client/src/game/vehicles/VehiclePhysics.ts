@@ -7,9 +7,11 @@
  * The prediction uses the Valve/Source Engine approach:
  *   1. Client runs physics locally on every input → immediate visual response
  *   2. Each input is tagged with a monotonic sequence number and stored
- *   3. The server stores the last received input_seq in the Vehicle table
+ *   3. The server stores two sequence numbers in the Vehicle table:
+ *      - input_seq: last received input packet
+ *      - acked_input_seq: last input actually consumed by physics tick
  *   4. When a server Entity update arrives, the client:
- *      a. Reads the acknowledged input_seq from the Vehicle table
+ *      a. Reads acked_input_seq from the Vehicle table
  *      b. Discards inputs with seq ≤ acknowledged
  *      c. Starts from the server's authoritative state
  *      d. Replays all remaining unacknowledged inputs through local physics
@@ -249,19 +251,19 @@ interface InputEntry {
 
 // ── Rewind-and-replay prediction ──
 
-/** Max entries in the input history (safety cap). At 30Hz input rate and
- *  200ms RTT, unacked count is ~6.  64 covers extreme cases. */
-const MAX_INPUT_HISTORY = 64;
+/** Max entries in the input history (safety cap). */
+const MAX_INPUT_HISTORY = 256;
 /** Snap threshold — if replay result differs from current prediction by
  *  more than this, teleport instead of smoothing. */
 const MAX_SMOOTH_DIST_SQ = 100; // 10 units
-/** Position correction half-life.  2s is very slow — ~0.6% of movement
- *  per frame at 60fps.  Completely invisible but prevents unbounded drift. */
-const POS_HALF_LIFE = 2.0;
-/** Velocity correction half-life.  300ms converges in ~1s. */
+/** Ignore tiny positional mismatches to avoid correction chatter. */
+const EPSILON_DIST_SQ = 0.25; // 0.5u
+/** Position correction half-life for render-only offsets. */
+const POS_HALF_LIFE = 0.25;
+/** Velocity correction half-life for render-only offsets. */
 const VEL_HALF_LIFE = 0.3;
-/** Rotation correction half-life. */
-const ROT_HALF_LIFE = 0.2;
+/** Rotation correction half-life for render-only offsets. */
+const ROT_HALF_LIFE = 0.15;
 
 export class VehiclePrediction {
   /** Current predicted state (the "head" of the prediction). */
@@ -272,23 +274,20 @@ export class VehiclePrediction {
   private groundFn: GroundHeightFn;
   private accumulator = 0;
 
-  /** Monotonic tick counter — incremented each time a physics tick runs.
-   *  Used as the sequence number sent with vehicle inputs. */
-  tickSeq = 0;
-  /** Ring buffer of recent inputs, keyed by tickSeq. */
+  /** Ring buffer of recent sent inputs, keyed by packet sequence. */
   private inputHistory: InputEntry[] = [];
 
-  // Correction offsets (disabled for diagnostic — kept for re-enablement)
+  // Render-only correction offsets. These MUST NOT mutate simulation state.
+  // They are only applied to the final interpolated render pose.
   private opx = 0; private opy = 0; private opz = 0;
-  // @ts-ignore: kept for re-enablement
   private ovx = 0; private ovy = 0; private ovz = 0;
-  // @ts-ignore: kept for re-enablement
   private oyaw = 0; private opitch = 0;
 
-  // Debug
-  private _lastDbg = 0;
-  private _dbgFrame = 0;
-  private _lastRenderPx = 0;
+  discardAckedInputs(ackedSeq: number): void {
+    while (this.inputHistory.length > 0 && this.inputHistory[0].seq <= ackedSeq) {
+      this.inputHistory.shift();
+    }
+  }
 
   constructor(
     vehicleType: number,
@@ -301,18 +300,21 @@ export class VehiclePrediction {
     this.groundFn = groundFn;
   }
 
-  /** Run physics forward by `delta` seconds using the given pilot input.
-   *  Each physics tick increments `tickSeq` and stores the input in the
-   *  history buffer for future replay.  Returns a sub-tick interpolated
-   *  render state. */
-  advance(delta: number, input: PhysicsInput): PhysicsState {
+  /** Run physics forward by `delta` seconds using the latest pilot input.
+   *  Returns a sub-tick interpolated render state with render-only correction
+   *  offsets applied. */
+  advance(
+    delta: number,
+    input: PhysicsInput,
+    onTick?: (input: PhysicsInput) => number,
+  ): PhysicsState {
     this.accumulator += delta;
 
     while (this.accumulator >= TICK_DT) {
       this.accumulator -= TICK_DT;
-      this.tickSeq++;
 
-      this.inputHistory.push({ seq: this.tickSeq, input: { ...input } });
+      const seq = onTick ? onTick(input) : 0;
+      this.inputHistory.push({ seq, input: { ...input } });
       if (this.inputHistory.length > MAX_INPUT_HISTORY) {
         this.inputHistory.shift();
       }
@@ -321,46 +323,36 @@ export class VehiclePrediction {
       this.state = this.tick(this.state, input);
     }
 
-    // ── Per-frame smooth correction ──
-    // Apply stored offsets gradually each frame (not as 30Hz spikes).
-    // Half-lives are very slow so individual corrections are invisible.
+    // ── Per-frame smooth correction decay (render-only) ──
+    // Decay stored render offsets gradually. Simulation state is untouched.
 
-    // Position: 2s half-life — prevents unbounded drift
     const pd = 1 - Math.pow(0.5, delta / POS_HALF_LIFE);
-    const pcx = this.opx * pd, pcy = this.opy * pd, pcz = this.opz * pd;
-    this.state.px -= pcx;      this.prevState.px -= pcx;
-    this.state.py -= pcy;      this.prevState.py -= pcy;
-    this.state.pz -= pcz;      this.prevState.pz -= pcz;
-    this.opx -= pcx; this.opy -= pcy; this.opz -= pcz;
+    this.opx -= this.opx * pd;
+    this.opy -= this.opy * pd;
+    this.opz -= this.opz * pd;
 
-    // Velocity: 300ms half-life — keeps trajectories aligned
     const vd = 1 - Math.pow(0.5, delta / VEL_HALF_LIFE);
-    const vcx = this.ovx * vd, vcy = this.ovy * vd, vcz = this.ovz * vd;
-    this.state.vx -= vcx;      this.prevState.vx -= vcx;
-    this.state.vy -= vcy;      this.prevState.vy -= vcy;
-    this.state.vz -= vcz;      this.prevState.vz -= vcz;
-    this.ovx -= vcx; this.ovy -= vcy; this.ovz -= vcz;
+    this.ovx -= this.ovx * vd;
+    this.ovy -= this.ovy * vd;
+    this.ovz -= this.ovz * vd;
 
-    // Rotation: 200ms half-life — prevents heading drift
     const rd = 1 - Math.pow(0.5, delta / ROT_HALF_LIFE);
-    const ryaw = this.oyaw * rd, rpitch = this.opitch * rd;
-    this.state.yaw -= ryaw;     this.prevState.yaw -= ryaw;
-    this.state.pitch -= rpitch;  this.prevState.pitch -= rpitch;
-    this.oyaw -= ryaw; this.opitch -= rpitch;
+    this.oyaw -= this.oyaw * rd;
+    this.opitch -= this.opitch * rd;
 
-    // Sub-tick interpolation for smooth rendering
+    // Sub-tick interpolation from untouched simulation states
     const alpha = this.accumulator / TICK_DT;
     const result = lerpState(this.prevState, this.state, alpha);
 
-    // DEBUG
-    this._dbgFrame++;
-    if (this._dbgFrame % 30 === 0) {
-      const dpx = result.px - this._lastRenderPx;
-      const speed = Math.sqrt(result.vx ** 2 + result.vy ** 2 + result.vz ** 2);
-      const posDrift = Math.sqrt(this.opx ** 2 + this.opy ** 2 + this.opz ** 2);
-      console.log(`[RENDER] dpx=${dpx.toFixed(4)} px=${result.px.toFixed(2)} speed=${speed.toFixed(1)} posDrift=${posDrift.toFixed(2)} dt=${delta.toFixed(4)}`);
-    }
-    this._lastRenderPx = result.px;
+    // Apply render-only offsets after interpolation
+    result.px += this.opx;
+    result.py += this.opy;
+    result.pz += this.opz;
+    result.vx += this.ovx;
+    result.vy += this.ovy;
+    result.vz += this.ovz;
+    result.yaw += this.oyaw;
+    result.pitch += this.opitch;
 
     return result;
   }
@@ -368,8 +360,8 @@ export class VehiclePrediction {
   /** Rewind-and-replay reconciliation.
    *
    *  Called when the server's authoritative Entity update arrives.
-   *  `ackedSeq` is the `input_seq` from the Vehicle table — the sequence
-   *  number of the last input the server processed for this tick.
+   *  `ackedSeq` is `acked_input_seq` from the Vehicle table — the sequence
+   *  number of the last input packet actually consumed by server physics.
    *
    *  Steps:
    *  1. Discard all inputs with seq ≤ ackedSeq (server has processed them)
@@ -380,10 +372,10 @@ export class VehiclePrediction {
    *     absorbed by the visual offset for smooth rendering.
    */
   reconcile(server: PhysicsState, ackedSeq: number): void {
+    const before = { ...this.state };
+
     // 1. Discard acknowledged inputs
-    while (this.inputHistory.length > 0 && this.inputHistory[0].seq <= ackedSeq) {
-      this.inputHistory.shift();
-    }
+    this.discardAckedInputs(ackedSeq);
 
     // 2. Replay unacknowledged inputs from the server's authoritative state
     let replayState = { ...server };
@@ -399,44 +391,45 @@ export class VehiclePrediction {
     const dz = replayState.pz - this.state.pz;
     const distSq = dx * dx + dy * dy + dz * dz;
 
+    if (distSq <= EPSILON_DIST_SQ) {
+      // Tiny mismatch: snap sim state to replay and clear visual offsets to
+      // avoid sub-unit correction chatter.
+      this.prevState = replayPrev;
+      this.state = replayState;
+      this.opx = this.opy = this.opz = 0;
+      this.ovx = this.ovy = this.ovz = 0;
+      this.oyaw = this.opitch = 0;
+      return;
+    }
+
     if (distSq > MAX_SMOOTH_DIST_SQ) {
       // Teleport — too far (respawn, map reset, major desync)
       this.prevState = replayPrev;
       this.state = replayState;
+      this.opx = this.opy = this.opz = 0;
+      this.ovx = this.ovy = this.ovz = 0;
+      this.oyaw = this.opitch = 0;
       return;
     }
 
-    // DEBUG
-    const dist = Math.sqrt(distSq);
-    const now = performance.now();
-    if (!this._lastDbg || now - this._lastDbg > 300) {
-      this._lastDbg = now;
-      const speed = Math.sqrt(this.state.vx ** 2 + this.state.vy ** 2 + this.state.vz ** 2);
-      console.log(`[RECONCILE] replayed=${this.inputHistory.length} mismatch=${dist.toFixed(3)} speed=${speed.toFixed(1)} opx=${this.opx.toFixed(2)}`);
-    }
+    // 4. Adopt replay as simulation truth; preserve visual continuity via
+    // render-only offsets from previous sim to replayed sim.
+    this.prevState = replayPrev;
+    this.state = replayState;
 
-    // 4. ACCUMULATE the offset (don't overwrite).
-    //    The old offset is still decaying in advance().  The new mismatch
-    //    is ADDED on top so both old and new corrections converge smoothly.
-    //    advance() applies them per-frame via exponential decay.
+    this.opx = before.px - replayState.px;
+    this.opy = before.py - replayState.py;
+    this.opz = before.pz - replayState.pz;
 
-    // Store the CURRENT mismatch as the offset for advance() to decay.
-    // opx = how far the prediction is ahead of the replay.
-    // advance() does: state.px -= opx * decay (pushes prediction toward replay).
-    this.opx = this.state.px - replayState.px;
-    this.opy = this.state.py - replayState.py;
-    this.opz = this.state.pz - replayState.pz;
-
-    // Velocity offset
-    this.ovx = this.state.vx - replayState.vx;
-    this.ovy = this.state.vy - replayState.vy;
-    this.ovz = this.state.vz - replayState.vz;
+    this.ovx = before.vx - replayState.vx;
+    this.ovy = before.vy - replayState.vy;
+    this.ovz = before.vz - replayState.vz;
 
     // Rotation offset (yaw with wrapping)
-    let yawOfs = this.state.yaw - replayState.yaw;
+    let yawOfs = before.yaw - replayState.yaw;
     yawOfs -= Math.round(yawOfs / TAU) * TAU;
     this.oyaw = yawOfs;
-    this.opitch = this.state.pitch - replayState.pitch;
+    this.opitch = before.pitch - replayState.pitch;
   }
 
   /** Hard reset (mount transition). */
@@ -444,7 +437,6 @@ export class VehiclePrediction {
     this.state = { ...s };
     this.prevState = { ...s };
     this.accumulator = 0;
-    this.tickSeq = 0;
     this.inputHistory = [];
     this.opx = this.opy = this.opz = 0;
     this.ovx = this.ovy = this.ovz = 0;
@@ -479,5 +471,3 @@ function lerpState(a: PhysicsState, b: PhysicsState, t: number): PhysicsState {
     pitch: a.pitch + (b.pitch - a.pitch) * t,
   };
 }
-
-

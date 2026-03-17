@@ -26,6 +26,7 @@ export function GameScreen() {
     weaponName: 'Rifle',
     weaponColor: '#4488ff',
     fps: 0,
+    serverTps: 0,
     locked: false,
     playerCount: 1,
     health: 100,
@@ -381,6 +382,7 @@ export function GameScreen() {
         roundTimer={roundTimer}
         playerCount={state.playerCount}
         fps={state.fps}
+        serverTps={state.serverTps}
         heading={state.heading}
         locked={state.locked}
         handleLeave={handleLeave}

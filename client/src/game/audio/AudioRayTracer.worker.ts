@@ -1,15 +1,15 @@
 /**
  * AudioRayTracer — Web Worker that performs DDA voxel raycasting for
- * acoustic environment analysis.
+ * acoustic environment analysis and sound propagation.
  *
  * Runs on a background thread so it never blocks the game loop. Receives
- * chunk data and listener position from the main thread, casts rays to
- * compute:
+ * chunk data, listener position, and persistent sound source positions
+ * from the main thread. Computes:
  *   - Room size / reverb parameters (from bounce distances)
  *   - Indoor/outdoor ratio (from escaped rays)
  *   - Return ratio (for echo volume — the "garage effect")
- *
- * Communicates via postMessage with the main thread AudioRayState.
+ *   - Per-source apparent direction (sound propagation through openings)
+ *   - Per-source occlusion factor
  */
 
 // ── Types for worker messages ──
@@ -25,6 +25,13 @@ interface ChunkRemove {
   chunkId: number;
 }
 
+interface SourceInfo {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
 interface TraceRequest {
   type: 'trace';
   listenerX: number;
@@ -33,6 +40,8 @@ interface TraceRequest {
   worldSizeX: number;
   worldSizeY: number;
   worldSizeZ: number;
+  /** Persistent sound sources to compute propagation for. */
+  sources: SourceInfo[];
 }
 
 interface WorldInit {
@@ -45,6 +54,19 @@ interface WorldInit {
 
 type InboundMessage = ChunkTransfer | ChunkRemove | TraceRequest | WorldInit;
 
+/** Propagation result for a single sound source. */
+interface SourcePropagation {
+  id: number;
+  /** Apparent direction FROM the listener TO the perceived sound origin (unit vector). */
+  apparentDirX: number;
+  apparentDirY: number;
+  apparentDirZ: number;
+  /** How much of the sound is occluded (0 = clear, 1 = fully blocked). */
+  occlusion: number;
+  /** Whether direct line-of-sight exists. */
+  directLOS: boolean;
+}
+
 interface TraceResult {
   type: 'result';
   avgBounceDistance: number;
@@ -52,6 +74,8 @@ interface TraceResult {
   outdoorRatio: number;
   listenerPos: { x: number; y: number; z: number };
   timestamp: number;
+  /** Per-source propagation results. */
+  sources: SourcePropagation[];
 }
 
 // ── World data (mirrors VoxelWorld's chunk map) ──
@@ -213,13 +237,42 @@ function reflect(dx: number, dy: number, dz: number, nx: number, ny: number, nz:
   };
 }
 
+// ── Per-ray path storage for source propagation ──
+
+/**
+ * For sound propagation, we need to know the *initial direction* of each
+ * environment ray AND the positions it reaches after bounces. Then for each
+ * source, we find which rays' bounce endpoints can "see" the source, and
+ * use those rays' initial directions as the apparent sound direction.
+ */
+interface RayPath {
+  /** Initial direction from the listener. */
+  initDirX: number;
+  initDirY: number;
+  initDirZ: number;
+  /** Endpoints after each bounce (position just off the surface). */
+  bouncePoints: { x: number; y: number; z: number }[];
+  /** Whether this ray escaped to open air. */
+  escaped: boolean;
+  /** Final position of the ray (last bounce point or escaped position). */
+  finalX: number;
+  finalY: number;
+  finalZ: number;
+}
+
 // ── Main trace function ──
 
-function performTrace(lx: number, ly: number, lz: number): TraceResult {
+function performTrace(
+  lx: number, ly: number, lz: number,
+  sources: SourceInfo[],
+): TraceResult {
   let totalBounceDistance = 0;
   let returningRays = 0;
   let escapedRays = 0;
   let validRays = 0;
+
+  // Store paths for propagation analysis
+  const rayPaths: RayPath[] = [];
 
   for (let r = 0; r < RAY_COUNT; r++) {
     const dir = RAY_DIRS[r];
@@ -228,6 +281,13 @@ function performTrace(lx: number, ly: number, lz: number): TraceResult {
     let totalDist = 0;
     let bounced = false;
     let escaped = false;
+
+    const path: RayPath = {
+      initDirX: dir.x, initDirY: dir.y, initDirZ: dir.z,
+      bouncePoints: [],
+      escaped: false,
+      finalX: lx, finalY: ly, finalZ: lz,
+    };
 
     for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
       const remainingDist = MAX_RAY_DISTANCE - totalDist;
@@ -238,66 +298,74 @@ function performTrace(lx: number, ly: number, lz: number): TraceResult {
       if (!hit) {
         // Ray escaped the world or ran out of distance
         escaped = true;
+        // Estimate final position along the ray
+        path.finalX = ox + dx * remainingDist;
+        path.finalY = oy + dy * remainingDist;
+        path.finalZ = oz + dz * remainingDist;
         break;
       }
 
       totalDist += hit.distance;
       bounced = true;
 
-      // Check if the bounced ray can see back to the listener.
-      // This determines if this is a "returning" ray (contributes to echo).
+      // Store the bounce point (slightly off the surface)
+      const bpx = hit.hx + 0.5 + hit.nx * 0.15;
+      const bpy = hit.hy + 0.5 + hit.ny * 0.15;
+      const bpz = hit.hz + 0.5 + hit.nz * 0.15;
+      path.bouncePoints.push({ x: bpx, y: bpy, z: bpz });
+      path.finalX = bpx;
+      path.finalY = bpy;
+      path.finalZ = bpz;
+
+      // Check if the bounced ray can see back to the listener (echo analysis)
       if (bounce > 0) {
-        const toLx = lx - (hit.hx + 0.5);
-        const toLy = ly - (hit.hy + 0.5);
-        const toLz = lz - (hit.hz + 0.5);
+        const toLx = lx - bpx;
+        const toLy = ly - bpy;
+        const toLz = lz - bpz;
         const toListenerDist = Math.sqrt(toLx * toLx + toLy * toLy + toLz * toLz);
         if (toListenerDist > 0.5) {
           const invDist = 1 / toListenerDist;
           const losHit = raycastDDA(
-            hit.hx + 0.5 + hit.nx * 0.1,
-            hit.hy + 0.5 + hit.ny * 0.1,
-            hit.hz + 0.5 + hit.nz * 0.1,
+            bpx, bpy, bpz,
             toLx * invDist, toLy * invDist, toLz * invDist,
             toListenerDist,
           );
           if (!losHit) {
-            // Line of sight back to listener — this ray returns!
             returningRays++;
             totalBounceDistance += totalDist + toListenerDist;
             validRays++;
           }
         }
       } else {
-        // First bounce always "returns" (direct reflection)
         returningRays++;
-        totalBounceDistance += hit.distance * 2; // approximate round trip
+        totalBounceDistance += hit.distance * 2;
         validRays++;
       }
 
       // Set up the reflected ray for next bounce
-      // Offset origin slightly off the surface to avoid self-intersection
-      ox = hit.hx + 0.5 + hit.nx * 0.15;
-      oy = hit.hy + 0.5 + hit.ny * 0.15;
-      oz = hit.hz + 0.5 + hit.nz * 0.15;
+      ox = bpx;
+      oy = bpy;
+      oz = bpz;
       const refl = reflect(dx, dy, dz, hit.nx, hit.ny, hit.nz);
       dx = refl.x;
       dy = refl.y;
       dz = refl.z;
     }
 
-    if (escaped) {
-      escapedRays++;
-    }
+    path.escaped = escaped;
+    if (escaped) escapedRays++;
 
-    // If no bounces at all and didn't escape, the ray started inside a block
-    // (edge case — shouldn't happen with proper listener position)
     if (!bounced && !escaped) {
-      // Treat as fully enclosed — contributes to small-room reverb
       totalBounceDistance += 1;
       returningRays++;
       validRays++;
     }
+
+    rayPaths.push(path);
   }
+
+  // ── Per-source propagation ──
+  const sourcePropagations = computeSourcePropagations(lx, ly, lz, sources, rayPaths);
 
   const avgBounce = validRays > 0 ? totalBounceDistance / validRays : 5;
   const returnRatio = returningRays / RAY_COUNT;
@@ -310,7 +378,185 @@ function performTrace(lx: number, ly: number, lz: number): TraceResult {
     outdoorRatio,
     listenerPos: { x: lx, y: ly, z: lz },
     timestamp: performance.now(),
+    sources: sourcePropagations,
   };
+}
+
+/**
+ * For each sound source, compute the apparent direction the listener should
+ * hear it from, and the occlusion amount.
+ *
+ * Algorithm:
+ * 1. Check direct line-of-sight from listener to source.
+ *    - If clear: apparent direction = real direction, occlusion = 0.
+ * 2. If blocked: find environment rays whose bounce points can "see" the source.
+ *    - For each ray, at each bounce point, check LOS to the source.
+ *    - If a bounce point has LOS to the source, this ray "carries" the sound.
+ *    - The apparent direction = weighted average of the initial directions
+ *      of all rays that can reach the source (weighted by inverse distance).
+ * 3. Occlusion = fraction of rays that CANNOT reach the source.
+ *    If some rays reach via bounces, occlusion is partial (the sound is
+ *    muffled but the direction is correct for the opening).
+ */
+function computeSourcePropagations(
+  lx: number, ly: number, lz: number,
+  sources: SourceInfo[],
+  rayPaths: RayPath[],
+): SourcePropagation[] {
+  const results: SourcePropagation[] = [];
+
+  for (const src of sources) {
+    // ── 1. Direct LOS check ──
+    const toSrcX = src.x - lx;
+    const toSrcY = src.y - ly;
+    const toSrcZ = src.z - lz;
+    const directDist = Math.sqrt(toSrcX * toSrcX + toSrcY * toSrcY + toSrcZ * toSrcZ);
+
+    if (directDist < 0.5) {
+      // Source is at the listener — no propagation needed
+      results.push({
+        id: src.id,
+        apparentDirX: 0, apparentDirY: 0, apparentDirZ: 1,
+        occlusion: 0,
+        directLOS: true,
+      });
+      continue;
+    }
+
+    const invDirectDist = 1 / directDist;
+    const dirToSrcX = toSrcX * invDirectDist;
+    const dirToSrcY = toSrcY * invDirectDist;
+    const dirToSrcZ = toSrcZ * invDirectDist;
+
+    const directHit = raycastDDA(lx, ly, lz, dirToSrcX, dirToSrcY, dirToSrcZ, directDist);
+
+    if (!directHit) {
+      // Direct LOS — sound comes from real direction
+      results.push({
+        id: src.id,
+        apparentDirX: dirToSrcX,
+        apparentDirY: dirToSrcY,
+        apparentDirZ: dirToSrcZ,
+        occlusion: 0,
+        directLOS: true,
+      });
+      continue;
+    }
+
+    // ── 2. No direct LOS — find bounced rays that can reach the source ──
+    let weightedDirX = 0, weightedDirY = 0, weightedDirZ = 0;
+    let totalWeight = 0;
+    let reachingRays = 0;
+
+    // Also check: can any ray's final position or bounce points see the source?
+    for (let r = 0; r < rayPaths.length; r++) {
+      const path = rayPaths[r];
+      let reached = false;
+
+      // Check each bounce point for LOS to the source
+      for (let b = 0; b < path.bouncePoints.length; b++) {
+        const bp = path.bouncePoints[b];
+        const bToSrcX = src.x - bp.x;
+        const bToSrcY = src.y - bp.y;
+        const bToSrcZ = src.z - bp.z;
+        const bDist = Math.sqrt(bToSrcX * bToSrcX + bToSrcY * bToSrcY + bToSrcZ * bToSrcZ);
+
+        if (bDist < 0.5) { reached = true; break; }
+
+        const bInvDist = 1 / bDist;
+        const losHit = raycastDDA(
+          bp.x, bp.y, bp.z,
+          bToSrcX * bInvDist, bToSrcY * bInvDist, bToSrcZ * bInvDist,
+          bDist,
+        );
+
+        if (!losHit) {
+          reached = true;
+          break;
+        }
+      }
+
+      // If the ray escaped, its final position might also "see" the source
+      // (e.g., ray goes out a window, source is outside)
+      if (!reached && path.escaped) {
+        const fToSrcX = src.x - path.finalX;
+        const fToSrcY = src.y - path.finalY;
+        const fToSrcZ = src.z - path.finalZ;
+        const fDist = Math.sqrt(fToSrcX * fToSrcX + fToSrcY * fToSrcY + fToSrcZ * fToSrcZ);
+
+        if (fDist < 1.0) {
+          reached = true;
+        } else if (fDist < MAX_RAY_DISTANCE) {
+          const fInvDist = 1 / fDist;
+          const losHit = raycastDDA(
+            path.finalX, path.finalY, path.finalZ,
+            fToSrcX * fInvDist, fToSrcY * fInvDist, fToSrcZ * fInvDist,
+            fDist,
+          );
+          if (!losHit) reached = true;
+        }
+      }
+
+      if (reached) {
+        reachingRays++;
+        // Weight by how directly this ray points toward the source.
+        // Rays whose initial direction is closer to the source direction
+        // get slightly more weight, but all reaching rays contribute.
+        const dot = path.initDirX * dirToSrcX + path.initDirY * dirToSrcY + path.initDirZ * dirToSrcZ;
+        const weight = 1.0 + Math.max(0, dot) * 0.5;
+        weightedDirX += path.initDirX * weight;
+        weightedDirY += path.initDirY * weight;
+        weightedDirZ += path.initDirZ * weight;
+        totalWeight += weight;
+      }
+    }
+
+    if (reachingRays > 0 && totalWeight > 0) {
+      // Normalize the weighted direction
+      const invWeight = 1 / totalWeight;
+      let adx = weightedDirX * invWeight;
+      let ady = weightedDirY * invWeight;
+      let adz = weightedDirZ * invWeight;
+      const len = Math.sqrt(adx * adx + ady * ady + adz * adz);
+      if (len > 0.001) {
+        adx /= len;
+        ady /= len;
+        adz /= len;
+      } else {
+        // Fallback to real direction
+        adx = dirToSrcX;
+        ady = dirToSrcY;
+        adz = dirToSrcZ;
+      }
+
+      // Occlusion: partial — some sound gets through via bounces but it's reduced.
+      // More reaching rays = less occlusion.
+      const reachRatio = reachingRays / RAY_COUNT;
+      const occlusion = Math.max(0, Math.min(1, 1 - reachRatio * 2.5));
+
+      results.push({
+        id: src.id,
+        apparentDirX: adx,
+        apparentDirY: ady,
+        apparentDirZ: adz,
+        occlusion,
+        directLOS: false,
+      });
+    } else {
+      // No rays reach the source — fully occluded.
+      // Keep the real direction but mark as fully blocked.
+      results.push({
+        id: src.id,
+        apparentDirX: dirToSrcX,
+        apparentDirY: dirToSrcY,
+        apparentDirZ: dirToSrcZ,
+        occlusion: 1,
+        directLOS: false,
+      });
+    }
+  }
+
+  return results;
 }
 
 // ── Worker message handler ──
@@ -328,7 +574,6 @@ self.onmessage = (e: MessageEvent<InboundMessage>) => {
 
     case 'chunk':
       chunks.set(msg.chunkId, msg.data);
-      // Invalidate chunk cache if the updated chunk was cached
       if (msg.chunkId === cachedChunkId) {
         cachedChunkId = -1;
         cachedChunkData = null;
@@ -344,7 +589,10 @@ self.onmessage = (e: MessageEvent<InboundMessage>) => {
       break;
 
     case 'trace': {
-      const result = performTrace(msg.listenerX, msg.listenerY, msg.listenerZ);
+      const result = performTrace(
+        msg.listenerX, msg.listenerY, msg.listenerZ,
+        msg.sources,
+      );
       (self as unknown as Worker).postMessage(result);
       break;
     }

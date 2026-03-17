@@ -106,8 +106,13 @@ export default class VehicleManager {
 
   // ── Client-side prediction for the local vehicle ──
   private prediction: VehiclePrediction | null = null;
+  private nextVehicleInputSeq = 1;
+  private lastAckedInputSeq = 0;
+  private lastReconciledSimTick = 0;
   /** Current physics input assembled from keyboard state each frame. */
   private currentInput: PhysicsInput = { forward: 0, strafe: 0, lift: 0, yaw: 0 };
+  /** Local tick-aligned input packets queued for server send. */
+  private pendingInputPackets: Array<{ seq: number; input: PhysicsInput }> = [];
   // Legacy fields kept for mount-transition seeding in Engine.ts
   localLastServerPos = new THREE.Vector3();
   localLastServerVel = new THREE.Vector3();
@@ -117,11 +122,7 @@ export default class VehicleManager {
 
   // ── Mounted camera state ──
   private mountedCameraPosition = new THREE.Vector3();
-  /** Smoothed vehicle center used for lookAt — prevents oscillating
-   *  perspective shift caused by the camera position being lerped
-   *  while the lookAt target was using the raw mesh position. */
-  private mountedLookAtCenter = new THREE.Vector3();
-  private mountedCameraInitialized = false;
+  private readonly tmpCamDir = new THREE.Vector3();
 
   // ── Vehicle pilot input state ──
   vehiclePilotYaw = 0;
@@ -388,7 +389,7 @@ export default class VehicleManager {
     this.vehicleInstances.delete(entityId);
   }
 
-  updateVehicleEntity(entity: any): void {
+  updateVehicleEntity(entity: any, reconcileLocal = true): void {
     const id = Number(entity.id);
     if (!Number.isFinite(id) || id <= 0) return;
 
@@ -411,12 +412,12 @@ export default class VehicleManager {
     const rot = entity.rot || { yaw: 0, pitch: 0 };
 
     // Local pilot: rewind-and-replay reconciliation.
-    // The server's Entity update is the authoritative state.  We read
-    // the acknowledged input_seq from the Vehicle table, discard old
-    // inputs, and replay unacknowledged ones from the server state.
+    // The server's Entity update is the authoritative state. We read
+    // acked_input_seq from the Vehicle table, discard old inputs,
+    // and replay unacknowledged ones from the server state.
     // If the physics match (they should), the replayed result is
     // identical to our prediction — zero visible correction.
-    if (id === this.engine.mountedVehicleId) {
+    if (reconcileLocal && id === this.engine.mountedVehicleId) {
       const newPos = { x: Number(entity.pos.x), y: Number(entity.pos.y), z: Number(entity.pos.z) };
       const newVel = { x: Number(vel.x), y: Number(vel.y), z: Number(vel.z) };
 
@@ -436,8 +437,27 @@ export default class VehicleManager {
       this.localLastServerPitch = Number(rot.pitch ?? 0);
       this.localLastServerTime = performance.now();
 
-      // Read the acknowledged input sequence from the Vehicle table
-      const ackedSeq = Number(vehicle.inputSeq ?? 0);
+      // Only reconcile when entity pose and vehicle ack were produced by the
+      // same server simulation tick.
+      const entitySimTick = Number(entity.simTick ?? 0);
+      const vehicleSimTick = Number(vehicle.simTick ?? 0);
+      if (entitySimTick <= 0 || vehicleSimTick <= 0 || entitySimTick !== vehicleSimTick) {
+        return;
+      }
+
+      // Reconcile each server sim tick at most once. We listen on both entity
+      // and vehicle streams; this guard prevents duplicate reconcile passes
+      // while still allowing whichever callback arrives second to complete a
+      // coherent pair.
+      if (entitySimTick <= this.lastReconciledSimTick) {
+        return;
+      }
+      this.lastReconciledSimTick = entitySimTick;
+
+      // Read the acknowledged processed input sequence from the Vehicle table
+      const ackedSeq = Number(vehicle.ackedInputSeq ?? 0);
+      this.lastAckedInputSeq = ackedSeq;
+      this.prediction?.discardAckedInputs(ackedSeq);
 
       // Rewind-and-replay reconciliation
       if (this.prediction) {
@@ -483,13 +503,63 @@ export default class VehicleManager {
     }
   }
 
-  syncVehicleInput(delta: number): void {
+  syncVehicleInput(): void {
     if (!this.engine.conn || !this.engine.localIdentity || this.engine.mountedVehicleId === 0) return;
 
+    if (this.lastAckedInputSeq > 0) {
+      while (this.pendingInputPackets.length > 0 && this.pendingInputPackets[0]!.seq <= this.lastAckedInputSeq) {
+        this.pendingInputPackets.shift();
+      }
+    }
+
+    // Hard-cap queue growth to avoid runaway backlog under transient stalls.
+    if (this.pendingInputPackets.length > 256) {
+      this.pendingInputPackets.splice(0, this.pendingInputPackets.length - 256);
+    }
+
+    // Primary path: flush tick-aligned packets generated during local
+    // prediction. This preserves 1:1 replay semantics (one seq per sim tick).
+    while (this.pendingInputPackets.length > 0) {
+      const packet = this.pendingInputPackets.shift()!;
+      this.engine.conn.reducers.updateVehicleInput({
+        forward: packet.input.forward,
+        strafe: packet.input.strafe,
+        lift: packet.input.lift,
+        yaw: packet.input.yaw,
+        boosting: false,
+        inputSeq: packet.seq,
+      });
+      this.lastVehicleInputUpdate = performance.now();
+      this.engine.netDiag.recordVehicleInputSent();
+    }
+
+    // Fallback path: if no local tick ran recently (very high FPS), send the
+    // latest sampled input at the server tick rate so the server still sees
+    // fresh controls.
+    // Avoid synthetic fallback packets while there is no prediction history;
+    // this prevents introducing sequence entries the local sim never stepped.
+    if (!this.prediction) return;
+
+    const now = performance.now();
+    if (now - this.lastVehicleInputUpdate < VEHICLE_INPUT_INTERVAL_MS) return;
+    this.lastVehicleInputUpdate = now;
+
+    const seq = this.nextVehicleInputSeq++;
+    this.engine.conn.reducers.updateVehicleInput({
+      forward: this.currentInput.forward,
+      strafe: this.currentInput.strafe,
+      lift: this.currentInput.lift,
+      yaw: this.currentInput.yaw,
+      boosting: false,
+      inputSeq: seq,
+    });
+    this.engine.netDiag.recordVehicleInputSent();
+  }
+
+  private sampleCurrentInput(delta: number): void {
     const mountedType = this.getMountedVehicleType();
     const isJet = mountedType?.typeId === VEHICLE_TYPES.FighterJet;
 
-    // Update persistent jet throttle every frame (before rate-limiting the network send)
     let forward = 0;
     if (isJet) {
       const throttleRate = 1.2; // per second
@@ -517,31 +587,10 @@ export default class VehicleManager {
     if (this.engine.controls.moveRight) yaw += 1;
     if (this.engine.controls.moveLeft) yaw -= 1;
 
-    // Always update the local input for client-side prediction (every frame).
-    // The prediction system uses this immediately for instant response.
     this.currentInput.forward = forward;
     this.currentInput.strafe = strafe;
     this.currentInput.lift = lift;
     this.currentInput.yaw = yaw;
-
-    // Rate-limit the network send to match the server tick rate
-    const now = performance.now();
-    if (now - this.lastVehicleInputUpdate < VEHICLE_INPUT_INTERVAL_MS) return;
-    this.lastVehicleInputUpdate = now;
-
-    // Send the latest tickSeq so the server can store it in the Vehicle
-    // table — the client reads it back on Entity updates to know which
-    // inputs have been acknowledged for rewind-and-replay.
-    const inputSeq = this.prediction ? this.prediction.tickSeq : 0;
-
-    this.engine.conn.reducers.updateVehicleInput({
-      forward,
-      strafe,
-      lift,
-      yaw,
-      boosting: false,
-      inputSeq,
-    });
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -555,6 +604,16 @@ export default class VehicleManager {
     }
     const top = this.engine.world.getHighestBlock(x, z);
     return top >= 0 ? top + 1 : 0;
+  }
+
+  private getPredictionGroundHeight(typeId: number, x: number, z: number): number {
+    const top = this.engine.world.getHighestBlock(x, z);
+    if (top < 0) return 3.0;
+    // Server parity:
+    // - helicopter_ground_rest_height: y + 2
+    // - fighter_jet_ground_height: y + 1
+    const offset = typeId === VEHICLE_TYPES.Helicopter ? 2 : 1;
+    return top + offset;
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -604,7 +663,7 @@ export default class VehicleManager {
     return null;
   }
 
-  syncMountedCameraToVehicle(delta: number): void {
+  syncMountedCameraToVehicle(): void {
     const pose = this.getMountedVehiclePose();
     if (!pose) return;
 
@@ -621,33 +680,29 @@ export default class VehicleManager {
     const camDist = this.vehicleCameraDistance;
     const camHeight = camConfig.height * (camDist / camConfig.distance);
 
-    const desired = new THREE.Vector3(
+    // Important: no lerp here. The local mounted vehicle mesh is already
+    // smoothly predicted/interpolated. Extra camera smoothing adds a
+    // speed-dependent lag that causes visible model-vs-camera oscillation.
+    this.mountedCameraPosition.set(
       pose.x - fx * camDist,
       pose.y + camHeight,
       pose.z - fz * camDist,
     );
-    const minCamY = this.getGroundHeight(desired.x, desired.z, desired.y) + 1.2;
-    if (desired.y < minCamY) desired.y = minCamY;
 
-    if (!this.mountedCameraInitialized) {
-      this.mountedCameraPosition.copy(desired);
-      this.mountedLookAtCenter.set(pose.x, pose.y, pose.z);
-      this.mountedCameraInitialized = true;
-    } else {
-      // Moderate lerp — smooth chase-cam feel without amplifying jitter.
-      // 0.5 at 60fps: reaches 97% in ~3 frames (~50ms).
-      const lerpFactor = 1 - Math.pow(1 - 0.5, delta * 60);
-      this.mountedCameraPosition.lerp(desired, lerpFactor);
-      this.mountedLookAtCenter.x += (pose.x - this.mountedLookAtCenter.x) * lerpFactor;
-      this.mountedLookAtCenter.y += (pose.y - this.mountedLookAtCenter.y) * lerpFactor;
-      this.mountedLookAtCenter.z += (pose.z - this.mountedLookAtCenter.z) * lerpFactor;
+    const minCamY = this.getGroundHeight(
+      this.mountedCameraPosition.x,
+      this.mountedCameraPosition.z,
+      this.mountedCameraPosition.y,
+    ) + 1.2;
+    if (this.mountedCameraPosition.y < minCamY) {
+      this.mountedCameraPosition.y = minCamY;
     }
 
     this.engine.camera.position.copy(this.mountedCameraPosition);
     this.engine.camera.lookAt(
-      this.mountedLookAtCenter.x + fx * 18,
-      this.mountedLookAtCenter.y + 2.2 + fy * 18,
-      this.mountedLookAtCenter.z + fz * 18,
+      pose.x + fx * 18,
+      pose.y + 2.2 + fy * 18,
+      pose.z + fz * 18,
     );
     this.engine.controls.resetVelocity();
 
@@ -667,9 +722,10 @@ export default class VehicleManager {
     const distToVehicle = Math.sqrt(dx * dx + dy * dy + dz * dz);
     if (distToVehicle < 0.01) { this.setVehicleOpacity(mesh, 0.15); return; }
 
-    const camDir = new THREE.Vector3();
-    this.engine.camera.getWorldDirection(camDir);
-    const dot = (dx / distToVehicle) * camDir.x + (dy / distToVehicle) * camDir.y + (dz / distToVehicle) * camDir.z;
+    this.engine.camera.getWorldDirection(this.tmpCamDir);
+    const dot = (dx / distToVehicle) * this.tmpCamDir.x
+      + (dy / distToVehicle) * this.tmpCamDir.y
+      + (dz / distToVehicle) * this.tmpCamDir.z;
 
     if (dot < 0) { this.setVehicleOpacity(mesh, 1.0); return; }
 
@@ -791,8 +847,12 @@ export default class VehicleManager {
 
   resetLocalPilotSmoothing(): void {
     this.prediction = null;
+    this.nextVehicleInputSeq = 1;
+    this.lastAckedInputSeq = 0;
+    this.lastReconciledSimTick = 0;
+    this.pendingInputPackets = [];
+    this.lastVehicleInputUpdate = 0;
     this.localLastServerTime = 0;
-    this.mountedCameraInitialized = false;
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -801,6 +861,10 @@ export default class VehicleManager {
 
   updatePerFrame(delta: number): void {
     const rot = { yaw: 0, pitch: 0 };
+
+    if (this.engine.mountedVehicleId !== 0) {
+      this.sampleCurrentInput(delta);
+    }
 
     // Build the frame context once (shared by all vehicle type callbacks)
     const frameCtx: VehicleTypeFrameContext = {
@@ -829,10 +893,8 @@ export default class VehicleManager {
       // ── Position / rotation ──
       if (isLocal) {
         // Client-side prediction: run the same physics locally using the
-        // player's current input.  This gives instant response (0ms input
-        // latency).  The server corrects drift via correctToward() in
-        // updateVehicleEntity, which is typically < 1 unit because the
-        // physics is identical.
+        // player's current input for instant response. Reconciliation applies
+        // server-authoritative corrections as render-only offsets.
         const typeId = inst?.type ?? VEHICLE_TYPES.Helicopter;
 
         // Lazily create the prediction on first use
@@ -846,12 +908,16 @@ export default class VehicleManager {
             vz: this.localLastServerVel.z,
             yaw: this.localLastServerYaw,
             pitch: this.localLastServerPitch,
-          }, (x, z) => this.getGroundHeight(x, z));
+          }, (x, z) => this.getPredictionGroundHeight(typeId, x, z));
         }
 
         if (this.prediction) {
           // Advance physics with current input — immediate response
-          const predicted = this.prediction.advance(delta, this.currentInput);
+          const predicted = this.prediction.advance(delta, this.currentInput, (tickInput) => {
+            const seq = this.nextVehicleInputSeq++;
+            this.pendingInputPackets.push({ seq, input: { ...tickInput } });
+            return seq;
+          });
           mesh.position.set(predicted.px, predicted.py, predicted.pz);
           mesh.rotation.set(predicted.pitch, predicted.yaw, 0);
         } else {

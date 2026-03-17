@@ -17,6 +17,7 @@ pub fn create_player_entity(ctx: &ReducerContext, pos: &Vec3, vel: &Vec3, rot: &
         rot: rot.clone(),
         scale: 1.0,
         active: true,
+        sim_tick: 0,
         created_at: ctx.timestamp,
         updated_at: ctx.timestamp,
     });

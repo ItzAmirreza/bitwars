@@ -71,6 +71,14 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
     } else {
         jet_pilot_seat_height()
     };
+    for row in ctx
+        .db
+        .vehicle_input_cmd()
+        .idx_vehicle_input_by_vehicle()
+        .filter(&vehicle_id)
+    {
+        ctx.db.vehicle_input_cmd().id().delete(&row.id);
+    }
     ctx.db.vehicle().entity_id().update(Vehicle {
         pilot_identity: Some(sender),
         input_forward: 0.0,
@@ -79,6 +87,9 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
         input_yaw: 0.0,
         boosting: false,
         input_seq: 0,
+        acked_input_seq: 0,
+        sim_tick: 0,
+        sim_updated_at: ctx.timestamp,
         last_input_at: ctx.timestamp,
         ..vehicle
     });
@@ -132,10 +143,37 @@ pub fn update_vehicle_input(
         return Err("Not pilot".to_string());
     }
 
-    vehicle.input_forward = clamp_vehicle_axis(forward);
-    vehicle.input_strafe = clamp_vehicle_axis(strafe);
-    vehicle.input_lift = clamp_vehicle_axis(lift);
-    vehicle.input_yaw = clamp_vehicle_axis(yaw);
+    // Monotonic guard: ignore stale/out-of-order input packets.
+    // WebSocket is ordered, but this protects against edge cases and
+    // preserves a strict sequence contract for client reconciliation.
+    if input_seq <= vehicle.input_seq {
+        return Ok(());
+    }
+
+    let forward = clamp_vehicle_axis(forward);
+    let strafe = clamp_vehicle_axis(strafe);
+    let lift = clamp_vehicle_axis(lift);
+    let yaw = clamp_vehicle_axis(yaw);
+
+    // Queue this input command for deterministic one-command-per-tick
+    // consumption in tick_vehicles.
+    ctx.db.vehicle_input_cmd().insert(VehicleInputCmd {
+        id: 0,
+        vehicle_id: player.mounted_vehicle_id,
+        seq: input_seq,
+        forward,
+        strafe,
+        lift,
+        yaw,
+        boosting,
+        received_at: ctx.timestamp,
+    });
+    trim_vehicle_input_queue(ctx, player.mounted_vehicle_id);
+
+    vehicle.input_forward = forward;
+    vehicle.input_strafe = strafe;
+    vehicle.input_lift = lift;
+    vehicle.input_yaw = yaw;
     vehicle.boosting = boosting;
     vehicle.input_seq = input_seq;
     vehicle.last_input_at = ctx.timestamp;

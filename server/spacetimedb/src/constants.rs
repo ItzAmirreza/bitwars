@@ -121,6 +121,11 @@ pub const HELI_SPAWN_MIN_SEPARATION: f32 = 28.0;
 /// rate doesn't change at runtime.  If you change it, update the JSON too.
 pub const HELI_TICK_INTERVAL_MS: u64 = 33;
 
+/// Monotonic server simulation tick id for vehicles.
+/// Kept server-side only (not shared config) because it is an internal
+/// sequencing mechanism, not gameplay tuning.
+pub const VEHICLE_SIM_TICK_INCREMENT: u64 = 1;
+
 pub fn heli_scale() -> f32 {
     shared_config::config().helicopter.scale
 }
