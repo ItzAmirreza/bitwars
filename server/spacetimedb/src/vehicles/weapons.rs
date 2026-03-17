@@ -106,11 +106,24 @@ pub fn fire_vehicle_weapon(
         return Err("Invalid shot direction".to_string());
     }
 
-    // Server-authoritative muzzle origin: never trust client pose for mounted fire.
+    // Server-authoritative muzzle origin from current vehicle pose.
+    // Extrapolate from the last vehicle sim snapshot to reducer time so fast
+    // vehicles don't appear to fire from a noticeably stale position.
+    let now_us = timestamp_micros(ctx.timestamp);
+    let updated_us = timestamp_micros(entity.updated_at);
+    let age_us = now_us.saturating_sub(updated_us);
+    let max_extrap_us = (crate::constants::HELI_TICK_INTERVAL_MS * 1000 * 2) as u64;
+    let dt = (age_us.min(max_extrap_us) as f32) / 1_000_000.0;
+    let muzzle_base = Vec3 {
+        x: entity.pos.x + entity.vel.x * dt,
+        y: entity.pos.y + entity.vel.y * dt,
+        z: entity.pos.z + entity.vel.z * dt,
+    };
+
     let origin = Vec3 {
-        x: entity.pos.x + normalized_dir.x * 3.5,
-        y: entity.pos.y + 1.0,
-        z: entity.pos.z + normalized_dir.z * 3.5,
+        x: muzzle_base.x + normalized_dir.x * 3.5,
+        y: muzzle_base.y + 1.0,
+        z: muzzle_base.z + normalized_dir.z * 3.5,
     };
 
     // Deduct ammo

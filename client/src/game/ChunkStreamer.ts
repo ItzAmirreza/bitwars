@@ -70,6 +70,7 @@ export class ChunkStreamer {
   startupProgressPrev = 0;
   startupProgressStallTime = 0;
   chunkLoadFrame = 0;
+  requestBackoffUntilMs = 0;
 
   private ctx: ChunkStreamerContext;
 
@@ -148,10 +149,15 @@ export class ChunkStreamer {
     }
 
     // Request missing chunks in small batches to spread decode/meshing cost across frames
+    const now = performance.now();
+    const canSendRequests = now >= this.requestBackoffUntilMs;
+
     const batch: number[] = [];
     const remainingPendingBudget = Math.max(0, MAX_PENDING_CHUNK_REQUESTS - this.pendingChunkRequests.size);
     let processed = 0;
     while (
+      canSendRequests
+      &&
       batch.length < CHUNKS_PER_REQUEST
       && batch.length < remainingPendingBudget
       && processed < MAX_QUEUE_PROCESS_PER_TICK
@@ -170,7 +176,24 @@ export class ChunkStreamer {
       batch.push(id);
     }
     if (batch.length > 0) {
-      this.ctx.conn.reducers.requestChunks({ chunkIds: batch });
+      const requestedIds = [...batch];
+      void this.ctx.conn.reducers.requestChunks({ chunkIds: requestedIds }).catch((error: unknown) => {
+        for (let i = requestedIds.length - 1; i >= 0; i--) {
+          const id = requestedIds[i]!;
+          this.pendingChunkRequests.delete(id);
+          if (!this.queuedChunkRequests.has(id) && !this.bootstrapQueued.has(id)) {
+            this.chunkRequestQueue.unshift(id);
+            this.queuedChunkRequests.add(id);
+          }
+        }
+
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('Not registered')) {
+          this.requestBackoffUntilMs = performance.now() + 1000;
+          return;
+        }
+        console.warn('[BitWars] request_chunks failed:', message);
+      });
     }
 
     // Unload chunks that are too far away (only check when player moved)
@@ -412,6 +435,7 @@ export class ChunkStreamer {
     this.startupWorldReady = false;
     this.startupProgressPrev = 0;
     this.startupProgressStallTime = 0;
+    this.requestBackoffUntilMs = 0;
     this.lastPlayerCx = -1;
     this.lastPlayerCz = -1;
   }

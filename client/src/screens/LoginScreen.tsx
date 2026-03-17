@@ -91,6 +91,7 @@ export function LoginScreen() {
   const [input, setInput] = useState('');
   const [focused, setFocused] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const {
     connection,
     setUsername,
@@ -116,22 +117,30 @@ export function LoginScreen() {
     menuAudio.setMasterVolume(settings.masterVolume);
   }, [settings.masterVolume]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = input.trim();
-    if (!name || name.length > 20 || !connection) {
+    if (!name || name.length > 20 || !connection || submitting) {
       if (!name) menuAudio.playUIError();
       return;
     }
 
-    menuAudio.playUIDeploy();
-    connection.reducers.setUsername({
-      username: name,
-      characterPreset: selectedCharacterPreset,
-    });
-    setUsername(name);
-    setScreen('lobby');
+    setSubmitting(true);
     setError(null);
+    menuAudio.playUIDeploy();
+    try {
+      await connection.reducers.setUsername({
+        username: name,
+        characterPreset: selectedCharacterPreset,
+      });
+      setUsername(name);
+      setScreen('lobby');
+    } catch (error) {
+      menuAudio.playUIError();
+      setError(error instanceof Error ? error.message : 'Failed to set username');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -393,11 +402,18 @@ export function LoginScreen() {
           <div className="anim-fade-up" style={{ animationDelay: '0.5s' }}>
             <button
               type="submit"
+              disabled={submitting}
               className="btn-primary glitch-hover"
               onMouseEnter={() => menuAudio.playUIHover()}
-              style={{ fontSize: '18px', padding: '18px 48px', width: 'min(360px, 80vw)' }}
+              style={{
+                fontSize: '18px',
+                padding: '18px 48px',
+                width: 'min(360px, 80vw)',
+                opacity: submitting ? 0.75 : 1,
+                cursor: submitting ? 'not-allowed' : 'pointer',
+              }}
             >
-              DEPLOY
+              {submitting ? 'DEPLOYING...' : 'DEPLOY'}
             </button>
           </div>
 

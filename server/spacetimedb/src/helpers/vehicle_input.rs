@@ -2,9 +2,8 @@ use crate::tables::vehicle_input_cmd;
 use crate::tables::VehicleInputCmd;
 use spacetimedb::ReducerContext;
 
-// Keep queue short so controls stay real-time under transient stalls.
-// At 30Hz vehicle tick, 12 commands caps control lag to ~400ms.
-const MAX_INPUT_QUEUE_PER_VEHICLE: usize = 12;
+// Allow enough burst tolerance to avoid dropping inputs during transient stalls.
+const MAX_INPUT_QUEUE_PER_VEHICLE: usize = 128;
 
 #[derive(Clone)]
 pub struct VehicleControls {

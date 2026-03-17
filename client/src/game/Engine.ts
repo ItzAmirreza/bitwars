@@ -1726,6 +1726,9 @@ export class Engine {
     if (this.mountedVehicleId !== 0) {
       this.vehicleManager.syncMountedCameraToVehicle();
       this.vehicleManager.syncVehicleInput();
+      if (this.mouseDown && this.controls.locked) {
+        this.tryVehicleFire();
+      }
     }
 
     // Chunk streaming (every N frames to load quickly)
@@ -1857,8 +1860,7 @@ export class Engine {
 
     // Auto-fire
     if (this.mouseDown && this.controls.locked) {
-      if (this.mountedVehicleId !== 0) this.tryVehicleFire();
-      else this.tryFire();
+      if (this.mountedVehicleId === 0) this.tryFire();
     }
 
     // Vehicle reload timer

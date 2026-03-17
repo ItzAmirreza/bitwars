@@ -10,6 +10,37 @@ use crate::tables::*;
 use crate::types::*;
 use crate::weapons;
 
+fn make_stale_username(ctx: &ReducerContext, old_username: &str) -> String {
+    let base = old_username.trim();
+    let mut suffix: u32 = 1;
+
+    loop {
+        let candidate = if suffix == 1 {
+            format!("{}_stale", base)
+        } else {
+            format!("{}_stale{}", base, suffix)
+        };
+
+        let taken_by_player = ctx
+            .db
+            .player()
+            .iter()
+            .any(|p| p.username.eq_ignore_ascii_case(&candidate));
+        let taken_by_loadout = ctx
+            .db
+            .player_loadout()
+            .username()
+            .find(&candidate)
+            .is_some();
+
+        if !taken_by_player && !taken_by_loadout {
+            return candidate;
+        }
+
+        suffix += 1;
+    }
+}
+
 #[reducer]
 pub fn set_username(
     ctx: &ReducerContext,
@@ -23,10 +54,41 @@ pub fn set_username(
     let character_preset = normalize_character_preset(character_preset);
 
     let sender = ctx.sender();
-    for p in ctx.db.player().iter() {
-        if p.username == username && p.identity != sender {
+    let conflicting_players: Vec<Player> = ctx
+        .db
+        .player()
+        .iter()
+        .filter(|p| p.identity != sender && p.username.eq_ignore_ascii_case(&username))
+        .collect();
+
+    for conflicting in conflicting_players {
+        if conflicting.online {
             return Err("Username already taken".to_string());
         }
+
+        let stale_username = make_stale_username(ctx, &conflicting.username);
+
+        if let Some(loadout) = ctx
+            .db
+            .player_loadout()
+            .username()
+            .find(&conflicting.username)
+        {
+            ctx.db
+                .player_loadout()
+                .username()
+                .delete(&conflicting.username);
+            ctx.db.player_loadout().insert(PlayerLoadout {
+                username: stale_username.clone(),
+                ..loadout
+            });
+        }
+
+        ctx.db.player().identity().update(Player {
+            username: stale_username,
+            online: false,
+            ..conflicting
+        });
     }
 
     let loadout = normalize_or_create_player_loadout(ctx, &username);

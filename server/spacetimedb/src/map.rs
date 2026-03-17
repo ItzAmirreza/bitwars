@@ -13,8 +13,6 @@ use crate::vehicles::{spawn_jets_at_airstrips, spawn_sandbox_helicopters};
 
 use crate::worldgen::{self, CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
 
-const MAX_CHUNKS_GENERATED_PER_REQUEST: usize = 2;
-
 #[reducer]
 pub fn request_chunks(ctx: &ReducerContext, chunk_ids: Vec<u32>) -> Result<(), String> {
     let _sender = ctx.sender();
@@ -35,7 +33,6 @@ pub fn request_chunks(ctx: &ReducerContext, chunk_ids: Vec<u32>) -> Result<(), S
         .find(1)
         .ok_or("World not initialized")?;
 
-    let mut generated = 0usize;
     for chunk_id in chunk_ids {
         if ctx.db.world_chunk().chunk_id().find(chunk_id).is_some() {
             continue;
@@ -58,10 +55,6 @@ pub fn request_chunks(ctx: &ReducerContext, chunk_ids: Vec<u32>) -> Result<(), S
             data,
             version: 1,
         });
-        generated += 1;
-        if generated >= MAX_CHUNKS_GENERATED_PER_REQUEST {
-            break;
-        }
     }
 
     Ok(())

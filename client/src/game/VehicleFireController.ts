@@ -126,9 +126,9 @@ export class VehicleFireController {
       dir.normalize();
     }
 
-    // Origin must use server-authoritative pose so server range validation
-    // matches what we send, even when local prediction is slightly ahead.
-    const pose = ctx.vehicleManager.getMountedVehiclePoseRaw();
+    // Use the locally-rendered mounted pose for instant muzzle/projectile
+    // feedback. Server fire remains authoritative and derives its own origin.
+    const pose = ctx.vehicleManager.getMountedVehiclePose();
     if (!pose) return;
     const origin = new THREE.Vector3(
       pose.x + dir.x * 3.5,
