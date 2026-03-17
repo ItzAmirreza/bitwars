@@ -7,6 +7,7 @@ export function LobbyScreen() {
   const settings = useGameStore((s) => s.settings);
   const [mounted, setMounted] = useState(false);
   const [hoverDeploy, setHoverDeploy] = useState(false);
+  const [hoverPerf, setHoverPerf] = useState(false);
 
   const players = connection
     ? Array.from(connection.db.player.iter()).filter((p: any) => p.online)
@@ -29,6 +30,12 @@ export function LobbyScreen() {
 
   const handleEnterGame = () => {
     menuAudio.playUIDeploy();
+    setScreen('game');
+  };
+
+  const handleEnterPerf = () => {
+    menuAudio.playUIDeploy();
+    sessionStorage.setItem('bitwars-open-perf', '1');
     setScreen('game');
   };
 
@@ -177,6 +184,30 @@ export function LobbyScreen() {
                 }}
               >
                 ENTER SANDBOX
+              </button>
+
+              <button
+                onClick={handleEnterPerf}
+                onMouseEnter={() => {
+                  setHoverPerf(true);
+                  menuAudio.playUIHover();
+                }}
+                onMouseLeave={() => setHoverPerf(false)}
+                className="w-full"
+                style={{
+                  marginTop: '10px',
+                  fontSize: '14px',
+                  padding: '12px 16px',
+                  letterSpacing: '0.18em',
+                  fontFamily: 'var(--font-mono)',
+                  border: `1px solid ${hoverPerf ? 'var(--c-cyan)' : 'var(--c-border)'}`,
+                  color: hoverPerf ? 'var(--c-cyan)' : 'var(--c-muted)',
+                  background: hoverPerf ? 'rgba(102,224,255,0.12)' : 'rgba(6,8,16,0.55)',
+                  cursor: 'pointer',
+                  transition: 'all 0.18s',
+                }}
+              >
+                ENTER SANDBOX + TEST HARNESS
               </button>
 
               <p

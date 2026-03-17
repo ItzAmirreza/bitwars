@@ -166,6 +166,20 @@ export function TopHudBar({
               SETTINGS
             </button>
             <button
+              className="pointer-events-auto cursor-pointer px-3 py-1 hud-btn"
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: '10px',
+                color: 'var(--c-muted)',
+                background: 'rgba(6,8,16,0.6)',
+                border: '1px solid var(--c-border)',
+                letterSpacing: '0.1em',
+              }}
+              title="Press F8 in-game"
+            >
+              [F8] TEST
+            </button>
+            <button
               onClick={openLoadout}
               className="pointer-events-auto cursor-pointer px-3 py-1 hud-btn"
               style={{

@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Engine } from '../game/Engine';
 import type { EngineState } from '../game/Engine';
+import { PerfHarness, buildPerfHooks } from '../game/PerfHarness';
+import type { PerfRunResult } from '../game/PerfHarness';
+import type { PerfRunSummary } from '../game/PerfHistoryStore';
 import { useGameStore } from '../store';
 import { SettingsPanel } from './SettingsPanel';
+import { PerfPanel } from './PerfPanel';
 import { LoadoutOverlay } from './hud/LoadoutOverlay';
 import { KillFeed } from './hud/KillFeed';
 import { TopHudBar } from './hud/TopHudBar';
@@ -73,6 +77,16 @@ export function GameScreen() {
   const [activeLoadoutSlot, setActiveLoadoutSlot] = useState(0);
   const [savingLoadout, setSavingLoadout] = useState(false);
   const [roundTimer, setRoundTimer] = useState('');
+  const [showPerfPanel, setShowPerfPanel] = useState(false);
+  const [perfRunning, setPerfRunning] = useState(false);
+  const [perfProgress, setPerfProgress] = useState(0);
+  const [perfLastRun, setPerfLastRun] = useState<PerfRunResult | null>(null);
+  const [perfSummaries, setPerfSummaries] = useState<PerfRunSummary[]>([]);
+  const [perfSelectedRun, setPerfSelectedRun] = useState<PerfRunResult | null>(null);
+  const [perfCompareRun, setPerfCompareRun] = useState<PerfRunResult | null>(null);
+
+  const perfHarnessRef = useRef<PerfHarness | null>(null);
+  const perfTickerRef = useRef<number | null>(null);
 
   // Round timer countdown from WorldConfig
   useEffect(() => {
@@ -185,17 +199,140 @@ export function GameScreen() {
       const engine = new Engine(container, connection, setState, identity, username || null);
       engine.updateSettings(settings);
       engineRef.current = engine;
+
+      const harness = new PerfHarness(buildPerfHooks(engine));
+      perfHarnessRef.current = harness;
+
+      const maybeOpenPerf = sessionStorage.getItem('bitwars-open-perf') === '1';
+      if (maybeOpenPerf) {
+        sessionStorage.removeItem('bitwars-open-perf');
+        setShowPerfPanel(true);
+      }
     });
 
     return () => {
       disposed = true;
       cancelAnimationFrame(engineInitFrame);
+      if (perfTickerRef.current !== null) {
+        clearInterval(perfTickerRef.current);
+        perfTickerRef.current = null;
+      }
       if (engineRef.current) {
         engineRef.current.destroy();
         engineRef.current = null;
       }
+      perfHarnessRef.current = null;
     };
   }, [connection, username]);
+
+  const refreshPerfHistory = useCallback(async () => {
+    const harness = perfHarnessRef.current;
+    if (!harness) return;
+    const rows = await harness.history(30);
+    setPerfSummaries(rows);
+  }, []);
+
+  const selectPerfRun = useCallback(async (id: string) => {
+    const harness = perfHarnessRef.current;
+    if (!harness) return;
+    const run = await harness.loadRun(id);
+    setPerfSelectedRun(run);
+  }, []);
+
+  const selectPerfCompareRun = useCallback(async (id: string) => {
+    if (!id) {
+      setPerfCompareRun(null);
+      return;
+    }
+    const harness = perfHarnessRef.current;
+    if (!harness) return;
+    const run = await harness.loadRun(id);
+    setPerfCompareRun(run);
+  }, []);
+
+  const deletePerfRun = useCallback(async (id: string) => {
+    const harness = perfHarnessRef.current;
+    if (!harness) return;
+    await harness.deleteRun(id);
+    if (perfSelectedRun?.id === id) setPerfSelectedRun(null);
+    if (perfCompareRun?.id === id) setPerfCompareRun(null);
+    await refreshPerfHistory();
+  }, [perfSelectedRun, perfCompareRun, refreshPerfHistory]);
+
+  const clearPerfRuns = useCallback(async () => {
+    const harness = perfHarnessRef.current;
+    if (!harness) return;
+    await harness.clearHistory();
+    setPerfSelectedRun(null);
+    setPerfCompareRun(null);
+    setPerfLastRun(null);
+    await refreshPerfHistory();
+  }, [refreshPerfHistory]);
+
+  const exportPerfRun = useCallback(async (id: string) => {
+    const harness = perfHarnessRef.current;
+    if (!harness) return;
+    const run = await harness.loadRun(id);
+    if (!run) return;
+    const json = harness.exportRun(run);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${run.id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const importPerfRun = useCallback(async (jsonText: string) => {
+    const harness = perfHarnessRef.current;
+    if (!harness) return;
+    const parsed = harness.parseImportedRun(jsonText);
+    if (!parsed) return;
+    const imported = { ...parsed, id: `${parsed.id}-import-${Date.now()}` };
+    await harness.saveImportedRun(imported);
+    await refreshPerfHistory();
+  }, [refreshPerfHistory]);
+
+  const runPerfHarness = useCallback(async () => {
+    const harness = perfHarnessRef.current;
+    if (!harness || perfRunning) return;
+    const ok = harness.start(60, 'full');
+    if (!ok) return;
+
+    const reopenPerfPanelAfterRun = showPerfPanel;
+
+    setPerfRunning(true);
+    setPerfProgress(0);
+    setPerfSelectedRun(null);
+    setShowPerfPanel(false);
+
+    const started = performance.now();
+    if (perfTickerRef.current !== null) {
+      clearInterval(perfTickerRef.current);
+      perfTickerRef.current = null;
+    }
+
+    perfTickerRef.current = window.setInterval(async () => {
+      const h = perfHarnessRef.current;
+      if (!h) return;
+      const run = await h.tick();
+      const elapsed = (performance.now() - started) / 1000;
+      setPerfProgress(Math.max(0, Math.min(1, elapsed / 60)));
+      if (run) {
+        if (perfTickerRef.current !== null) {
+          clearInterval(perfTickerRef.current);
+          perfTickerRef.current = null;
+        }
+        setPerfRunning(false);
+        setPerfProgress(1);
+        setPerfLastRun(run);
+        setPerfSelectedRun(run);
+        if (reopenPerfPanelAfterRun) setShowPerfPanel(true);
+        await refreshPerfHistory();
+      }
+    }, 16);
+  }, [perfRunning, refreshPerfHistory, showPerfPanel]);
 
   // Sync settings to engine when they change
   useEffect(() => {
@@ -235,6 +372,12 @@ export function GameScreen() {
         return;
       }
 
+      if (e.code === 'F8') {
+        e.preventDefault();
+        setShowPerfPanel((v) => !v);
+        return;
+      }
+
       if (e.code === 'KeyE' && state.locked && !showSettings && !state.mountedVehicleName) {
         e.preventDefault();
         openLoadout();
@@ -266,6 +409,42 @@ export function GameScreen() {
 
       {/* Settings Panel */}
       {showSettings && <SettingsPanel />}
+
+      {perfRunning && !showPerfPanel && (
+        <div
+          className="absolute top-3 right-3 z-30"
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '10px',
+            letterSpacing: '0.1em',
+            color: 'var(--c-cyan)',
+            border: '1px solid var(--c-border)',
+            background: 'rgba(6,8,16,0.65)',
+            padding: '6px 8px',
+          }}
+        >
+          PERF TEST RUNNING {Math.round(perfProgress * 100)}%
+        </div>
+      )}
+
+      <PerfPanel
+        open={showPerfPanel}
+        running={perfRunning}
+        progress={perfProgress}
+        lastRun={perfLastRun}
+        summaries={perfSummaries}
+        selectedRun={perfSelectedRun}
+        compareRun={perfCompareRun}
+        onClose={() => setShowPerfPanel(false)}
+        onRun={runPerfHarness}
+        onRefresh={refreshPerfHistory}
+        onSelectRun={selectPerfRun}
+        onSelectCompareRun={selectPerfCompareRun}
+        onDeleteRun={deletePerfRun}
+        onClear={clearPerfRuns}
+        onExportRun={exportPerfRun}
+        onImportRun={importPerfRun}
+      />
 
       {/* Startup world streaming overlay */}
       {!state.worldReady && (

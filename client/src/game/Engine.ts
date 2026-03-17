@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, packChunkId } from './VoxelWorld';
+import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId } from './VoxelWorld';
 import { FPSControls } from './FPSControls';
 import { WeaponSystem, WEAPONS } from './Weapons';
 import { AudioSystem } from './AudioSystem';
@@ -12,6 +12,7 @@ import { SkySystem } from './SkySystem';
 import { LanternSystem } from './LanternSystem';
 import type { LanternContext } from './LanternSystem';
 import { ChunkStreamer, ACTIVE_CHUNK_RADIUS, CHUNK_STREAM_INTERVAL_FRAMES, CHUNK_REBUILD_BUDGET_MOVING, CHUNK_REBUILD_BUDGET_IDLE, CHUNK_REBUILD_BUDGET_BOOTSTRAP } from './ChunkStreamer';
+import { generateDeterministicPerfChunk, perfSceneSpawnPoint } from './PerfWorldScene';
 import { RemotePlayerManager, disposeObjectMaterials } from './RemotePlayerManager';
 import VehicleManager, { VEHICLE_WEAPONS } from './vehicles/VehicleManager';
 import type { VehicleEngineContext } from './vehicles/VehicleManager';
@@ -19,11 +20,12 @@ import { InfantryFireController } from './InfantryFireController';
 import type { InfantryFireContext } from './InfantryFireController';
 import { VehicleFireController } from './VehicleFireController';
 import type { VehicleFireContext } from './VehicleFireController';
-import { ENTITY_KINDS } from '../shared-config';
+import { ENTITY_KINDS, VEHICLE_TYPES } from '../shared-config';
 import { GRENADE } from '../shared-config';
 import type { DbConnection } from '../module_bindings';
 import type { GameSettings } from '../store';
 import { NetDiagnostics } from './NetDiagnostics';
+import type { HarnessMode } from './PerfHarness';
 
 const ENTITY_KIND_VEHICLE = ENTITY_KINDS.Vehicle;
 
@@ -166,6 +168,22 @@ export class Engine {
   private nextPlayerCountSampleAt = 0;
   private animationId = 0;
   private mouseDown = false;
+  private autoFireHeld = false;
+  private sandboxMotionEnabled = false;
+  private sandboxMotionMode: HarnessMode = 'idle';
+  private sandboxMotionTime = 0;
+  private sandboxPhaseTime = 0;
+  private sandboxTeleportsDone = 0;
+  private sandboxExplosionPulse = 0;
+  private readonly sandboxRemoteIds = ['perf-bot-1', 'perf-bot-2', 'perf-bot-3', 'perf-bot-4'];
+  private perfBenchmarkSceneEnabled = false;
+  private perfSceneVehicleMode: 0 | 1 = 0;
+  private sandboxRngState = 0x12345678;
+  private perfVehicleSwitchCooldown = 0;
+  private perfEnvironmentPhase = 0;
+  private perfLastMountedVehicleId = 0;
+  private perfMountedSince = 0;
+  __perfLastState: { frameMs: number; playerCount: number } = { frameMs: 0, playerCount: 1 };
   private lastPositionUpdate = 0;
   private remotePlayers!: RemotePlayerManager;
   private localIdentity: string | null = null;
@@ -296,6 +314,8 @@ export class Engine {
         this.audio?.sendChunkToWorker(packChunkId(cx, cy, cz), decoded);
       },
       onChunkUnloading: (chunkId) => this.lanterns.clearLanternLightsForChunk(chunkId, this.getLanternContext()),
+      perfSceneEnabled: () => this.perfBenchmarkSceneEnabled,
+      getPerfSceneChunkData: (cx, cy, cz) => generateDeterministicPerfChunk(cx, cy, cz),
     });
     this.chunkStreamer.loadWorldFromServer();
     this.world.setRebuildAnchor(
@@ -599,16 +619,329 @@ export class Engine {
   // ── INPUT ──
 
   private onMouseDown = (e: MouseEvent): void => {
+    if (this.sandboxMotionEnabled) return;
     if (e.button === 0 && this.controls.locked) {
       this.mouseDown = true;
       if (this.mountedVehicleId !== 0) this.tryVehicleFire();
       else this.tryFire();
     }
   };
+
+  setPerfSandboxMotion(enabled: boolean, mode: HarnessMode): void {
+    const modeChanged = this.sandboxMotionMode !== mode;
+    this.sandboxMotionEnabled = enabled;
+    this.sandboxMotionMode = mode;
+    if (!enabled || modeChanged) {
+      this.sandboxMotionTime = 0;
+      this.sandboxPhaseTime = 0;
+      this.sandboxTeleportsDone = 0;
+      this.sandboxExplosionPulse = 0;
+      this.sandboxRngState = mode === 'combat-chaos' ? 0x4f1bbcdc : mode === 'mixed-teleport' ? 0x6d2b79f5 : 0x12345678;
+      this.removeSandboxRemotePlayers();
+    }
+
+    this.controls.setPerfSandboxExclusive(enabled);
+
+    if (enabled) {
+      this.chatOpen = false;
+      this.loadoutMenuOpen = false;
+      this.controls.inputEnabled = true;
+      this.weapons.setInputEnabled(true);
+      if (!this.controls.locked) this.controls.lock();
+    }
+  }
+
+  setPerfBenchmarkSceneEnabled(enabled: boolean): void {
+    this.perfBenchmarkSceneEnabled = enabled;
+    if (enabled) {
+      this.loadPerfBenchmarkScene();
+    }
+    if (!enabled) {
+      this.perfSceneVehicleMode = 0;
+      this.perfVehicleSwitchCooldown = 0;
+      this.perfEnvironmentPhase = 0;
+      this.perfLastMountedVehicleId = 0;
+      this.perfMountedSince = 0;
+      this.removeSandboxRemotePlayers();
+      this.restoreServerWorldAfterPerf();
+    }
+  }
+
+  private clearAudioWorkerChunks(): void {
+    const maxCx = Math.ceil(WORLD_X / CHUNK);
+    const maxCy = Math.ceil(WORLD_Y / CHUNK);
+    const maxCz = Math.ceil(WORLD_Z / CHUNK);
+    for (let cz = 0; cz < maxCz; cz++) {
+      for (let cy = 0; cy < maxCy; cy++) {
+        for (let cx = 0; cx < maxCx; cx++) {
+          this.audio.removeChunkFromWorker(packChunkId(cx, cy, cz));
+        }
+      }
+    }
+  }
+
+  private restoreServerWorldAfterPerf(): void {
+    this.world.clearAll(this.scene);
+    this.chunkStreamer.resetAll();
+    this.lanterns.reset(this.getLanternContext());
+    this.clearAudioWorkerChunks();
+    this.chunkStreamer.loadWorldFromServer();
+    this.chunkStreamer.chunkLoadFrame = 0;
+  }
+
+  private loadPerfBenchmarkScene(): void {
+    // Deterministic benchmark mode; keep chunk streaming behavior realistic by
+    // letting ChunkStreamer lazily page in generated benchmark chunks.
+    this.world.clearAll(this.scene);
+    this.chunkStreamer.resetAll();
+    this.lanterns.reset(this.getLanternContext());
+    this.clearAudioWorkerChunks();
+
+    const spawn = perfSceneSpawnPoint(0);
+    this.camera.position.set(spawn.x, spawn.y, spawn.z);
+    this.controls.resetVelocity();
+    this.orientSandboxLookToward(spawn.x + 12, spawn.y, spawn.z + 10);
+
+    this.perfEnvironmentPhase = 0;
+    this.sky.setEnvironment({ timeOfDay: 9.5, weather: 0, windSpeed: 0.2, cloudDensity: 0.2, fogDensity: 0.65 });
+    this.perfLastMountedVehicleId = 0;
+    this.perfMountedSince = 0;
+
+    this.chunkStreamer.startupWorldReady = false;
+    this.chunkStreamer.startupProgressPrev = 0;
+    this.chunkStreamer.startupProgressStallTime = 0;
+    this.chunkStreamer.chunkLoadFrame = 0;
+  }
+
+  private sandboxRand(): number {
+    this.sandboxRngState = (Math.imul(this.sandboxRngState, 1664525) + 1013904223) >>> 0;
+    return this.sandboxRngState / 4294967296;
+  }
+
+  setPerfSandboxAutoFire(enabled: boolean): void {
+    this.autoFireHeld = enabled;
+  }
+
+  private removeSandboxRemotePlayers(): void {
+    for (const id of this.sandboxRemoteIds) this.remotePlayers.removeOtherPlayer(id);
+  }
+
+  private ensureSandboxRemotePlayers(time: number): void {
+    const base = this.camera.position;
+    for (let i = 0; i < this.sandboxRemoteIds.length; i++) {
+      const id = this.sandboxRemoteIds[i]!;
+      const ring = 14 + i * 3;
+      const angle = time * (0.4 + i * 0.12) + i * 1.7;
+      const x = base.x + Math.cos(angle) * ring;
+      const z = base.z + Math.sin(angle) * ring;
+      const y = this.getGroundHeight(x, z) + 1.7;
+      const nextAngle = angle + 0.05;
+      const nx = base.x + Math.cos(nextAngle) * ring;
+      const nz = base.z + Math.sin(nextAngle) * ring;
+      this.remotePlayers.updateOtherPlayer(
+        id,
+        { x, y: y + 1.7, z },
+        { x: (nx - x) / 0.05, y: 0, z: (nz - z) / 0.05 },
+        { yaw: Math.atan2(nx - x, nz - z), pitch: 0 },
+        `BOT-${i + 1}`,
+        i,
+        i % 5,
+      );
+    }
+  }
+
+  private emitSandboxChaos(delta: number): void {
+    this.ensureSandboxRemotePlayers(this.elapsedTime);
+
+    this.sandboxExplosionPulse -= delta;
+    if (this.sandboxExplosionPulse <= 0) {
+      this.sandboxExplosionPulse = 0.12;
+      const cx = this.camera.position.x + (this.sandboxRand() - 0.5) * 30;
+      const cz = this.camera.position.z + (this.sandboxRand() - 0.5) * 30;
+      const cy = this.getGroundHeight(cx, cz) + 1;
+      const radius = 2 + this.sandboxRand() * 4;
+      this.vfx.emitExplosion(cx, cy, cz, radius);
+      this.audio.playExplosion({ position: { x: cx, y: cy, z: cz } });
+      this.vfx.emitImpact(cx, cy, cz);
+    }
+
+    // Local-only projectile spam as deterministic stress load
+    for (let i = 0; i < 2; i++) {
+      const origin = this.camera.position.clone().add(new THREE.Vector3(
+        (this.sandboxRand() - 0.5) * 2,
+        -0.2 + this.sandboxRand() * 0.6,
+        (this.sandboxRand() - 0.5) * 2,
+      ));
+      const dir = new THREE.Vector3(
+        (this.sandboxRand() - 0.5) * 0.5,
+        -0.05 + this.sandboxRand() * 0.25,
+        -1,
+      ).normalize();
+      this.projectileManager.spawnRemote(2, origin, dir, performance.now(), this.sandboxRemoteIds[i % this.sandboxRemoteIds.length]!);
+    }
+  }
+
+  private orientSandboxLookToward(targetX: number, targetY: number, targetZ: number): void {
+    const dx = targetX - this.camera.position.x;
+    const dy = targetY - this.camera.position.y;
+    const dz = targetZ - this.camera.position.z;
+    const yaw = Math.atan2(-dx, -dz);
+    const horiz = Math.max(0.0001, Math.sqrt(dx * dx + dz * dz));
+    const pitch = Math.max(-1.1, Math.min(1.1, Math.atan2(dy, horiz)));
+    const e = new THREE.Euler(pitch, yaw, 0, 'YXZ');
+    this.camera.quaternion.setFromEuler(e);
+    this.vehicleManager.vehiclePilotYaw = yaw;
+    this.vehicleManager.vehiclePilotPitch = pitch;
+  }
+
+  private teleportSandboxCamera(x: number, z: number): void {
+    const y = this.getGroundHeight(x, z) + 2.6;
+    this.camera.position.set(x, y, z);
+    this.controls.resetVelocity();
+    const lookX = Math.min(WORLD_X - 2, Math.max(2, x + 10));
+    const lookZ = Math.min(WORLD_Z - 2, Math.max(2, z + 8));
+    const lookY = this.getGroundHeight(lookX, lookZ) + 1.7;
+    this.orientSandboxLookToward(lookX, lookY, lookZ);
+  }
+
+  private sandboxLanePoint(step: number): { x: number; z: number } {
+    const margin = 64;
+    const segments = [
+      { x: margin, z: margin },
+      { x: WORLD_X - margin, z: margin },
+      { x: WORLD_X - margin, z: WORLD_Z - margin },
+      { x: margin, z: WORLD_Z - margin },
+    ];
+    return segments[step % segments.length]!;
+  }
+
+  private ensurePerfAmmoAndVehicle(): void {
+    if (!this.perfBenchmarkSceneEnabled) return;
+
+    // Keep deterministic fire pressure active for full run duration.
+    if (this.weapons.getAmmo() <= 2) {
+      for (let i = 0; i < WEAPONS.length; i++) {
+        this.weapons.setAmmo(i, WEAPONS[i].maxAmmo);
+      }
+    }
+
+    // Deterministic environment phase sweep so tests include multiple light/weather regimes.
+    const envPhase = Math.floor(this.sandboxMotionTime / 20) % 4;
+    if (envPhase !== this.perfEnvironmentPhase) {
+      this.perfEnvironmentPhase = envPhase;
+      if (envPhase === 0) this.sky.setEnvironment({ timeOfDay: 9.5, weather: 0, windSpeed: 0.2, cloudDensity: 0.2, fogDensity: 0.65 });
+      else if (envPhase === 1) this.sky.setEnvironment({ timeOfDay: 13.5, weather: 1, windSpeed: 0.25, cloudDensity: 0.45, fogDensity: 0.72 });
+      else if (envPhase === 2) this.sky.setEnvironment({ timeOfDay: 18.7, weather: 2, windSpeed: 0.35, cloudDensity: 0.74, fogDensity: 0.88 });
+      else this.sky.setEnvironment({ timeOfDay: 22.4, weather: 3, windSpeed: 0.5, cloudDensity: 0.95, fogDensity: 1.08 });
+    }
+
+    this.perfVehicleSwitchCooldown = Math.max(0, this.perfVehicleSwitchCooldown - 1 / 60);
+
+    if (this.mountedVehicleId !== this.perfLastMountedVehicleId) {
+      this.perfLastMountedVehicleId = this.mountedVehicleId;
+      this.perfMountedSince = this.sandboxMotionTime;
+    }
+
+    // Keep vehicle phases moving: dismount after a fixed mounted window,
+    // then remount target type from current benchmark slot.
+    if (this.mountedVehicleId !== 0) {
+      const mountedFor = this.sandboxMotionTime - this.perfMountedSince;
+      if (mountedFor > 6.8 && this.perfVehicleSwitchCooldown <= 0 && this.conn) {
+        this.conn.reducers.interactVehicle({});
+        this.perfVehicleSwitchCooldown = 1.1;
+      }
+      return;
+    }
+
+    if (this.perfVehicleSwitchCooldown > 0) return;
+    const slot = (Math.floor(this.sandboxMotionTime / 14) % 2) as 0 | 1;
+    const previousMode = this.perfSceneVehicleMode;
+    this.perfSceneVehicleMode = slot;
+
+    const desiredType = slot === 0 ? VEHICLE_TYPES.FighterJet : VEHICLE_TYPES.Helicopter;
+    const nearest = this.vehicleManager.findNearestVehicleOfType(desiredType, this.camera.position);
+    if (!nearest) return;
+
+    const offset = Math.min(Math.max(1.5, nearest.mountRange * 0.55), nearest.mountRange - 0.1);
+    this.camera.position.set(nearest.position.x, nearest.position.y + 2.0, nearest.position.z + offset);
+    this.controls.resetVelocity();
+    this.orientSandboxLookToward(nearest.position.x, nearest.position.y + 1.2, nearest.position.z);
+    if (this.conn) this.conn.reducers.interactVehicle({});
+    this.perfVehicleSwitchCooldown = 1.5;
+
+    // If mount did not occur after a short delay, allow retries on next pass.
+    window.setTimeout(() => {
+      if (this.perfBenchmarkSceneEnabled && this.mountedVehicleId === 0 && this.perfSceneVehicleMode === slot) {
+        this.perfSceneVehicleMode = previousMode;
+      }
+    }, 900);
+  }
+
+  private applySandboxMotion(delta: number): void {
+    if (!this.sandboxMotionEnabled || this.mountedVehicleId !== 0 || this.health <= 0 || !this.controls.inputEnabled) {
+      return;
+    }
+    if (!this.perfBenchmarkSceneEnabled) return;
+
+    this.ensurePerfAmmoAndVehicle();
+
+    this.sandboxMotionTime += delta;
+    this.sandboxPhaseTime += delta;
+    let fwd = false;
+    let back = false;
+    let left = false;
+    let right = false;
+    let sprint = false;
+
+    if (this.sandboxMotionMode === 'chunk-hop') {
+      if (this.sandboxPhaseTime > 3.5 || this.sandboxTeleportsDone === 0) {
+        this.sandboxPhaseTime = 0;
+        this.sandboxTeleportsDone++;
+        const pt = this.sandboxLanePoint(this.sandboxTeleportsDone);
+        this.teleportSandboxCamera(pt.x, pt.z);
+      }
+      sprint = true;
+    } else if (this.sandboxMotionMode === 'combat-chaos') {
+      if (this.sandboxPhaseTime > 2.4 || this.sandboxTeleportsDone === 0) {
+        this.sandboxPhaseTime = 0;
+        this.sandboxTeleportsDone++;
+        const centerX = WORLD_X * 0.5;
+        const centerZ = WORLD_Z * 0.5;
+        const ring = 48;
+        const ang = this.sandboxTeleportsDone * 1.3;
+        this.teleportSandboxCamera(centerX + Math.cos(ang) * ring, centerZ + Math.sin(ang) * ring);
+      }
+      sprint = true;
+      this.emitSandboxChaos(delta);
+    } else if (this.sandboxMotionMode === 'mixed-teleport') {
+      if (this.sandboxPhaseTime > 2.8) {
+        this.sandboxPhaseTime = 0;
+        this.sandboxTeleportsDone++;
+        const pt = this.sandboxLanePoint(this.sandboxTeleportsDone + 1);
+        this.teleportSandboxCamera(pt.x + 20, pt.z + 12);
+      }
+      sprint = true;
+      this.emitSandboxChaos(delta);
+    }
+
+    this.controls.moveForward = fwd;
+    this.controls.moveBackward = back;
+    this.controls.moveLeft = left;
+    this.controls.moveRight = right;
+    this.mouseDown = false;
+    this.controls.qPressed = false;
+    this.controls.ePressed = false;
+    this.controls.setSandboxSprint?.(sprint);
+
+    if (this.sandboxMotionMode === 'idle') {
+      this.removeSandboxRemotePlayers();
+    }
+  }
   private onMouseUp = (e: MouseEvent): void => {
     if (e.button === 0) this.mouseDown = false;
   };
   private onKeyDown = (e: KeyboardEvent): void => {
+    if (this.sandboxMotionEnabled) return;
     if (this.chatOpen || this.loadoutMenuOpen) return;
     if (e.code === 'KeyF') {
       if (this.mountedVehicleId !== 0) {
@@ -1925,6 +2258,7 @@ export class Engine {
 
   private animate = (timestamp?: DOMHighResTimeStamp): void => {
     this.animationId = requestAnimationFrame(this.animate);
+    const frameStartMs = performance.now();
     this.clock.update(timestamp);
     const delta = Math.min(this.clock.getDelta(), 0.1);
     this.elapsedTime += delta;
@@ -1993,6 +2327,7 @@ export class Engine {
 
     const startupLocked = !this.chunkStreamer.startupWorldReady;
     this.updateInputState(delta, startupLocked);
+    this.applySandboxMotion(delta);
     this.updateGameSystems(delta);
     this.updateFeedback(delta);
 
@@ -2006,7 +2341,7 @@ export class Engine {
     if (this.mountedVehicleId !== 0) {
       this.vehicleManager.syncMountedCameraToVehicle();
       this.vehicleManager.syncVehicleInput();
-      if (this.mouseDown && this.controls.locked) {
+      if ((this.mouseDown || this.autoFireHeld) && this.controls.locked) {
         this.tryVehicleFire();
       }
     }
@@ -2077,6 +2412,8 @@ export class Engine {
     this.renderFrame(delta);
     this.pushHudState(startupProgress);
     this.netDiag.refreshOverlay();
+    this.__perfLastState.frameMs = performance.now() - frameStartMs;
+    this.__perfLastState.playerCount = this.cachedPlayerCount;
   };
 
   private updateInputState(delta: number, startupLocked: boolean): void {
@@ -2149,7 +2486,7 @@ export class Engine {
     this.wasSliding = this.controls.isSliding;
 
     // Auto-fire
-    if (this.mouseDown && this.controls.locked) {
+    if ((this.mouseDown || this.autoFireHeld) && this.controls.locked) {
       if (this.mountedVehicleId === 0) this.tryFire();
     }
 

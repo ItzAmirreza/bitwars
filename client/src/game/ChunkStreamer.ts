@@ -56,6 +56,8 @@ export interface ChunkStreamerContext {
   onChunkLoaded: (cx: number, cy: number, cz: number, decoded: Uint8Array) => void;
   /** Callback invoked before a chunk is unloaded so the Engine can clean up related state (lantern lights, etc.) */
   onChunkUnloading: (chunkId: number) => void;
+  perfSceneEnabled: () => boolean;
+  getPerfSceneChunkData: (cx: number, cy: number, cz: number) => Uint8Array;
 }
 
 export class ChunkStreamer {
@@ -90,7 +92,13 @@ export class ChunkStreamer {
   }
 
   rehydrateSubscribedChunks(maxNewChunks = Number.POSITIVE_INFINITY): number {
-    if (!this.ctx.conn || maxNewChunks <= 0) return 0;
+    if (maxNewChunks <= 0) return 0;
+
+    if (this.ctx.perfSceneEnabled()) {
+      return this.rehydratePerfSceneChunks(maxNewChunks);
+    }
+
+    if (!this.ctx.conn) return 0;
 
     const [anchorCx, anchorCz] = this.getLoadAnchorChunk();
     const viewDistSq = (VIEW_DISTANCE + UNLOAD_BUFFER) * (VIEW_DISTANCE + UNLOAD_BUFFER);
@@ -118,9 +126,37 @@ export class ChunkStreamer {
     return loaded;
   }
 
+  private rehydratePerfSceneChunks(maxNewChunks: number): number {
+    const [anchorCx, anchorCz] = this.getLoadAnchorChunk();
+    const viewDistSq = (VIEW_DISTANCE + UNLOAD_BUFFER) * (VIEW_DISTANCE + UNLOAD_BUFFER);
+    const maxCx = Math.ceil(WORLD_X / CHUNK);
+    const maxCz = Math.ceil(WORLD_Z / CHUNK);
+
+    let loaded = 0;
+    for (let cz = Math.max(0, anchorCz - (VIEW_DISTANCE + UNLOAD_BUFFER)); cz <= Math.min(maxCz - 1, anchorCz + (VIEW_DISTANCE + UNLOAD_BUFFER)); cz++) {
+      for (let cx = Math.max(0, anchorCx - (VIEW_DISTANCE + UNLOAD_BUFFER)); cx <= Math.min(maxCx - 1, anchorCx + (VIEW_DISTANCE + UNLOAD_BUFFER)); cx++) {
+        const dx = cx - anchorCx;
+        const dz = cz - anchorCz;
+        if (dx * dx + dz * dz > viewDistSq) continue;
+
+        for (let cy = 0; cy < NUM_CHUNKS_Y; cy++) {
+          if (this.ctx.world.isChunkLoaded(cx, cy, cz)) continue;
+          const data = this.ctx.getPerfSceneChunkData(cx, cy, cz);
+          this.ctx.world.loadChunk(cx, cy, cz, data);
+          this.ctx.onChunkLoaded(cx, cy, cz, data);
+          this.pendingChunkRequests.delete(packChunkId(cx, cy, cz));
+          loaded++;
+          if (loaded >= maxNewChunks) return loaded;
+        }
+      }
+    }
+
+    return loaded;
+  }
+
   /** Request chunks near the player that aren't loaded yet */
   updateChunkLoading(): void {
-    if (!this.ctx.conn) return;
+    if (!this.ctx.conn && !this.ctx.perfSceneEnabled()) return;
 
     this.reapPendingChunkRequests();
 
@@ -182,12 +218,22 @@ export class ChunkStreamer {
     }
     if (batch.length > 0) {
       const requestedIds = [...batch];
-      void this.ctx.conn.reducers.requestChunks({ chunkIds: requestedIds }).catch((error: unknown) => {
-        for (let i = requestedIds.length - 1; i >= 0; i--) {
+      if (this.ctx.perfSceneEnabled()) {
+        for (let i = 0; i < requestedIds.length; i++) {
           const id = requestedIds[i]!;
+          const [pcx, pcy, pcz] = unpackChunkId(id);
+          const decoded = this.ctx.getPerfSceneChunkData(pcx, pcy, pcz);
+          this.ctx.world.loadChunk(pcx, pcy, pcz, decoded);
+          this.ctx.onChunkLoaded(pcx, pcy, pcz, decoded);
           this.pendingChunkRequests.delete(id);
-          if (!this.queuedChunkRequests.has(id) && !this.bootstrapQueued.has(id)) {
-            this.chunkRequestQueue.unshift(id);
+        }
+      } else {
+        void this.ctx.conn!.reducers.requestChunks({ chunkIds: requestedIds }).catch((error: unknown) => {
+          for (let i = requestedIds.length - 1; i >= 0; i--) {
+            const id = requestedIds[i]!;
+            this.pendingChunkRequests.delete(id);
+            if (!this.queuedChunkRequests.has(id) && !this.bootstrapQueued.has(id)) {
+              this.chunkRequestQueue.unshift(id);
             this.queuedChunkRequests.add(id);
           }
         }
@@ -197,8 +243,9 @@ export class ChunkStreamer {
           this.requestBackoffUntilMs = performance.now() + 1000;
           return;
         }
-        console.warn('[BitWars] request_chunks failed:', message);
-      });
+          console.warn('[BitWars] request_chunks failed:', message);
+        });
+      }
     }
 
     // Unload chunks that are too far away (only check when player moved)
@@ -354,6 +401,18 @@ export class ChunkStreamer {
   }
 
   private hydrateChunkFromSubscription(id: number): boolean {
+    if (this.ctx.perfSceneEnabled()) {
+      const [cx, cy, cz] = unpackChunkId(id);
+      if (this.ctx.world.isChunkLoaded(cx, cy, cz)) return true;
+      const decoded = this.ctx.getPerfSceneChunkData(cx, cy, cz);
+      this.ctx.world.loadChunk(cx, cy, cz, decoded);
+      this.ctx.onChunkLoaded(cx, cy, cz, decoded);
+      this.pendingChunkRequests.delete(id);
+      this.queuedChunkRequests.delete(id);
+      this.bootstrapQueued.delete(id);
+      return true;
+    }
+
     if (!this.ctx.conn) return false;
 
     const table = this.ctx.conn.db.world_chunk as any;
@@ -439,6 +498,21 @@ export class ChunkStreamer {
     this.bootstrapActive = true;
     this.startupWorldReady = false;
     this.startupProgressPrev = 0;
+    this.startupProgressStallTime = 0;
+    this.requestBackoffUntilMs = 0;
+    this.lastPlayerCx = -1;
+    this.lastPlayerCz = -1;
+  }
+
+  setStartupReadyForPerfScene(): void {
+    this.pendingChunkRequests.clear();
+    this.queuedChunkRequests.clear();
+    this.chunkRequestQueue.length = 0;
+    this.bootstrapRequestQueue.length = 0;
+    this.bootstrapQueued.clear();
+    this.bootstrapActive = false;
+    this.startupWorldReady = true;
+    this.startupProgressPrev = 1;
     this.startupProgressStallTime = 0;
     this.requestBackoffUntilMs = 0;
     this.lastPlayerCx = -1;

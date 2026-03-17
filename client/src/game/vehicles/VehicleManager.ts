@@ -206,6 +206,35 @@ export default class VehicleManager {
     return null;
   }
 
+  findNearestVehicleOfType(typeId: number, around: THREE.Vector3): {
+    entityId: number;
+    position: THREE.Vector3;
+    mountRange: number;
+  } | null {
+    let best: { entityId: number; position: THREE.Vector3; mountRange: number } | null = null;
+    let bestD2 = Number.POSITIVE_INFINITY;
+
+    for (const [entityId, inst] of this.vehicleInstances) {
+      if (inst.type !== typeId) continue;
+      const mesh = this.vehicles.get(entityId);
+      if (!mesh) continue;
+      const vt = this.vehicleTypes.get(inst.type);
+      if (!vt) continue;
+
+      const d2 = around.distanceToSquared(mesh.position);
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = {
+          entityId,
+          position: mesh.position.clone(),
+          mountRange: vt.getMountRange(),
+        };
+      }
+    }
+
+    return best;
+  }
+
   findEntityRow(entityId: number): any | null {
     if (!this.engine.conn) return null;
     const table = (this.engine.conn.db as any).entity;

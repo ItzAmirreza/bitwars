@@ -120,6 +120,7 @@ export class FPSControls {
   private minZ: number;
   private maxZ: number;
   private domElement: HTMLElement;
+  private perfSandboxExclusive = false;
 
   constructor(
     camera: THREE.PerspectiveCamera,
@@ -211,6 +212,21 @@ export class FPSControls {
     if (!enabled) this.sprintToggleActive = false;
   }
 
+  setPerfSandboxExclusive(enabled: boolean): void {
+    this.perfSandboxExclusive = enabled;
+    if (enabled) {
+      this.releaseAllInput();
+    }
+  }
+
+  setSandboxSprint(held: boolean): void {
+    if (this.sprintToggleSetting) {
+      this.sprintToggleActive = held;
+    } else {
+      this.shiftDown = held;
+    }
+  }
+
   get shiftHeld(): boolean {
     return this.shiftDown;
   }
@@ -241,6 +257,7 @@ export class FPSControls {
   }
 
   private onMouseMove = (event: MouseEvent): void => {
+    if (this.perfSandboxExclusive) return;
     if (!this.locked) return;
     this.euler.setFromQuaternion(this.camera.quaternion);
     this.euler.y -= event.movementX * this.sensitivity;
@@ -264,6 +281,7 @@ export class FPSControls {
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
+    if (this.perfSandboxExclusive) return;
     if (!this.inputEnabled) return;
     switch (event.code) {
       case 'KeyW': case 'ArrowUp': this.moveForward = true; break;
@@ -308,6 +326,7 @@ export class FPSControls {
   };
 
   private onKeyUp = (event: KeyboardEvent): void => {
+    if (this.perfSandboxExclusive) return;
     if (!this.inputEnabled) return;
     switch (event.code) {
       case 'KeyW': case 'ArrowUp': this.moveForward = false; break;
