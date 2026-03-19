@@ -297,7 +297,7 @@ export function GameScreen() {
   const runPerfHarness = useCallback(async () => {
     const harness = perfHarnessRef.current;
     if (!harness || perfRunning) return;
-    const ok = harness.start(60, 'full');
+    const ok = harness.start(65, 'full');
     if (!ok) return;
 
     const reopenPerfPanelAfterRun = showPerfPanel;
@@ -318,7 +318,7 @@ export function GameScreen() {
       if (!h) return;
       const run = await h.tick();
       const elapsed = (performance.now() - started) / 1000;
-      setPerfProgress(Math.max(0, Math.min(1, elapsed / 60)));
+      setPerfProgress(Math.max(0, Math.min(1, elapsed / 65)));
       if (run) {
         if (perfTickerRef.current !== null) {
           clearInterval(perfTickerRef.current);

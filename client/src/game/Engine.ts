@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, BlockType, BLOCK_COLORS } from './VoxelWorld';
+import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, BLOCK_COLORS } from './VoxelWorld';
 import { FPSControls } from './FPSControls';
 import { WeaponSystem, WEAPONS } from './Weapons';
 import { AudioSystem } from './AudioSystem';
@@ -20,7 +20,7 @@ import { InfantryFireController } from './InfantryFireController';
 import type { InfantryFireContext } from './InfantryFireController';
 import { VehicleFireController } from './VehicleFireController';
 import type { VehicleFireContext } from './VehicleFireController';
-import { ENTITY_KINDS, VEHICLE_TYPES } from '../shared-config';
+import { ENTITY_KINDS } from '../shared-config';
 import { GRENADE } from '../shared-config';
 import type { DbConnection } from '../module_bindings';
 import type { GameSettings } from '../store';
@@ -153,6 +153,7 @@ export class Engine {
   private clock: THREE.Timer;
   private container: HTMLElement;
   private conn: DbConnection | null;
+  private connStashedForPerf: DbConnection | null = null; // real conn saved during benchmark
   private onStateChange: (state: EngineState) => void;
   private username: string | null;
 
@@ -180,12 +181,8 @@ export class Engine {
     'perf-bot-5', 'perf-bot-6', 'perf-bot-7', 'perf-bot-8',
   ];
   private perfBenchmarkSceneEnabled = false;
-  private perfSceneVehicleMode: 0 | 1 = 0;
   private sandboxRngState = 0x12345678;
-  private perfVehicleSwitchCooldown = 0;
   private perfEnvironmentPhase = -1;
-  private perfLastMountedVehicleId = 0;
-  private perfMountedSince = 0;
   private sandboxWeaponCycleTimer = 0;
   private sandboxBotMuzzleTimer = 0;
   private sandboxDamagePulseTimer = 0;
@@ -663,14 +660,22 @@ export class Engine {
   setPerfBenchmarkSceneEnabled(enabled: boolean): void {
     this.perfBenchmarkSceneEnabled = enabled;
     if (enabled) {
+      // Force dismount BEFORE nulling conn so it actually reaches the server
+      if (this.mountedVehicleId !== 0 && this.conn) {
+        this.conn.reducers.interactVehicle({});
+      }
+      // Stash the real server connection and null it out.
+      // This suppresses ALL server reducer calls (position, fire, loadout, etc.)
+      // so the benchmark is purely client-side with zero server interaction.
+      this.connStashedForPerf = this.conn;
+      this.conn = null;
       this.loadPerfBenchmarkScene();
     }
     if (!enabled) {
-      this.perfSceneVehicleMode = 0;
-      this.perfVehicleSwitchCooldown = 0;
+      // Restore the real connection before restoring the server world
+      this.conn = this.connStashedForPerf;
+      this.connStashedForPerf = null;
       this.perfEnvironmentPhase = -1;
-      this.perfLastMountedVehicleId = 0;
-      this.perfMountedSince = 0;
       this.sandboxWeaponCycleTimer = 0;
       this.sandboxBotMuzzleTimer = 0;
       this.sandboxDamagePulseTimer = 0;
@@ -706,6 +711,8 @@ export class Engine {
   private loadPerfBenchmarkScene(): void {
     // Deterministic benchmark mode; keep chunk streaming behavior realistic by
     // letting ChunkStreamer lazily page in generated benchmark chunks.
+    // Note: vehicle dismount is handled in setPerfBenchmarkSceneEnabled before conn is stashed.
+
     this.world.clearAll(this.scene);
     this.chunkStreamer.resetAll();
     this.lanterns.reset(this.getLanternContext());
@@ -718,8 +725,6 @@ export class Engine {
 
     this.perfEnvironmentPhase = -1;
     this.sky.setEnvironment({ timeOfDay: 9.5, weather: 0, windSpeed: 0.2, cloudDensity: 0.2, fogDensity: 0.65 });
-    this.perfLastMountedVehicleId = 0;
-    this.perfMountedSince = 0;
     this.sandboxWeaponCycleTimer = 0;
     this.sandboxBotMuzzleTimer = 0;
     this.sandboxDamagePulseTimer = 0;
@@ -927,17 +932,28 @@ export class Engine {
       }
     }
 
-    // ── Weapon cycling: switch to next weapon every 5s ──
+    // ── Weapon cycling: rotate loadout every 5s to hit all 5 weapons ──
+    // setCurrentWeapon only works for weapons in the 3-slot loadout, so we
+    // must also rotate the loadout itself to reach weapons 3 and 4.
     this.sandboxWeaponCycleTimer -= delta;
     if (this.sandboxWeaponCycleTimer <= 0) {
       this.sandboxWeaponCycleTimer = 5.0;
-      const next = (this.weapons.currentWeapon + 1) % WEAPONS.length;
-      this.weapons.setCurrentWeapon(next);
+      const loadouts: [number, number, number][] = [
+        [0, 1, 2],  // Rifle, Shotgun, RPG
+        [3, 4, 0],  // Machine Gun, Grenade Launcher, Rifle
+        [1, 2, 3],  // Shotgun, RPG, Machine Gun
+        [4, 0, 1],  // Grenade Launcher, Rifle, Shotgun
+        [2, 3, 4],  // RPG, Machine Gun, Grenade Launcher
+      ];
+      const cycle = Math.floor(this.sandboxMotionTime / 5) % loadouts.length;
+      const targetLoadout = loadouts[cycle]!;
+      this.weapons.setLoadout(targetLoadout);
+      // Switch to slot 0 of the new loadout (the first weapon in each set)
+      this.weapons.switchToSlot(0);
     }
 
-    // ── Environment phase sweep: 5 phases x 12s = 60s total ──
-    // Runs unconditionally so it doesn't stall when vehicle-mounted.
-    const envPhase = Math.floor(this.sandboxMotionTime / 12) % 5;
+    // ── Environment phase sweep: 5 phases x 13s = 65s total ──
+    const envPhase = Math.floor(this.sandboxMotionTime / 13) % 5;
     if (envPhase !== this.perfEnvironmentPhase) {
       this.perfEnvironmentPhase = envPhase;
       if (envPhase === 0) this.sky.setEnvironment({ timeOfDay: 9.5, weather: 0, windSpeed: 0.2, cloudDensity: 0.2, fogDensity: 0.65 });
@@ -947,47 +963,10 @@ export class Engine {
       else this.sky.setEnvironment({ timeOfDay: 4.5, weather: 4, windSpeed: 0.6, cloudDensity: 1.0, fogDensity: 1.2 });
     }
 
-    // ── Vehicle mount/dismount cycling ──
-    this.perfVehicleSwitchCooldown = Math.max(0, this.perfVehicleSwitchCooldown - delta);
-
-    if (this.mountedVehicleId !== this.perfLastMountedVehicleId) {
-      this.perfLastMountedVehicleId = this.mountedVehicleId;
-      this.perfMountedSince = this.sandboxMotionTime;
-    }
-
-    // Dismount after a fixed mounted window
-    if (this.mountedVehicleId !== 0) {
-      const mountedFor = this.sandboxMotionTime - this.perfMountedSince;
-      if (mountedFor > 6.8 && this.perfVehicleSwitchCooldown <= 0 && this.conn) {
-        this.conn.reducers.interactVehicle({});
-        this.perfVehicleSwitchCooldown = 1.1;
-      }
-      return;
-    }
-
-    // Try mounting a vehicle
-    if (this.perfVehicleSwitchCooldown > 0) return;
-    const slot = (Math.floor(this.sandboxMotionTime / 14) % 2) as 0 | 1;
-    const previousMode = this.perfSceneVehicleMode;
-    this.perfSceneVehicleMode = slot;
-
-    const desiredType = slot === 0 ? VEHICLE_TYPES.FighterJet : VEHICLE_TYPES.Helicopter;
-    const nearest = this.vehicleManager.findNearestVehicleOfType(desiredType, this.camera.position);
-    if (!nearest) return;
-
-    const offset = Math.min(Math.max(1.5, nearest.mountRange * 0.55), nearest.mountRange - 0.1);
-    this.camera.position.set(nearest.position.x, nearest.position.y + 2.0, nearest.position.z + offset);
-    this.controls.resetVelocity();
-    this.orientSandboxLookToward(nearest.position.x, nearest.position.y + 1.2, nearest.position.z);
-    if (this.conn) this.conn.reducers.interactVehicle({});
-    this.perfVehicleSwitchCooldown = 1.5;
-
-    // If mount did not occur after a short delay, allow retries on next pass.
-    window.setTimeout(() => {
-      if (this.perfBenchmarkSceneEnabled && this.mountedVehicleId === 0 && this.perfSceneVehicleMode === slot) {
-        this.perfSceneVehicleMode = previousMode;
-      }
-    }, 900);
+    // NOTE: Vehicle mount/dismount cycling has been removed.
+    // Vehicle positions are server-spawned at non-deterministic locations,
+    // which caused random teleports mid-test, breaking reproducibility.
+    // Vehicles in the scene are still rendered by VehicleManager if they exist.
   }
 
   private applySandboxMotion(delta: number): void {
@@ -998,6 +977,12 @@ export class Engine {
     this.sandboxMotionTime += delta;
     this.updatePerfBenchmarkState(delta);
 
+    // Protect against server-side death derailing the benchmark.
+    // Force health to 100 so the player cannot die during the test.
+    if (this.perfBenchmarkSceneEnabled && this.health <= 0) {
+      this.health = 100;
+    }
+
     if (this.mountedVehicleId !== 0 || this.health <= 0 || !this.controls.inputEnabled) {
       return;
     }
@@ -1005,9 +990,6 @@ export class Engine {
 
     this.sandboxPhaseTime += delta;
     let fwd = false;
-    let back = false;
-    let left = false;
-    let right = false;
     let sprint = false;
 
     if (this.sandboxMotionMode === 'chunk-hop') {
@@ -1017,6 +999,8 @@ export class Engine {
         const pt = this.sandboxLanePoint(this.sandboxTeleportsDone);
         this.teleportSandboxCamera(pt.x, pt.z);
       }
+      // Walk forward between teleports to stress chunk streaming under movement
+      fwd = true;
       sprint = true;
     } else if (this.sandboxMotionMode === 'combat-chaos') {
       if (this.sandboxPhaseTime > 2.4 || this.sandboxTeleportsDone === 0) {
@@ -1028,23 +1012,26 @@ export class Engine {
         const ang = this.sandboxTeleportsDone * 1.3;
         this.teleportSandboxCamera(centerX + Math.cos(ang) * ring, centerZ + Math.sin(ang) * ring);
       }
+      // Walk forward between teleports to generate footsteps, head bob, and sprint FOV
+      fwd = true;
       sprint = true;
       this.emitSandboxChaos(delta);
     } else if (this.sandboxMotionMode === 'mixed-teleport') {
-      if (this.sandboxPhaseTime > 2.8) {
+      if (this.sandboxPhaseTime > 2.8 || this.sandboxTeleportsDone === 0) {
         this.sandboxPhaseTime = 0;
         this.sandboxTeleportsDone++;
         const pt = this.sandboxLanePoint(this.sandboxTeleportsDone + 1);
         this.teleportSandboxCamera(pt.x + 20, pt.z + 12);
       }
+      fwd = true;
       sprint = true;
       this.emitSandboxChaos(delta);
     }
 
     this.controls.moveForward = fwd;
-    this.controls.moveBackward = back;
-    this.controls.moveLeft = left;
-    this.controls.moveRight = right;
+    this.controls.moveBackward = false;
+    this.controls.moveLeft = false;
+    this.controls.moveRight = false;
     this.mouseDown = false;
     this.controls.qPressed = false;
     this.controls.ePressed = false;

@@ -231,9 +231,9 @@ export class PerfHarness {
     if (this.scenario === 'full') {
       const t = elapsed / 1000;
       let mode: HarnessMode;
-      if (t < 16) mode = 'chunk-hop';
-      else if (t < 40) mode = 'combat-chaos';
-      else if (t < 54) mode = 'mixed-teleport';
+      if (t < 17) mode = 'chunk-hop';
+      else if (t < 42) mode = 'combat-chaos';
+      else if (t < 57) mode = 'mixed-teleport';
       else mode = 'combat-chaos';
 
       this.currentMode = mode;
