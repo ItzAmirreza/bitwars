@@ -53,6 +53,9 @@ export interface PerfSample {
   mountedVehicle: number;
 }
 
+declare const __GIT_BRANCH__: string;
+declare const __GIT_COMMIT__: string;
+
 export interface PerfRunResult {
   id: string;
   createdAt: string;
@@ -65,6 +68,8 @@ export interface PerfRunResult {
     language: string;
     viewport: { width: number; height: number };
     gpuRenderer: string;
+    gitBranch: string;
+    gitCommit: string;
   };
   summary: {
     avgFps: number;
@@ -370,6 +375,8 @@ export class PerfHarness {
         language: navigator.language,
         viewport,
         gpuRenderer: this.hooks.getGpuRenderer(),
+        gitBranch: typeof __GIT_BRANCH__ !== 'undefined' ? __GIT_BRANCH__ : 'unknown',
+        gitCommit: typeof __GIT_COMMIT__ !== 'undefined' ? __GIT_COMMIT__ : 'unknown',
       },
       summary: {
         avgFps: round2(avg(this.samples.map((s) => s.fps))),

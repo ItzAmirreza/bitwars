@@ -350,7 +350,12 @@ export function PerfPanel(props: PerfPanelProps) {
                   padding: 0,
                 }}
               >
-                <div style={{ fontSize: '11px', color: 'var(--c-cyan)' }}>{new Date(s.createdAt).toLocaleString()}</div>
+                <div style={{ fontSize: '11px', color: 'var(--c-cyan)' }}>
+                  {s.gitBranch && s.gitBranch !== 'unknown'
+                    ? <><span style={{ color: 'var(--c-green)' }}>{s.gitBranch}</span> <span style={{ color: 'var(--c-muted)' }}>@{s.gitCommit}</span> &mdash; </>
+                    : null}
+                  {new Date(s.createdAt).toLocaleString()}
+                </div>
                 <div style={{ fontSize: '10px', color: 'var(--c-muted)' }}>
                   avg FPS {fmt(s.summary.avgFps)} | p1 FPS {fmt(s.summary.p1Fps)} | p99 {fmt(s.summary.p99FrameMs)}ms
                 </div>
@@ -370,6 +375,21 @@ export function PerfPanel(props: PerfPanelProps) {
 
           {focusRun && (
             <>
+              {focusRun.metadata?.gitBranch && focusRun.metadata.gitBranch !== 'unknown' && (
+                <div style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '12px',
+                  marginBottom: '8px',
+                  padding: '6px 8px',
+                  background: 'rgba(4,8,14,0.6)',
+                  border: '1px solid var(--c-border)',
+                }}>
+                  <span style={{ color: 'var(--c-green)' }}>{focusRun.metadata.gitBranch}</span>
+                  <span style={{ color: 'var(--c-muted)' }}> @ </span>
+                  <span style={{ color: 'var(--c-cyan)' }}>{focusRun.metadata.gitCommit}</span>
+                  <span style={{ color: 'var(--c-muted)' }}> &mdash; {new Date(focusRun.createdAt).toLocaleString()}</span>
+                </div>
+              )}
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(4, minmax(120px, 1fr))',

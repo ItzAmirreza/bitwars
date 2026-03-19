@@ -7,6 +7,8 @@ export interface PerfRunSummary {
   scenario: PerfRunResult['scenario'];
   summary: PerfRunResult['summary'];
   sampleCount: number;
+  gitBranch: string;
+  gitCommit: string;
 }
 
 const DB_NAME = 'bitwars-perf-db';
@@ -51,6 +53,8 @@ export async function savePerfRun(run: PerfRunResult): Promise<void> {
       scenario: run.scenario,
       summary: run.summary,
       sampleCount: run.samples.length,
+      gitBranch: run.metadata?.gitBranch ?? 'unknown',
+      gitCommit: run.metadata?.gitCommit ?? 'unknown',
     };
     tx.objectStore(STORE_SUMMARIES).put(summary);
     await txDone(tx);
