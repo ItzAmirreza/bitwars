@@ -56,6 +56,11 @@ export interface PerfSample {
 declare const __GIT_BRANCH__: string;
 declare const __GIT_COMMIT__: string;
 
+interface RuntimeGitMeta {
+  gitBranch: string;
+  gitCommit: string;
+}
+
 export interface PerfRunResult {
   id: string;
   createdAt: string;
@@ -192,6 +197,28 @@ export class PerfHarness {
   private scenario: PerfScenario = 'full';
   private currentMode: HarnessMode = 'idle';
 
+  private async resolveRuntimeGitMeta(): Promise<RuntimeGitMeta> {
+    const fallback: RuntimeGitMeta = {
+      gitBranch: typeof __GIT_BRANCH__ !== 'undefined' ? __GIT_BRANCH__ : 'unknown',
+      gitCommit: typeof __GIT_COMMIT__ !== 'undefined' ? __GIT_COMMIT__ : 'unknown',
+    };
+
+    try {
+      const res = await fetch(`/__bitwars_git_meta?ts=${Date.now()}`, {
+        cache: 'no-store',
+      });
+      if (!res.ok) return fallback;
+
+      const data = (await res.json()) as Partial<RuntimeGitMeta>;
+      return {
+        gitBranch: typeof data.gitBranch === 'string' && data.gitBranch.length > 0 ? data.gitBranch : fallback.gitBranch,
+        gitCommit: typeof data.gitCommit === 'string' && data.gitCommit.length > 0 ? data.gitCommit : fallback.gitCommit,
+      };
+    } catch {
+      return fallback;
+    }
+  }
+
   constructor(hooks: PerfHarnessHooks) {
     this.hooks = hooks;
     const c = hooks.getSnapshot().cameraPos;
@@ -223,7 +250,7 @@ export class PerfHarness {
     this.hooks.enablePerfBenchmarkScene(false);
     this.hooks.setSandboxAutoFire(false);
     this.hooks.setSandboxFlightPath(false, 'idle');
-    const result = this.finalize();
+    const result = await this.finalize();
     await savePerfRun(result);
     return result;
   }
@@ -307,7 +334,7 @@ export class PerfHarness {
       this.hooks.enablePerfBenchmarkScene(false);
       this.hooks.setSandboxAutoFire(false);
       this.hooks.setSandboxFlightPath(false, 'idle');
-      const result = this.finalize();
+      const result = await this.finalize();
       await savePerfRun(result);
       return result;
     }
@@ -350,10 +377,11 @@ export class PerfHarness {
     await savePerfRun(run);
   }
 
-  private finalize(): PerfRunResult {
+  private async finalize(): Promise<PerfRunResult> {
     const fps = this.samples.map((s) => s.fps).sort((a, b) => a - b);
     const frameMs = this.samples.map((s) => s.frameMs).sort((a, b) => a - b);
     const cpuMs = this.samples.map((s) => s.cpuFrameMs).sort((a, b) => a - b);
+    const gitMeta = await this.resolveRuntimeGitMeta();
 
     const worldReadyCount = this.samples.reduce((acc, s) => acc + (s.worldReady > 0 ? 1 : 0), 0);
     const heapUsed = this.samples.map((s) => s.jsHeapUsedMB);
@@ -375,8 +403,8 @@ export class PerfHarness {
         language: navigator.language,
         viewport,
         gpuRenderer: this.hooks.getGpuRenderer(),
-        gitBranch: typeof __GIT_BRANCH__ !== 'undefined' ? __GIT_BRANCH__ : 'unknown',
-        gitCommit: typeof __GIT_COMMIT__ !== 'undefined' ? __GIT_COMMIT__ : 'unknown',
+        gitBranch: gitMeta.gitBranch,
+        gitCommit: gitMeta.gitCommit,
       },
       summary: {
         avgFps: round2(avg(this.samples.map((s) => s.fps))),
