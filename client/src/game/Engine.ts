@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, BLOCK_COLORS } from './VoxelWorld';
+import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, BLOCK_COLORS, type ChunkApplyBudget } from './VoxelWorld';
 import { FPSControls } from './FPSControls';
 import { WeaponSystem, WEAPONS } from './Weapons';
 import { AudioSystem } from './AudioSystem';
@@ -229,6 +229,13 @@ export class Engine {
   private currentShadowCastRadiusChunks = 7;
   private currentRebuildBudgetMoving = CHUNK_REBUILD_BUDGET_MOVING;
   private currentRebuildBudgetIdle = CHUNK_REBUILD_BUDGET_IDLE;
+  private currentMeshApplyBudgetMsMoving = 1.1;
+  private currentMeshApplyBudgetMsIdle = 1.6;
+  private readonly bootstrapChunkApplyBudget: ChunkApplyBudget = {
+    maxChunks: CHUNK_REBUILD_BUDGET_BOOTSTRAP,
+    maxBuildChunks: CHUNK_REBUILD_BUDGET_BOOTSTRAP,
+    maxApplyMs: 3.2,
+  };
   private currentChunkStreamIntervalFrames = CHUNK_STREAM_INTERVAL_FRAMES;
   private shadowRefreshTimer = 0;
 
@@ -327,7 +334,7 @@ export class Engine {
       this.camera.position.y,
       this.camera.position.z,
     );
-    this.world.rebuildDirtyChunks(this.scene, CHUNK_REBUILD_BUDGET_BOOTSTRAP);
+    this.world.rebuildDirtyChunks(this.scene, this.bootstrapChunkApplyBudget);
 
     // ── Ground plane ──
     const groundGeo = new THREE.PlaneGeometry(2048, 2048);
@@ -459,6 +466,9 @@ export class Engine {
       : 0;
     this.currentRebuildBudgetMoving = Math.max(4, Math.round(CHUNK_REBUILD_BUDGET_MOVING * budgetScale));
     this.currentRebuildBudgetIdle = Math.max(8, Math.round(CHUNK_REBUILD_BUDGET_IDLE * budgetScale));
+    const applyBudgetScale = [1.0, 0.86, 0.72, 0.56][this.adaptiveTier] ?? 1.0;
+    this.currentMeshApplyBudgetMsMoving = Math.max(0.45, 1.1 * applyBudgetScale);
+    this.currentMeshApplyBudgetMsIdle = Math.max(0.7, 1.6 * applyBudgetScale);
 
     const nextStreamInterval = this.adaptiveTier >= 3 ? 4 : this.adaptiveTier >= 2 ? 3 : CHUNK_STREAM_INTERVAL_FRAMES;
     if (force || this.currentChunkStreamIntervalFrames !== nextStreamInterval) {
@@ -2500,8 +2510,13 @@ export class Engine {
     const isMoving = this.controls.moveForward || this.controls.moveBackward
       || this.controls.moveLeft || this.controls.moveRight
       || this.controls.isSliding || !this.controls.onGround;
-    const baseBudget = isMoving ? this.currentRebuildBudgetMoving : this.currentRebuildBudgetIdle;
-    this.world.rebuildDirtyChunks(this.scene, baseBudget);
+    const maxBuildChunks = isMoving ? this.currentRebuildBudgetMoving : this.currentRebuildBudgetIdle;
+    const maxApplyMs = isMoving ? this.currentMeshApplyBudgetMsMoving : this.currentMeshApplyBudgetMsIdle;
+    this.world.rebuildDirtyChunks(this.scene, {
+      maxChunks: maxBuildChunks,
+      maxBuildChunks,
+      maxApplyMs,
+    });
 
     this.shadowRefreshTimer -= delta;
     if (this.shadowRefreshTimer <= 0) {

@@ -10,7 +10,7 @@ import type { ProjectileManager } from './ProjectileManager';
 import type { ProjectileImpact } from './ProjectileManager';
 import type { FPSControls } from './FPSControls';
 import type { DbConnection } from '../module_bindings';
-import type { VoxelWorld } from './VoxelWorld';
+import type { ChunkApplyBudget, VoxelWorld } from './VoxelWorld';
 
 /** Minimal interface exposing only the Engine members InfantryFireController needs. */
 export interface InfantryFireContext {
@@ -42,6 +42,11 @@ export interface InfantryFireContext {
 
 export class InfantryFireController {
   private ctx: InfantryFireContext;
+  private readonly impactChunkApplyBudget: ChunkApplyBudget = {
+    maxChunks: 32,
+    maxBuildChunks: 32,
+    maxApplyMs: 2.0,
+  };
 
   constructor(ctx: InfantryFireContext) {
     this.ctx = ctx;
@@ -178,7 +183,7 @@ export class InfantryFireController {
     }
 
     // Rebuild affected chunks (capped to avoid frame spikes from large backlogs)
-    ctx.world.rebuildDirtyChunks(ctx.scene, 32);
+    ctx.world.rebuildDirtyChunks(ctx.scene, this.impactChunkApplyBudget);
   }
 
   // ── PROJECTILE IMPACT CALLBACK ──
@@ -250,7 +255,7 @@ export class InfantryFireController {
     }
 
     // Rebuild affected chunks (capped to avoid frame spikes from large backlogs)
-    ctx.world.rebuildDirtyChunks(ctx.scene, 32);
+    ctx.world.rebuildDirtyChunks(ctx.scene, this.impactChunkApplyBudget);
 
     // Server sync: route to correct reducer
     if (impact.isVehicle) {

@@ -4,6 +4,12 @@ import { buildChunkMeshData } from './chunkMeshing';
 import type { ChunkMeshBuildInput, ChunkMeshData, ChunkNeighborData } from './chunkMeshing';
 import type { ChunkMeshWorkerRequest, ChunkMeshWorkerResponse, PendingMeshJob, CompletedMeshJob } from './chunkMeshingWorkerTypes';
 
+export interface ChunkApplyBudget {
+  maxChunks: number;
+  maxBuildChunks?: number;
+  maxApplyMs?: number;
+}
+
 export const CHUNK = WORLD_CONFIG.chunkSize;
 export const WORLD_X = WORLD_CONFIG.sizeX;
 export const WORLD_Y = WORLD_CONFIG.sizeY;
@@ -317,10 +323,14 @@ export class VoxelWorld {
   private anchorY = 0;
   private anchorZ = 0;
 
-  rebuildDirtyChunks(scene: THREE.Scene, maxChunks = Number.POSITIVE_INFINITY): number {
+  rebuildDirtyChunks(scene: THREE.Scene, budget: number | ChunkApplyBudget = Number.POSITIVE_INFINITY): number {
+    const maxChunks = typeof budget === 'number' ? budget : budget.maxChunks;
+    const maxBuildChunks = typeof budget === 'number' ? maxChunks : Math.max(0, budget.maxBuildChunks ?? maxChunks);
+    const maxApplyMs = typeof budget === 'number' ? Number.POSITIVE_INFINITY : Math.max(0, budget.maxApplyMs ?? Number.POSITIVE_INFINITY);
+
     if (maxChunks <= 0) return 0;
 
-    let rebuilt = this.flushCompletedJobs(scene, maxChunks);
+    let rebuilt = this.flushCompletedJobs(scene, maxChunks, maxApplyMs);
     if (rebuilt >= maxChunks || this.dirtyChunks.size === 0) return rebuilt;
 
     const anchorCx = Math.floor(this.anchorX / CHUNK);
@@ -336,8 +346,10 @@ export class VoxelWorld {
       return da - db;
     });
 
+    let built = 0;
     for (const id of dirtyIds) {
       if (rebuilt >= maxChunks) break;
+      if (built >= maxBuildChunks) break;
       if (!this.chunks.has(id)) {
         this.dirtyChunks.delete(id);
         continue;
@@ -356,10 +368,7 @@ export class VoxelWorld {
       const mesh = this.buildMeshDataLocally(cx, cy, cz);
       this.applyMesh(scene, id, mesh);
       rebuilt++;
-    }
-
-    if (rebuilt < maxChunks) {
-      rebuilt += this.flushCompletedJobs(scene, maxChunks - rebuilt);
+      built++;
     }
 
     return rebuilt;
@@ -422,11 +431,17 @@ export class VoxelWorld {
     return neighbors;
   }
 
-  private flushCompletedJobs(scene: THREE.Scene, maxToApply: number): number {
+  private flushCompletedJobs(scene: THREE.Scene, maxToApply: number, maxApplyMs = Number.POSITIVE_INFINITY): number {
     if (maxToApply <= 0 || this.completedJobs.length === 0) return 0;
+
+    const start = maxApplyMs === Number.POSITIVE_INFINITY ? 0 : performance.now();
 
     let applied = 0;
     while (applied < maxToApply && this.completedJobs.length > 0) {
+      if (maxApplyMs !== Number.POSITIVE_INFINITY && (performance.now() - start) >= maxApplyMs) {
+        break;
+      }
+
       const job = this.completedJobs.pop()!;
       if (!this.chunks.has(job.chunkId)) continue;
       const currentRevision = this.chunkRevision.get(job.chunkId) ?? 0;

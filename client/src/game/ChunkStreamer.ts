@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, unpackChunkId } from './VoxelWorld';
+import type { ChunkApplyBudget } from './VoxelWorld';
 import type { DbConnection } from '../module_bindings';
 import { updateWorldChunkSubscriptionAoi } from '../db';
 
@@ -18,6 +19,11 @@ const CHUNK_REQUEST_TIMEOUT_MS = 2000;
 const NUM_CHUNKS_Y = Math.ceil(WORLD_Y / CHUNK);
 const STARTUP_READY_RADIUS = 2;
 const WORLD_CHUNK_AOI_RADIUS = VIEW_DISTANCE + UNLOAD_BUFFER + 5;
+const BOOTSTRAP_APPLY_BUDGET: ChunkApplyBudget = {
+  maxChunks: CHUNK_REBUILD_BUDGET_BOOTSTRAP,
+  maxBuildChunks: CHUNK_REBUILD_BUDGET_BOOTSTRAP,
+  maxApplyMs: 2.2,
+};
 
 type ChunkOffset = { dx: number; dz: number; d2: number };
 
@@ -485,7 +491,7 @@ export class ChunkStreamer {
         this.ctx.world.markChunkDirty(cx, cy, cz);
       }
     }
-    this.ctx.world.rebuildDirtyChunks(this.ctx.scene, CHUNK_REBUILD_BUDGET_BOOTSTRAP);
+    this.ctx.world.rebuildDirtyChunks(this.ctx.scene, BOOTSTRAP_APPLY_BUDGET);
   }
 
   /** Reset all chunk streaming state (e.g. on map reset) */

@@ -7,7 +7,7 @@ import type { PhysicsSystem } from './PhysicsSystem';
 import type { ProjectileManager } from './ProjectileManager';
 import type { FPSControls } from './FPSControls';
 import type { DbConnection } from '../module_bindings';
-import type { VoxelWorld } from './VoxelWorld';
+import type { ChunkApplyBudget, VoxelWorld } from './VoxelWorld';
 import type VehicleManager from './vehicles/VehicleManager';
 import { VEHICLE_WEAPONS } from './vehicles/VehicleManager';
 
@@ -38,6 +38,11 @@ export interface VehicleFireContext {
 
 export class VehicleFireController {
   private ctx: VehicleFireContext;
+  private readonly impactChunkApplyBudget: ChunkApplyBudget = {
+    maxChunks: 32,
+    maxBuildChunks: 32,
+    maxApplyMs: 2.0,
+  };
 
   constructor(ctx: VehicleFireContext) {
     this.ctx = ctx;
@@ -241,7 +246,7 @@ export class VehicleFireController {
     );
 
     // Rebuild affected chunks (capped to avoid frame spikes from large backlogs)
-    ctx.world.rebuildDirtyChunks(ctx.scene, 32);
+    ctx.world.rebuildDirtyChunks(ctx.scene, this.impactChunkApplyBudget);
   }
 
   // ── SERVER SYNC ──
