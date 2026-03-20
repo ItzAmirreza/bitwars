@@ -41,7 +41,7 @@ export class VehicleFireController {
   private readonly impactChunkApplyBudget: ChunkApplyBudget = {
     maxChunks: 32,
     maxBuildChunks: 32,
-    maxApplyMs: 2.0,
+    maxApplyMs: 2.4,
   };
 
   constructor(ctx: VehicleFireContext) {

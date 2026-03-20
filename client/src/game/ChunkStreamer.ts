@@ -22,7 +22,7 @@ const WORLD_CHUNK_AOI_RADIUS = VIEW_DISTANCE + UNLOAD_BUFFER + 5;
 const BOOTSTRAP_APPLY_BUDGET: ChunkApplyBudget = {
   maxChunks: CHUNK_REBUILD_BUDGET_BOOTSTRAP,
   maxBuildChunks: CHUNK_REBUILD_BUDGET_BOOTSTRAP,
-  maxApplyMs: 2.2,
+  maxApplyMs: 2.8,
 };
 
 type ChunkOffset = { dx: number; dz: number; d2: number };

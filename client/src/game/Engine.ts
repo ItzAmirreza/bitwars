@@ -229,12 +229,12 @@ export class Engine {
   private currentShadowCastRadiusChunks = 7;
   private currentRebuildBudgetMoving = CHUNK_REBUILD_BUDGET_MOVING;
   private currentRebuildBudgetIdle = CHUNK_REBUILD_BUDGET_IDLE;
-  private currentMeshApplyBudgetMsMoving = 1.1;
-  private currentMeshApplyBudgetMsIdle = 1.6;
+  private currentMeshApplyBudgetMsMoving = 1.25;
+  private currentMeshApplyBudgetMsIdle = 1.9;
   private readonly bootstrapChunkApplyBudget: ChunkApplyBudget = {
     maxChunks: CHUNK_REBUILD_BUDGET_BOOTSTRAP,
     maxBuildChunks: CHUNK_REBUILD_BUDGET_BOOTSTRAP,
-    maxApplyMs: 3.2,
+    maxApplyMs: 4.0,
   };
   private currentChunkStreamIntervalFrames = CHUNK_STREAM_INTERVAL_FRAMES;
   private shadowRefreshTimer = 0;
@@ -466,9 +466,11 @@ export class Engine {
       : 0;
     this.currentRebuildBudgetMoving = Math.max(4, Math.round(CHUNK_REBUILD_BUDGET_MOVING * budgetScale));
     this.currentRebuildBudgetIdle = Math.max(8, Math.round(CHUNK_REBUILD_BUDGET_IDLE * budgetScale));
-    const applyBudgetScale = [1.0, 0.86, 0.72, 0.56][this.adaptiveTier] ?? 1.0;
-    this.currentMeshApplyBudgetMsMoving = Math.max(0.45, 1.1 * applyBudgetScale);
-    this.currentMeshApplyBudgetMsIdle = Math.max(0.7, 1.6 * applyBudgetScale);
+    const applyBudgetScale = [1.0, 0.9, 0.76, 0.62][this.adaptiveTier] ?? 1.0;
+    const baseApplyMoving = this.graphicsQuality === 'low' ? 1.05 : this.graphicsQuality === 'medium' ? 1.2 : 1.35;
+    const baseApplyIdle = this.graphicsQuality === 'low' ? 1.55 : this.graphicsQuality === 'medium' ? 1.85 : 2.15;
+    this.currentMeshApplyBudgetMsMoving = Math.max(0.5, baseApplyMoving * applyBudgetScale);
+    this.currentMeshApplyBudgetMsIdle = Math.max(0.8, baseApplyIdle * applyBudgetScale);
 
     const nextStreamInterval = this.adaptiveTier >= 3 ? 4 : this.adaptiveTier >= 2 ? 3 : CHUNK_STREAM_INTERVAL_FRAMES;
     if (force || this.currentChunkStreamIntervalFrames !== nextStreamInterval) {
