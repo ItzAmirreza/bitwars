@@ -11,6 +11,8 @@ const LANTERN_LIGHT_REFRESH_INTERVAL = 0.25;
 const LANTERN_LIGHT_MAX_DISTANCE = 36;
 const LANTERN_LIGHT_KEEP_DISTANCE = 56;
 const LANTERN_GLOW_MAX_DISTANCE = 190;
+const LANTERN_LIGHT_STICKY_DISTANCE_BONUS = 12;
+const LANTERN_LIGHT_STICKY_SECONDS = 0.45;
 
 /** Context interface for Engine dependencies that LanternSystem needs. */
 export interface LanternContext {
@@ -31,6 +33,12 @@ export class LanternSystem {
 
   // Currently active lantern point-light ids, keyed by "x,y,z" string
   activeLanternLights = new Map<string, string>();
+
+  // Reusable lantern light pool (fixed-size, avoids add/remove churn spikes)
+  private lanternPoolIds: string[] = [];
+  private lanternPoolIndexById = new Map<string, number>();
+  private lanternPoolKeyByIndex: Array<string | null> = [];
+  private lanternStickyUntilByKey = new Map<string, number>();
 
   // Reverse mapping: dynamic light id → lantern "x,y,z" key
   lanternLightKeyById = new Map<string, string>();
@@ -60,7 +68,10 @@ export class LanternSystem {
       const key = `${pos.x},${pos.y},${pos.z}`;
       const id = this.activeLanternLights.get(key);
       if (!id) continue;
-      ctx.removeDynamicLight(id);
+      const poolIndex = this.lanternPoolIndexById.get(id);
+      if (poolIndex !== undefined) {
+        this.deactivatePoolSlot(poolIndex, ctx);
+      }
     }
     this.lanternPositionsByChunk.delete(chunkId);
   }
@@ -102,15 +113,20 @@ export class LanternSystem {
 
   /** Refresh the set of active lantern point-lights based on player proximity. */
   refreshLanternLights(lanternVisibility: number, ctx: LanternContext): void {
+    this.ensureLanternPool(ctx);
+
     if (lanternVisibility <= 0.001) {
-      for (const id of Array.from(this.activeLanternLights.values())) ctx.removeDynamicLight(id);
-      this.activeLanternLights.clear();
+      for (let i = 0; i < this.lanternPoolIds.length; i++) {
+        this.deactivatePoolSlot(i, ctx);
+      }
       this.clearLanternGlows();
       return;
     }
 
     const addDistance2 = LANTERN_LIGHT_MAX_DISTANCE * LANTERN_LIGHT_MAX_DISTANCE;
     const keepDistance2 = LANTERN_LIGHT_KEEP_DISTANCE * LANTERN_LIGHT_KEEP_DISTANCE;
+    const stickyKeepDistance = LANTERN_LIGHT_KEEP_DISTANCE + LANTERN_LIGHT_STICKY_DISTANCE_BONUS;
+    const stickyKeepDistance2 = stickyKeepDistance * stickyKeepDistance;
     const chunkRadius = Math.ceil(LANTERN_LIGHT_KEEP_DISTANCE / CHUNK) + 1;
     const playerCx = Math.floor(THREE.MathUtils.clamp(ctx.camera.position.x, 0, WORLD_X - 1) / CHUNK);
     const playerCy = Math.floor(THREE.MathUtils.clamp(ctx.camera.position.y, 0, WORLD_Y - 1) / CHUNK);
@@ -138,7 +154,12 @@ export class LanternSystem {
           d2,
         };
 
-        if (d2 <= keepDistance2) keepCandidates.set(candidate.key, candidate);
+        const stickyUntil = this.lanternStickyUntilByKey.get(candidate.key) ?? 0;
+        const stickyActive = this.activeLanternLights.has(candidate.key) && ctx.elapsedTime < stickyUntil;
+
+        if (d2 <= keepDistance2 || (stickyActive && d2 <= stickyKeepDistance2)) {
+          keepCandidates.set(candidate.key, candidate);
+        }
         if (d2 <= addDistance2) addCandidates.push(candidate);
       }
     }
@@ -150,62 +171,73 @@ export class LanternSystem {
       return;
     }
 
-    addCandidates.sort((a, b) => a.d2 - b.d2);
+    addCandidates.sort((a, b) => {
+      if (a.d2 !== b.d2) return a.d2 - b.d2;
+      return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+    });
     const candidateByKey = new Map<string, { key: string; x: number; y: number; z: number; d2: number }>();
     for (const c of addCandidates) candidateByKey.set(c.key, c);
     for (const [k, c] of keepCandidates) {
       if (!candidateByKey.has(k)) candidateByKey.set(k, c);
     }
 
+    const wantedKeys: string[] = [];
     const wanted = new Set<string>();
     const count = Math.min(MAX_ACTIVE_LANTERN_LIGHTS, candidateByKey.size);
 
     for (const key of this.activeLanternLights.keys()) {
-      if (wanted.size >= count) break;
+      if (wantedKeys.length >= count) break;
       if (!keepCandidates.has(key)) continue;
+      if (wanted.has(key)) continue;
+      wantedKeys.push(key);
       wanted.add(key);
     }
 
-    for (let i = 0; i < addCandidates.length && wanted.size < count; i++) {
-      wanted.add(addCandidates[i]!.key);
+    for (let i = 0; i < addCandidates.length && wantedKeys.length < count; i++) {
+      const key = addCandidates[i]!.key;
+      if (wanted.has(key)) continue;
+      wantedKeys.push(key);
+      wanted.add(key);
     }
 
-    for (const key of wanted) {
+    const usedSlots = new Set<number>();
+
+    // Keep existing assignments for wanted keys first (stable, no slot churn).
+    for (const key of wantedKeys) {
+      const id = this.activeLanternLights.get(key);
+      if (!id) continue;
+      const slotIndex = this.lanternPoolIndexById.get(id);
+      if (slotIndex === undefined) continue;
+
       const c = candidateByKey.get(key);
       if (!c) continue;
-
-      const hash = ((c.x * 73856093) ^ (c.y * 19349663) ^ (c.z * 83492791)) >>> 0;
-      const warmJitter = hash % 3;
-      const color = warmJitter === 0 ? 0xffba63 : warmJitter === 1 ? 0xffca7f : 0xffa94f;
-
-      let id = this.activeLanternLights.get(c.key);
-      if (!id || !ctx.dynamicLights.has(id)) {
-        id = ctx.addDynamicLight({
-          kind: 'lantern',
-          type: 'point',
-          position: { x: c.x + 0.5, y: c.y + 0.62, z: c.z + 0.5 },
-          color,
-          intensity: 4.8 * lanternVisibility,
-          distance: 28,
-          decay: 1.45,
-        });
-        this.activeLanternLights.set(c.key, id);
-        this.lanternLightKeyById.set(id, c.key);
-      } else {
-        ctx.updateDynamicLight(id, {
-          position: { x: c.x + 0.5, y: c.y + 0.62, z: c.z + 0.5 },
-          color,
-          intensity: 4.8 * lanternVisibility,
-          distance: 28,
-          decay: 1.45,
-        });
-      }
+      this.assignPoolSlot(slotIndex, key, c, lanternVisibility, ctx);
+      usedSlots.add(slotIndex);
     }
 
-    for (const [key, id] of Array.from(this.activeLanternLights.entries())) {
-      if (wanted.has(key)) continue;
-      ctx.removeDynamicLight(id);
-      this.activeLanternLights.delete(key);
+    // Assign remaining wanted keys to available slots.
+    for (const key of wantedKeys) {
+      const existingId = this.activeLanternLights.get(key);
+      if (existingId && this.lanternPoolIndexById.has(existingId)) continue;
+
+      let slotIndex = -1;
+      for (let i = 0; i < this.lanternPoolIds.length; i++) {
+        if (usedSlots.has(i)) continue;
+        slotIndex = i;
+        break;
+      }
+      if (slotIndex < 0) break;
+
+      const c = candidateByKey.get(key);
+      if (!c) continue;
+      this.assignPoolSlot(slotIndex, key, c, lanternVisibility, ctx);
+      usedSlots.add(slotIndex);
+    }
+
+    // Fade out and clear unneeded assignments without deleting light objects.
+    for (let i = 0; i < this.lanternPoolIds.length; i++) {
+      if (usedSlots.has(i)) continue;
+      this.deactivatePoolSlot(i, ctx);
     }
 
     this.refreshLanternGlows(lanternVisibility, ctx);
@@ -213,9 +245,22 @@ export class LanternSystem {
 
   /** Called when a dynamic light is removed externally — clean up reverse maps. */
   onDynamicLightRemoved(id: string): void {
+    const poolIndex = this.lanternPoolIndexById.get(id);
+    if (poolIndex !== undefined) {
+      const key = this.lanternPoolKeyByIndex[poolIndex];
+      if (key) {
+        this.activeLanternLights.delete(key);
+        this.lanternStickyUntilByKey.delete(key);
+      }
+      this.lanternPoolIds[poolIndex] = '';
+      this.lanternPoolKeyByIndex[poolIndex] = null;
+      this.lanternPoolIndexById.delete(id);
+    }
+
     const lanternKey = this.lanternLightKeyById.get(id);
     if (lanternKey) {
       this.activeLanternLights.delete(lanternKey);
+      this.lanternStickyUntilByKey.delete(lanternKey);
       this.lanternLightKeyById.delete(id);
     }
   }
@@ -253,14 +298,26 @@ export class LanternSystem {
       this.clearLanternLightsForChunk(chunkId, ctx);
     }
     this.lanternPositionsByChunk.clear();
+    for (let i = 0; i < this.lanternPoolIds.length; i++) {
+      this.deactivatePoolSlot(i, ctx);
+    }
     this.activeLanternLights.clear();
     this.lanternLightKeyById.clear();
+    this.lanternStickyUntilByKey.clear();
     this.lanternRefreshTimer = 0;
     this.clearLanternGlows();
   }
 
   /** Dispose all GPU resources (call on Engine destroy). */
   dispose(ctx: LanternContext): void {
+    for (const id of this.lanternPoolIds) {
+      if (!id) continue;
+      ctx.removeDynamicLight(id);
+    }
+    this.lanternPoolIds.length = 0;
+    this.lanternPoolKeyByIndex.length = 0;
+    this.lanternPoolIndexById.clear();
+
     this.clearLanternGlows();
     if (this.lanternGlowPoints) {
       ctx.scene.remove(this.lanternGlowPoints);
@@ -273,6 +330,8 @@ export class LanternSystem {
       this.lanternGlowTexture = null;
     }
     this.lanternLightKeyById.clear();
+    this.activeLanternLights.clear();
+    this.lanternStickyUntilByKey.clear();
   }
 
   // ── Private helpers ───────────────────────────────────────────────
@@ -305,6 +364,79 @@ export class LanternSystem {
     tex.needsUpdate = true;
     this.lanternGlowTexture = tex;
     return tex;
+  }
+
+  private ensureLanternPool(ctx: LanternContext): void {
+    for (let i = 0; i < MAX_ACTIVE_LANTERN_LIGHTS; i++) {
+      const currentId = this.lanternPoolIds[i];
+      if (currentId) continue;
+
+      const id = ctx.addDynamicLight({
+        kind: 'lantern',
+        type: 'point',
+        position: {
+          x: THREE.MathUtils.clamp(ctx.camera.position.x, 0, WORLD_X - 1),
+          y: THREE.MathUtils.clamp(ctx.camera.position.y, 0, WORLD_Y - 1),
+          z: THREE.MathUtils.clamp(ctx.camera.position.z, 0, WORLD_Z - 1),
+        },
+        color: 0xffba63,
+        intensity: 0,
+        distance: 28,
+        decay: 1.45,
+      });
+
+      this.lanternPoolIds[i] = id;
+      this.lanternPoolKeyByIndex[i] = null;
+      this.lanternPoolIndexById.set(id, i);
+      this.lanternLightKeyById.delete(id);
+    }
+  }
+
+  private assignPoolSlot(
+    slotIndex: number,
+    key: string,
+    c: { x: number; y: number; z: number; d2: number },
+    lanternVisibility: number,
+    ctx: LanternContext,
+  ): void {
+    const id = this.lanternPoolIds[slotIndex];
+    if (!id) return;
+
+    const oldKey = this.lanternPoolKeyByIndex[slotIndex];
+    if (oldKey && oldKey !== key) {
+      this.activeLanternLights.delete(oldKey);
+      this.lanternStickyUntilByKey.delete(oldKey);
+    }
+
+    const hash = ((c.x * 73856093) ^ (c.y * 19349663) ^ (c.z * 83492791)) >>> 0;
+    const warmJitter = hash % 3;
+    const color = warmJitter === 0 ? 0xffba63 : warmJitter === 1 ? 0xffca7f : 0xffa94f;
+
+    ctx.updateDynamicLight(id, {
+      position: { x: c.x + 0.5, y: c.y + 0.62, z: c.z + 0.5 },
+      color,
+      intensity: 4.8 * lanternVisibility,
+      distance: 28,
+      decay: 1.45,
+      kind: 'lantern',
+    });
+
+    this.lanternPoolKeyByIndex[slotIndex] = key;
+    this.activeLanternLights.set(key, id);
+    this.lanternLightKeyById.set(id, key);
+    this.lanternStickyUntilByKey.set(key, ctx.elapsedTime + LANTERN_LIGHT_STICKY_SECONDS);
+  }
+
+  private deactivatePoolSlot(slotIndex: number, ctx: LanternContext): void {
+    const id = this.lanternPoolIds[slotIndex];
+    const key = this.lanternPoolKeyByIndex[slotIndex];
+    if (!id || !key) return;
+
+    ctx.updateDynamicLight(id, { intensity: 0, kind: 'lantern' });
+    this.activeLanternLights.delete(key);
+    this.lanternStickyUntilByKey.delete(key);
+    this.lanternLightKeyById.delete(id);
+    this.lanternPoolKeyByIndex[slotIndex] = null;
   }
 
   private ensureLanternGlowPoints(ctx: LanternContext): void {
