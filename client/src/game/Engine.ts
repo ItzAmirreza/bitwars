@@ -2661,6 +2661,7 @@ export class Engine {
 
     // Sky & environment
     this.sky.update(delta, this.camera.position);
+    this.renderer.toneMappingExposure += (this.sky.getExposure() - this.renderer.toneMappingExposure) * Math.min(1, delta * 2.2);
     this.renderer.setClearColor(this.sky.getFogColor());
 
     // VFX

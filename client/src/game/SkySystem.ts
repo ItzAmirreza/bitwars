@@ -46,6 +46,16 @@ export class SkySystem {
   private sunVisibility = 1;
   private moonVisibility = 0;
   private moonColor = new THREE.Color(0.62, 0.72, 0.95);
+  private fogColor = new THREE.Color(0x8899aa);
+
+  // Storm lightning (visual only)
+  private stormFlash = 0;
+  private stormNextStrike = 4.5;
+
+  // Rain color blending
+  private rainBaseColor = new THREE.Color(0.72, 0.78, 0.86);
+  private rainFlashColor = new THREE.Color(0.9, 0.95, 1.0);
+  private rainMixedColor = new THREE.Color();
 
   // Reusable vectors
   private sunDir = new THREE.Vector3();
@@ -72,15 +82,19 @@ export class SkySystem {
       uniforms: {
         uZenith: { value: new THREE.Color(0x4488cc) },
         uHorizon: { value: new THREE.Color(0x99bbdd) },
+        uHazeColor: { value: new THREE.Color(0xa6c4de) },
         uSunColor: { value: new THREE.Color(0xfff0d0) },
         uSunDirection: { value: new THREE.Vector3(0.3, 0.8, 0.2).normalize() },
         uMoonDirection: { value: new THREE.Vector3(-0.25, 0.6, -0.2).normalize() },
         uMoonColor: { value: new THREE.Color(0.62, 0.72, 0.95) },
+        uCloudTint: { value: new THREE.Color(0xf2f6ff) },
+        uStarTint: { value: new THREE.Color(0xc6daff) },
         uSunSize: { value: 1.0 },
         uCloudDensity: { value: 0.3 },
         uTime: { value: 0 },
         uStarVisibility: { value: 0 },
         uMoonVisibility: { value: 0 },
+        uStormFlash: { value: 0 },
       },
       side: THREE.BackSide,
       depthWrite: false,
@@ -123,13 +137,13 @@ export class SkySystem {
     this.rainMaterial = new THREE.ShaderMaterial({
       vertexShader: rainVertexShader,
       fragmentShader: rainFragmentShader,
-      uniforms: {
-        uTime: { value: 0 },
-        uWindX: { value: 0.14 },
-        uWindZ: { value: -0.06 },
-        uRainDensity: { value: 0.8 },
-        uRainColor: { value: new THREE.Color(0.72, 0.78, 0.86) },
-      },
+        uniforms: {
+          uTime: { value: 0 },
+          uWindX: { value: 0.14 },
+          uWindZ: { value: -0.06 },
+          uRainDensity: { value: 0.8 },
+          uRainColor: { value: this.rainBaseColor.clone() },
+        },
       transparent: true,
       depthWrite: false,
       blending: THREE.NormalBlending,
@@ -172,8 +186,11 @@ export class SkySystem {
     // Update sky shader
     this.skyMaterial.uniforms.uZenith.value.copy(colors.zenith);
     this.skyMaterial.uniforms.uHorizon.value.copy(colors.horizon);
+    this.skyMaterial.uniforms.uHazeColor.value.copy(colors.haze);
     this.skyMaterial.uniforms.uSunColor.value.copy(colors.sun);
     this.skyMaterial.uniforms.uMoonColor.value.copy(this.moonColor);
+    this.skyMaterial.uniforms.uCloudTint.value.copy(colors.cloudTint);
+    this.skyMaterial.uniforms.uStarTint.value.copy(colors.starTint);
     this.skyMaterial.uniforms.uCloudDensity.value = this.currentEnv.cloudDensity;
     this.skyMaterial.uniforms.uTime.value = this.elapsedTime;
 
@@ -198,13 +215,17 @@ export class SkySystem {
     const moonVisibility = nightFactor * moonAboveHorizon;
     this.sunVisibility = sunAboveHorizon;
     this.moonVisibility = moonVisibility;
-    this.skyMaterial.uniforms.uStarVisibility.value = nightFactor;
+
+    this.updateStormFlash(delta);
+    const cloudStarPenalty = clamp01(this.currentEnv.cloudDensity * 0.85);
+    this.skyMaterial.uniforms.uStarVisibility.value = nightFactor * (1 - cloudStarPenalty);
     this.skyMaterial.uniforms.uMoonVisibility.value = moonVisibility;
+    this.skyMaterial.uniforms.uStormFlash.value = this.stormFlash;
 
     // Update directional light (sun) — must follow camera so shadows stay around player,
     // and direction must match the visual sun in the sky shader
     this.sunLight.color.copy(colors.sun);
-    this.sunLight.intensity = colors.sunIntensity * sunAboveHorizon;
+    this.sunLight.intensity = colors.sunIntensity * sunAboveHorizon + this.stormFlash * 0.08;
 
     if (cameraPosition) {
       // Light shines FROM sun direction toward camera — shadows match visual sun
@@ -226,7 +247,7 @@ export class SkySystem {
 
     // Moon light gives readable contrast for competitive nighttime gameplay
     this.moonLight.color.copy(this.moonColor);
-    this.moonLight.intensity = 0.4 + moonVisibility * 1.1;
+    this.moonLight.intensity = 0.4 + moonVisibility * 1.1 + this.stormFlash * 0.05;
     if (cameraPosition) {
       this.moonLight.position.set(
         cameraPosition.x + moonDir.x * 90,
@@ -244,20 +265,20 @@ export class SkySystem {
     // Hemisphere light
     this.hemiLight.color.copy(colors.hemiSky);
     this.hemiLight.groundColor.copy(colors.hemiGround);
-    this.hemiLight.intensity = Math.max(0.95, 0.78 + colors.ambientIntensity * 0.56);
+    this.hemiLight.intensity = Math.max(0.95, 0.78 + colors.ambientIntensity * 0.56 + this.stormFlash * 0.12);
 
     // Ambient light
     this.ambientLight.color.copy(colors.ambient);
-    this.ambientLight.intensity = Math.max(colors.ambientIntensity, 0.7 + nightFactor * 0.28);
+    this.ambientLight.intensity = Math.max(colors.ambientIntensity, 0.7 + nightFactor * 0.28) + this.stormFlash * 0.1;
 
     // Renderer exposure target (higher floor at night to prevent black crush)
     const weatherPenalty = clamp01(this.currentEnv.cloudDensity * 0.22);
-    this.exposure = 1.15 + nightFactor * 0.72 - weatherPenalty * 0.75;
+    this.exposure = 1.15 + nightFactor * 0.72 - weatherPenalty * 0.75 + this.stormFlash * 0.05;
 
     // Fog
-    const fogColor = colors.fog;
+    this.fogColor.copy(colors.fog).lerp(colors.haze, this.stormFlash * 0.08);
     if (this.scene.fog instanceof THREE.Fog) {
-      (this.scene.fog as THREE.Fog).color.copy(fogColor);
+      (this.scene.fog as THREE.Fog).color.copy(this.fogColor);
       // Adjust fog distance based on weather
       const baseFar = 150;
       const baseNear = 40;
@@ -281,14 +302,15 @@ export class SkySystem {
       this.rainMaterial.uniforms.uWindX.value = this.currentEnv.windSpeed * 0.35 - 0.08;
       this.rainMaterial.uniforms.uWindZ.value = this.currentEnv.windSpeed * 0.2 - 0.05;
       this.rainMaterial.uniforms.uRainDensity.value = this.currentEnv.weather >= WEATHER_STORMY ? 1.0 : 0.78;
+      this.rainMixedColor.copy(this.rainBaseColor).lerp(this.rainFlashColor, this.stormFlash * 0.45);
+      this.rainMaterial.uniforms.uRainColor.value.copy(this.rainMixedColor);
       this.rainMesh.visible = true;
     }
   }
 
   /** Get current fog color for renderer clear color */
   getFogColor(): THREE.Color {
-    const colors = getSkyColors(this.currentEnv.timeOfDay, this.currentEnv.weather);
-    return colors.fog;
+    return this.fogColor;
   }
 
   /** Get display info for HUD */
@@ -376,6 +398,22 @@ export class SkySystem {
     if (result < 0) result += 24;
     if (result >= 24) result -= 24;
     return result;
+  }
+
+  private updateStormFlash(delta: number): void {
+    if (this.currentEnv.weather < WEATHER_STORMY) {
+      this.stormFlash = Math.max(0, this.stormFlash - delta * 3.5);
+      this.stormNextStrike = 3.5;
+      return;
+    }
+
+    this.stormNextStrike -= delta * (0.35 + this.currentEnv.windSpeed * 0.35);
+    if (this.stormNextStrike <= 0) {
+      this.stormFlash = 0.28 + Math.random() * 0.22;
+      this.stormNextStrike = 3.5 + Math.random() * 7.5;
+    }
+
+    this.stormFlash = Math.max(0, this.stormFlash - delta * 6.5);
   }
 
   dispose(): void {
