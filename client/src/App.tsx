@@ -16,18 +16,22 @@ function LoadingScreen() {
   }, []);
 
   return (
-    <div className="scanlines hex-bg flex items-center justify-center h-full relative overflow-hidden">
+    <div
+      className="flex items-center justify-center h-full relative overflow-hidden"
+      style={{ background: 'var(--c-bg)' }}
+    >
       {/* Ambient glow */}
       <div
-        className="absolute pointer-events-none anim-breath"
+        className="absolute pointer-events-none"
         style={{
           width: '600px',
           height: '600px',
           borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(0,255,65,0.06) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, rgba(0,255,65,0.05) 0%, transparent 65%)',
           top: '50%',
           left: '50%',
           transform: 'translate(-50%, -50%)',
+          animation: 'breath 6s ease-in-out infinite',
         }}
       />
 
@@ -36,10 +40,10 @@ function LoadingScreen() {
           className="title-glow"
           style={{
             fontFamily: 'var(--font-pixel)',
-            fontSize: '36px',
+            fontSize: 'clamp(36px, 6vw, 56px)',
             color: 'var(--c-green)',
-            letterSpacing: '0.1em',
-            marginBottom: '32px',
+            letterSpacing: '0.12em',
+            marginBottom: '36px',
           }}
         >
           BITWARS
@@ -48,10 +52,10 @@ function LoadingScreen() {
         {/* Loading bar */}
         <div
           style={{
-            width: '300px',
+            width: '280px',
             height: '3px',
             background: 'var(--c-border)',
-            margin: '0 auto 20px',
+            margin: '0 auto 24px',
             overflow: 'hidden',
             borderRadius: '1px',
           }}
@@ -59,21 +63,17 @@ function LoadingScreen() {
           <div className="loading-bar" />
         </div>
 
-        <div className="flex items-center justify-center gap-2">
-          <div className="status-dot" />
-          <span
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '13px',
-              color: 'var(--c-muted)',
-              letterSpacing: '0.2em',
-              minWidth: '200px',
-              textAlign: 'left',
-            }}
-          >
-            ESTABLISHING UPLINK{dots}
-          </span>
-        </div>
+        <span
+          style={{
+            fontFamily: 'var(--font-ui)',
+            fontSize: '15px',
+            fontWeight: 600,
+            color: '#8888a0',
+            letterSpacing: '0.15em',
+          }}
+        >
+          CONNECTING{dots}
+        </span>
       </div>
     </div>
   );
