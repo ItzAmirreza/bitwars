@@ -360,7 +360,7 @@ void main() {
 
   float cloudMask = 0.0;
 
-  if (uCloudDensity > 0.03 && y > -0.22) {
+  if (uCloudDensity > 0.03 && y > 0.02) {
     float invY = 1.0 / max(y + 0.32, 0.08);
     vec2 baseUV = dir.xz * invY;
     vec2 driftA = vec2(uTime * 0.0045, -uTime * 0.0014);
@@ -376,6 +376,8 @@ void main() {
     );
     float detail = smoothstep(0.38, 0.9, cloudB);
     cloudMask = coverage * (0.62 + detail * 0.42);
+    // Fade clouds out near horizon so they don't extend below
+    cloudMask *= smoothstep(0.02, 0.12, y);
 
     float cloudLight = pow(max(dot(normalize(vec3(dir.x, max(dir.y, 0.04), dir.z)), uSunDirection), 0.0), 8.0);
     vec3 cloudColor = mix(uCloudTint * 0.74, uCloudTint * 1.08 + uSunColor * 0.24, cloudLight);

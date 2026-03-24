@@ -44,6 +44,7 @@ pub const WOOD: u8 = 11;
 pub const STONE: u8 = 12;
 pub const SNOW: u8 = 13;
 pub const LANTERN: u8 = 14;
+pub const BEDROCK: u8 = 15;
 
 // ── RLE Compression ──
 
@@ -219,7 +220,9 @@ pub fn generate_chunk(cx: usize, cy: usize, cz: usize, seed: u64) -> Vec<u8> {
                 if wy > h {
                     break;
                 }
-                let bt = if wy == h {
+                let bt = if wy == 0 {
+                    BEDROCK
+                } else if wy == h {
                     surface
                 } else if wy >= h - 2 {
                     subsurface

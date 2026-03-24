@@ -177,6 +177,15 @@ pub fn fire_weapon(
 
     let actually_destroyed =
         destroy_and_check_blocks(ctx, &origin, &hit_blocks, def.max_range + 5.0);
+    if !hit_blocks.is_empty() {
+        log::info!(
+            "[FIRE] player={:?} weapon={} requested_blocks={} actually_destroyed={}",
+            sender.to_hex(),
+            weapon,
+            hit_blocks.len(),
+            actually_destroyed.len(),
+        );
+    }
     let (shot_hit_pos, shot_has_hit) = determine_hit_pos(
         ctx,
         &actually_destroyed,

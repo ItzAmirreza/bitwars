@@ -8,7 +8,7 @@ use spacetimedb::{ReducerContext, Table};
 use crate::helpers::block_in_bounds;
 use crate::tables::*;
 use crate::types::*;
-use crate::worldgen::{self, AIR, CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
+use crate::worldgen::{self, AIR, BEDROCK, CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
 
 // ── Chunk Cache Helpers ──
 
@@ -205,7 +205,7 @@ pub fn destroy_blocks_in_world(
             for (x, y, z, lx, ly, lz) in local_blocks {
                 let local_idx = lx + ly * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE;
                 let block_type = block_data[local_idx];
-                if block_type != AIR {
+                if block_type != AIR && block_type != BEDROCK {
                     block_data[local_idx] = AIR;
                     actually_destroyed.push((x, y, z, block_type));
                     modified = true;
@@ -213,10 +213,18 @@ pub fn destroy_blocks_in_world(
             }
 
             if modified {
+                let new_version = chunk.version + 1;
                 let new_data = worldgen::rle_encode(&block_data);
+                log::info!(
+                    "[CHUNK_UPDATE] chunk_id={} version {} -> {} destroyed_in_chunk={}",
+                    chunk_id,
+                    chunk.version,
+                    new_version,
+                    actually_destroyed.len(),
+                );
                 ctx.db.world_chunk().chunk_id().update(WorldChunk {
                     data: new_data,
-                    version: chunk.version + 1,
+                    version: new_version,
                     ..chunk
                 });
             }

@@ -11,7 +11,7 @@ use crate::tables::*;
 use crate::types::*;
 use crate::vehicles::{spawn_jets_at_airstrips, spawn_sandbox_helicopters};
 
-use crate::worldgen::{self, CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
+use crate::worldgen::{self, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
 
 #[reducer]
 pub fn request_chunks(ctx: &ReducerContext, chunk_ids: Vec<u32>) -> Result<(), String> {
@@ -139,19 +139,11 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
         ctx.db.entity().id().delete(&id);
     }
 
-    // Generate spawn-area chunks
-    let center_cx = (crate::worldgen::WORLD_SIZE_X / 2 / CHUNK_SIZE) as i32;
-    let center_cz = (crate::worldgen::WORLD_SIZE_Z / 2 / CHUNK_SIZE) as i32;
-    for dcx in -2..=2 {
-        for dcz in -2..=2 {
-            let cx = center_cx + dcx;
-            let cz = center_cz + dcz;
-            if cx < 0 || cx >= NUM_CHUNKS_X as i32 || cz < 0 || cz >= NUM_CHUNKS_Z as i32 {
-                continue;
-            }
-            for cy in 0..NUM_CHUNKS_Y as i32 {
-                let data =
-                    worldgen::generate_chunk(cx as usize, cy as usize, cz as usize, new_seed);
+    // Pregenerate entire world
+    for cx in 0..NUM_CHUNKS_X {
+        for cz in 0..NUM_CHUNKS_Z {
+            for cy in 0..NUM_CHUNKS_Y {
+                let data = worldgen::generate_chunk(cx, cy, cz, new_seed);
                 let chunk_id = worldgen::pack_chunk_id(cx as u8, cy as u8, cz as u8);
                 ctx.db.world_chunk().insert(WorldChunk {
                     chunk_id,

@@ -64,6 +64,7 @@ const BLOCK_COLORS: Record<number, number> = {
   12: 0x6a6a6a,  // Stone
   13: 0xd8d8e0,  // Snow
   14: 0xffcf78,  // Lantern
+  15: 0x1a1a2e,  // Bedrock
 };
 
 // ── Lantern boost offsets ──

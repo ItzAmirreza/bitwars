@@ -170,7 +170,24 @@ pub fn update_vehicle_input(
         boosting,
         received_at: ctx.timestamp,
     });
+    let queue_before_trim: usize = ctx
+        .db
+        .vehicle_input_cmd()
+        .idx_vehicle_input_by_vehicle()
+        .filter(&player.mounted_vehicle_id)
+        .count();
     trim_vehicle_input_queue(ctx, player.mounted_vehicle_id);
+
+    // Log every 30th input to track arrival rate and queue growth
+    if input_seq % 30 == 0 {
+        log::info!(
+            "[VEHICLE_INPUT] vehicle={} seq={} queue_depth={} acked={}",
+            player.mounted_vehicle_id,
+            input_seq,
+            queue_before_trim,
+            vehicle.acked_input_seq,
+        );
+    }
 
     vehicle.input_forward = forward;
     vehicle.input_strafe = strafe;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VoxelWorld } from './VoxelWorld';
+import { VoxelWorld, BlockType } from './VoxelWorld';
 import { WEAPON_DEFINITIONS, NUM_WEAPONS } from './WeaponRegistry';
 import type { ProjectileConfig } from './WeaponRegistry';
 
@@ -243,7 +243,7 @@ export class WeaponSystem {
               const dx = bx - hit.x, dy = by - hit.y, dz = bz - hit.z;
               if (dx * dx + dy * dy + dz * dz <= r2) {
                 const bt = this.world.getBlock(bx, by, bz);
-                if (bt !== 0) {
+                if (bt !== 0 && bt !== BlockType.Bedrock) {
                   this.pendingBlockDestructions.set(`${bx},${by},${bz}`, bt);
                   this.world.setBlock(bx, by, bz, 0);
                   destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
@@ -255,9 +255,11 @@ export class WeaponSystem {
       } else {
         // Single block
         const bt = this.world.getBlock(hit.x, hit.y, hit.z);
-        this.pendingBlockDestructions.set(`${hit.x},${hit.y},${hit.z}`, bt);
-        this.world.setBlock(hit.x, hit.y, hit.z, 0);
-        destroyed.push({ x: hit.x, y: hit.y, z: hit.z, blockType: bt });
+        if (bt !== BlockType.Bedrock) {
+          this.pendingBlockDestructions.set(`${hit.x},${hit.y},${hit.z}`, bt);
+          this.world.setBlock(hit.x, hit.y, hit.z, 0);
+          destroyed.push({ x: hit.x, y: hit.y, z: hit.z, blockType: bt });
+        }
       }
     }
 

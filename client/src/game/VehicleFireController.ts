@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BLOCK_COLORS } from './VoxelWorld';
+import { BLOCK_COLORS, BlockType } from './VoxelWorld';
 import type { WeaponSystem } from './Weapons';
 import type { AudioSystem } from './AudioSystem';
 import type { VFX } from './VFX';
@@ -183,7 +183,7 @@ export class VehicleFireController {
               const ddx = bx - hit.x, ddy = by - hit.y, ddz = bz - hit.z;
               if (ddx * ddx + ddy * ddy + ddz * ddz <= r2) {
                 const bt = ctx.world.getBlock(bx, by, bz);
-                if (bt !== 0) {
+                if (bt !== 0 && bt !== BlockType.Bedrock) {
                   ctx.weapons.trackPendingDestruction(bx, by, bz, bt);
                   ctx.world.setBlock(bx, by, bz, 0);
                   destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
@@ -195,7 +195,7 @@ export class VehicleFireController {
       } else {
         // Single block destruction (minigun)
         const bt = ctx.world.getBlock(hit.x, hit.y, hit.z);
-        if (bt !== 0) {
+        if (bt !== 0 && bt !== BlockType.Bedrock) {
           ctx.weapons.trackPendingDestruction(hit.x, hit.y, hit.z, bt);
           ctx.world.setBlock(hit.x, hit.y, hit.z, 0);
           destroyed.push({ x: hit.x, y: hit.y, z: hit.z, blockType: bt });

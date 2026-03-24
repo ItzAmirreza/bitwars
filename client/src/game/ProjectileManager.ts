@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VoxelWorld } from './VoxelWorld';
+import { VoxelWorld, BlockType } from './VoxelWorld';
 import { WeaponSystem, WEAPONS } from './Weapons';
 import { VFX } from './VFX';
 import type { AudioSystem } from './AudioSystem';
@@ -375,7 +375,7 @@ export class ProjectileManager {
               const dx = bx - blockHit.x, dy = by - blockHit.y, dz = bz - blockHit.z;
               if ((dx * dx + dz * dz) / hr2 + (dy * dy) / vr2 <= 1.0) {
                 const bt = this.world.getBlock(bx, by, bz);
-                if (bt !== 0) {
+                if (bt !== 0 && bt !== BlockType.Bedrock) {
                   this.weapons.trackPendingDestruction(bx, by, bz, bt);
                   this.world.setBlock(bx, by, bz, 0);
                   destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
@@ -393,7 +393,7 @@ export class ProjectileManager {
               const dx = bx - blockHit.x, dy = by - blockHit.y, dz = bz - blockHit.z;
               if (dx * dx + dy * dy + dz * dz <= r2) {
                 const bt = this.world.getBlock(bx, by, bz);
-                if (bt !== 0) {
+                if (bt !== 0 && bt !== BlockType.Bedrock) {
                   this.weapons.trackPendingDestruction(bx, by, bz, bt);
                   this.world.setBlock(bx, by, bz, 0);
                   destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
@@ -404,7 +404,7 @@ export class ProjectileManager {
         }
       } else {
         const bt = this.world.getBlock(blockHit.x, blockHit.y, blockHit.z);
-        if (bt !== 0) {
+        if (bt !== 0 && bt !== BlockType.Bedrock) {
           this.weapons.trackPendingDestruction(blockHit.x, blockHit.y, blockHit.z, bt);
           this.world.setBlock(blockHit.x, blockHit.y, blockHit.z, 0);
           destroyed.push({ x: blockHit.x, y: blockHit.y, z: blockHit.z, blockType: bt });

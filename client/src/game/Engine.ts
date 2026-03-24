@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, BLOCK_COLORS, type ChunkApplyBudget } from './VoxelWorld';
+import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, BLOCK_COLORS, BlockType, type ChunkApplyBudget } from './VoxelWorld';
 import { FPSControls } from './FPSControls';
 import { WeaponSystem, WEAPONS } from './Weapons';
 import { AudioSystem } from './AudioSystem';
@@ -335,21 +335,6 @@ export class Engine {
       this.camera.position.z,
     );
     this.world.rebuildDirtyChunks(this.scene, this.bootstrapChunkApplyBudget);
-
-    // ── Ground plane ──
-    const groundGeo = new THREE.PlaneGeometry(2048, 2048);
-    const groundMat = new THREE.MeshPhongMaterial({
-      color: 0x4a4642,
-      emissive: new THREE.Color(0x0d1422),
-      emissiveIntensity: 0.26,
-      shininess: 4,
-      specular: new THREE.Color(0x111111),
-    });
-    const ground = new THREE.Mesh(groundGeo, groundMat);
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(WORLD_X / 2, -0.01, WORLD_Z / 2);
-    ground.receiveShadow = true;
-    this.scene.add(ground);
 
     // ── Spawn at world center ──
     const spawnX = WORLD_X / 2, spawnZ = WORLD_Z / 2;
@@ -822,7 +807,7 @@ export class Engine {
             if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
             const wx = bx + dx, wy = by + dy, wz = bz + dz;
             const bt = this.world.getBlock(wx, wy, wz);
-            if (bt !== 0) {
+            if (bt !== 0 && bt !== BlockType.Bedrock) {
               destroyedBlocks.push({ x: wx, y: wy, z: wz, blockType: bt });
               this.world.setBlock(wx, wy, wz, 0);
               this.sandboxBlockBreakCount++;

@@ -11,7 +11,7 @@ use crate::tables::*;
 use crate::types::*;
 use crate::vehicles::{spawn_jets_at_airstrips, spawn_sandbox_helicopters};
 
-use crate::worldgen::{self, CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
+use crate::worldgen::{self, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
 
 #[reducer(init)]
 pub fn init(ctx: &ReducerContext) {
@@ -26,19 +26,12 @@ pub fn init(ctx: &ReducerContext) {
         round_start: ctx.timestamp,
     });
 
-    // Generate spawn-area chunks
-    let center_cx = (crate::worldgen::WORLD_SIZE_X / 2 / CHUNK_SIZE) as i32;
-    let center_cz = (crate::worldgen::WORLD_SIZE_Z / 2 / CHUNK_SIZE) as i32;
-    let mut chunk_count = 0;
-    for dcx in -2..=2 {
-        for dcz in -2..=2 {
-            let cx = center_cx + dcx;
-            let cz = center_cz + dcz;
-            if cx < 0 || cx >= NUM_CHUNKS_X as i32 || cz < 0 || cz >= NUM_CHUNKS_Z as i32 {
-                continue;
-            }
-            for cy in 0..NUM_CHUNKS_Y as i32 {
-                let data = worldgen::generate_chunk(cx as usize, cy as usize, cz as usize, seed);
+    // Pregenerate entire world
+    let mut chunk_count = 0u32;
+    for cx in 0..NUM_CHUNKS_X {
+        for cz in 0..NUM_CHUNKS_Z {
+            for cy in 0..NUM_CHUNKS_Y {
+                let data = worldgen::generate_chunk(cx, cy, cz, seed);
                 let chunk_id = worldgen::pack_chunk_id(cx as u8, cy as u8, cz as u8);
                 ctx.db.world_chunk().insert(WorldChunk {
                     chunk_id,
@@ -54,7 +47,7 @@ pub fn init(ctx: &ReducerContext) {
     }
 
     log::info!(
-        "World generation complete: {} spawn-area chunks stored (seed={})",
+        "World generation complete: {} chunks stored (seed={})",
         chunk_count,
         seed
     );

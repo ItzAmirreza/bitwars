@@ -34,11 +34,13 @@ use crate::tables::*;
 /// Master vehicle tick — dispatches to per-type physics.
 /// When you add a new vehicle type, add a branch here.
 #[reducer]
-pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
+pub fn tick_vehicles(ctx: &ReducerContext, job: VehicleTick) {
     let vehicle_ids: Vec<u64> = ctx.db.vehicle().iter().map(|v| v.entity_id).collect();
+    let num_vehicles = vehicle_ids.len();
 
     let mut mounted_updates: Vec<Player> = Vec::new();
     let mut terrain = TerrainSampler::new();
+    let mut total_queue_depth: usize = 0;
 
     for entity_id in vehicle_ids {
         let Some(vehicle) = ctx.db.vehicle().entity_id().find(&entity_id) else {
@@ -51,7 +53,14 @@ pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
             continue;
         }
 
-        // Dispatch to per-vehicle-type physics
+        let queue_depth: usize = ctx
+            .db
+            .vehicle_input_cmd()
+            .idx_vehicle_input_by_vehicle()
+            .filter(&entity_id)
+            .count();
+        total_queue_depth += queue_depth;
+
         if vehicle.vehicle_type == vehicle_type_helicopter() {
             tick_helicopter(ctx, vehicle, entity, &mut mounted_updates, &mut terrain);
         } else if vehicle.vehicle_type == vehicle_type_fighter_jet() {
@@ -59,18 +68,44 @@ pub fn tick_vehicles(ctx: &ReducerContext, _job: VehicleTick) {
         }
     }
 
-    // Apply mounted player position updates
+    let num_mounted = mounted_updates.len();
     for mounted in mounted_updates {
         ctx.db.player().identity().update(mounted.clone());
         init_movement_state(ctx, mounted.identity, &mounted.pos);
         sync_player_entity(ctx, &mounted);
     }
 
-    // Reschedule
+    // Log every 30 ticks (~1 second)
+    let tick_number = ctx
+        .timestamp
+        .to_duration_since_unix_epoch()
+        .unwrap_or_default()
+        .as_millis()
+        / HELI_TICK_INTERVAL_MS as u128;
+    if tick_number % 30 == 0 {
+        log::info!(
+            "[VEHICLE_TICK] vehicles={} mounted={} queue_depth={}",
+            num_vehicles,
+            num_mounted,
+            total_queue_depth,
+        );
+    }
+
+    // Reschedule from the INTENDED tick time, not actual execution time.
+    // This prevents cumulative drift from scheduler overhead.
+    let intended_time = match job.scheduled_at {
+        ScheduleAt::Time(t) => t,
+        _ => ctx.timestamp,
+    };
+    let next_tick = intended_time + Duration::from_millis(HELI_TICK_INTERVAL_MS);
+    // If we fell too far behind (>5 ticks), reset to now to avoid burst catch-up
+    let next_tick = if next_tick + Duration::from_millis(HELI_TICK_INTERVAL_MS * 5) < ctx.timestamp {
+        ctx.timestamp + Duration::from_millis(HELI_TICK_INTERVAL_MS)
+    } else {
+        next_tick
+    };
     ctx.db.vehicle_tick().insert(VehicleTick {
         scheduled_id: 0,
-        scheduled_at: ScheduleAt::Time(
-            ctx.timestamp + Duration::from_millis(HELI_TICK_INTERVAL_MS),
-        ),
+        scheduled_at: ScheduleAt::Time(next_tick),
     });
 }

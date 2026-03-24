@@ -21,7 +21,8 @@
     "Wood": 11,
     "Stone": 12,
     "Snow": 13,
-    "Lantern": 14
+    "Lantern": 14,
+    "Bedrock": 15
   },
 
   "entityKinds": {

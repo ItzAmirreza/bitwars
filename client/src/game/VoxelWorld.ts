@@ -31,6 +31,7 @@ export const BlockType = BLOCK_TYPES as {
   readonly Stone: 12;
   readonly Snow: 13;
   readonly Lantern: 14;
+  readonly Bedrock: 15;
 };
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
 
@@ -49,6 +50,7 @@ export const BLOCK_COLORS: Record<number, number> = {
   [BlockType.Stone]: 0x6a6a6a,
   [BlockType.Snow]: 0xd8d8e0,
   [BlockType.Lantern]: 0xffcf78,
+  [BlockType.Bedrock]: 0x1a1a2e,
 };
 
 export function packChunkId(cx: number, cy: number, cz: number): number {
