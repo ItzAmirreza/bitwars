@@ -1,11 +1,8 @@
 import { WeaponSilhouette } from './LoadoutOverlay';
-import { getWeaponHudData, getVehicleWeaponHudData, WEAPON_DEFINITIONS } from '../../game/WeaponRegistry';
+import { getWeaponHudData, WEAPON_DEFINITIONS } from '../../game/WeaponRegistry';
 
 // Build WEAPON_DATA from the registry (same shape the component expects)
 const WEAPON_DATA = WEAPON_DEFINITIONS.map((_, i) => getWeaponHudData(i));
-
-// Vehicle weapon data for HUD — sourced from registry
-const VEHICLE_WEAPON_DATA = [getVehicleWeaponHudData(0), getVehicleWeaponHudData(1)];
 
 // Mini weapon icons for the slot indicators
 function MiniRifleSVG({ color }: { color: string }) {
@@ -110,9 +107,11 @@ export interface BottomHudProps {
   vehicleWeapon: number;
   vehicleAmmo: number;
   vehicleReloading: boolean;
+  vehicleMaxAmmo: number;
   vehicleAltitude: number;
   vehicleSpeed: number;
   vehicleThrottle: number;
+  vehicleWeaponSlots: { name: string; color: string }[];
 }
 
 export function BottomHud({
@@ -131,9 +130,11 @@ export function BottomHud({
   vehicleWeapon,
   vehicleAmmo,
   vehicleReloading,
+  vehicleMaxAmmo,
   vehicleAltitude,
   vehicleSpeed,
   vehicleThrottle,
+  vehicleWeaponSlots,
 }: BottomHudProps) {
   const healthColor = health > 50 ? 'var(--c-green)' : health > 25 ? 'var(--c-amber)' : 'var(--c-red)';
   const healthRawColor = health > 50 ? '#00ff41' : health > 25 ? '#ff9800' : '#ff0033';
@@ -508,11 +509,12 @@ export function BottomHud({
             })()}
 
             {mountedVehicleName && (() => {
-              const vw = VEHICLE_WEAPON_DATA[vehicleWeapon] ?? VEHICLE_WEAPON_DATA[0];
+              const vwSlot = vehicleWeaponSlots[vehicleWeapon] ?? vehicleWeaponSlots[0];
+              const vwColor = vwSlot?.color ?? '#ffaa00';
               const vHealthPct = vehicleMaxHealth > 0 ? (vehicleHealth / vehicleMaxHealth) * 100 : 0;
               const vHealthColor = vHealthPct > 50 ? '#66e0ff' : vHealthPct > 25 ? '#ff9800' : '#ff0033';
-              const vAmmoPct = vw.maxAmmo > 0 ? (vehicleAmmo / vw.maxAmmo) * 100 : 0;
-              const vAmmoLow = vehicleAmmo > 0 && vehicleAmmo <= Math.ceil(vw.maxAmmo * 0.15);
+              const vAmmoPct = vehicleMaxAmmo > 0 ? (vehicleAmmo / vehicleMaxAmmo) * 100 : 0;
+              const vAmmoLow = vehicleAmmo > 0 && vehicleAmmo <= Math.ceil(vehicleMaxAmmo * 0.15);
               return (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
 
@@ -574,21 +576,21 @@ export function BottomHud({
                   <div style={{
                     background: 'rgba(8,18,26,0.88)',
                     border: '1px solid rgba(102,224,255,0.2)',
-                    borderRight: `3px solid ${vw.color}`,
+                    borderRight: `3px solid ${vwColor}`,
                     backdropFilter: 'blur(8px)',
                     padding: '8px 14px',
                     minWidth: '240px',
                   }}>
                     {/* Weapon selector tabs */}
                     <div style={{ display: 'flex', gap: '4px', marginBottom: '6px' }}>
-                      {VEHICLE_WEAPON_DATA.map((w, idx) => {
+                      {vehicleWeaponSlots.map((slot, idx) => {
                         const active = vehicleWeapon === idx;
                         return (
-                          <div key={w.name} style={{
+                          <div key={slot.name} style={{
                             flex: 1,
                             padding: '3px 6px',
-                            background: active ? `${w.color}20` : 'rgba(255,255,255,0.03)',
-                            border: active ? `1px solid ${w.color}` : '1px solid rgba(255,255,255,0.08)',
+                            background: active ? `${slot.color}20` : 'rgba(255,255,255,0.03)',
+                            border: active ? `1px solid ${slot.color}` : '1px solid rgba(255,255,255,0.08)',
                             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
                             transition: 'all 0.15s ease',
                             position: 'relative',
@@ -596,19 +598,19 @@ export function BottomHud({
                           }}>
                             {active && <div style={{
                               position: 'absolute', bottom: 0, left: 0, right: 0, height: '1px',
-                              background: w.color, boxShadow: `0 0 6px ${w.color}`,
+                              background: slot.color, boxShadow: `0 0 6px ${slot.color}`,
                             }}/>}
                             <span style={{
                               fontFamily: 'var(--font-mono)', fontSize: '8px', fontWeight: 'bold',
-                              color: active ? w.color : 'var(--c-muted2)',
-                              background: active ? `${w.color}30` : 'rgba(255,255,255,0.05)',
+                              color: active ? slot.color : 'var(--c-muted2)',
+                              background: active ? `${slot.color}30` : 'rgba(255,255,255,0.05)',
                               padding: '0 3px', borderRadius: '2px', lineHeight: '1.4',
                             }}>{idx + 1}</span>
                             <span style={{
                               fontFamily: 'var(--font-mono)', fontSize: '9px',
-                              color: active ? w.color : 'var(--c-muted)',
+                              color: active ? slot.color : 'var(--c-muted)',
                               letterSpacing: '0.08em', fontWeight: active ? 'bold' : 'normal',
-                            }}>{w.name}</span>
+                            }}>{slot.name}</span>
                           </div>
                         );
                       })}
@@ -633,16 +635,16 @@ export function BottomHud({
                         }}>|</span>
                         <span style={{
                           fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--c-muted)',
-                        }}>{vw.maxAmmo}</span>
+                        }}>{vehicleMaxAmmo}</span>
                       </div>
                     </div>
                     {/* Ammo bar */}
                     <div style={{ height: '3px', background: 'rgba(255,255,255,0.06)', marginTop: '4px' }}>
                       <div style={{
                         height: '100%', width: `${vAmmoPct}%`,
-                        background: vehicleAmmo === 0 ? 'var(--c-red)' : vAmmoLow ? 'var(--c-amber)' : vw.color,
+                        background: vehicleAmmo === 0 ? 'var(--c-red)' : vAmmoLow ? 'var(--c-amber)' : vwColor,
                         transition: 'width 0.15s ease',
-                        boxShadow: `0 0 4px ${vehicleAmmo === 0 ? 'var(--c-red)' : vAmmoLow ? 'var(--c-amber)' : vw.color}`,
+                        boxShadow: `0 0 4px ${vehicleAmmo === 0 ? 'var(--c-red)' : vAmmoLow ? 'var(--c-amber)' : vwColor}`,
                       }}/>
                     </div>
                   </div>

@@ -52,19 +52,20 @@ export class VehicleFireController {
 
   startVehicleReload(): void {
     const ctx = this.ctx;
-    const idx = ctx.vehicleManager.vehicleWeaponIndex;
-    const wep = VEHICLE_WEAPONS[idx];
+    const slotIdx = ctx.vehicleManager.vehicleWeaponIndex;
+    const resolvedIdx = ctx.vehicleManager.getResolvedVehicleWeaponIndex();
+    const wep = VEHICLE_WEAPONS[resolvedIdx];
     if (!wep) return;
 
     // Already reloading this weapon?
     const now = performance.now();
-    if (ctx.vehicleManager.vehicleReloadingUntil[idx] > now) return;
+    if (ctx.vehicleManager.vehicleReloadingUntil[slotIdx] > now) return;
 
     // Already full?
-    if (ctx.vehicleManager.vehicleAmmo[idx] >= wep.maxAmmo) return;
+    if (ctx.vehicleManager.vehicleAmmo[slotIdx] >= wep.maxAmmo) return;
 
     // Start reload timer
-    ctx.vehicleManager.vehicleReloadingUntil[idx] = now + wep.reloadTime * 1000;
+    ctx.vehicleManager.vehicleReloadingUntil[slotIdx] = now + wep.reloadTime * 1000;
 
     // Play reload sound
     ctx.audio.playReload(ctx.localAudioSource(-0.15));
@@ -76,11 +77,18 @@ export class VehicleFireController {
   tickVehicleReload(): void {
     const ctx = this.ctx;
     const now = performance.now();
-    for (let i = 0; i < VEHICLE_WEAPONS.length; i++) {
-      if (ctx.vehicleManager.vehicleReloadingUntil[i] > 0 && now >= ctx.vehicleManager.vehicleReloadingUntil[i]) {
+    // Only iterate over the 2 weapon slots (ammo array has 2 entries)
+    for (let slot = 0; slot < 2; slot++) {
+      if (ctx.vehicleManager.vehicleReloadingUntil[slot] > 0 && now >= ctx.vehicleManager.vehicleReloadingUntil[slot]) {
+        // Resolve the actual weapon index for this slot to get correct maxAmmo
+        const savedSlot = ctx.vehicleManager.vehicleWeaponIndex;
+        ctx.vehicleManager.vehicleWeaponIndex = slot;
+        const resolvedIdx = ctx.vehicleManager.getResolvedVehicleWeaponIndex();
+        ctx.vehicleManager.vehicleWeaponIndex = savedSlot;
+        const wep = VEHICLE_WEAPONS[resolvedIdx];
         // Reload timer expired — client-predict ammo refill
-        ctx.vehicleManager.vehicleAmmo[i] = VEHICLE_WEAPONS[i].maxAmmo;
-        ctx.vehicleManager.vehicleReloadingUntil[i] = 0;
+        ctx.vehicleManager.vehicleAmmo[slot] = wep ? wep.maxAmmo : 0;
+        ctx.vehicleManager.vehicleReloadingUntil[slot] = 0;
       }
     }
   }
@@ -93,7 +101,9 @@ export class VehicleFireController {
     if (ctx.health <= 0) return;
     if (!ctx.conn) return;
 
-    const wep = VEHICLE_WEAPONS[ctx.vehicleManager.vehicleWeaponIndex];
+    // Resolve the actual weapon index (jets map slots 0/1 to indices 2/3)
+    const resolvedIdx = ctx.vehicleManager.getResolvedVehicleWeaponIndex();
+    const wep = VEHICLE_WEAPONS[resolvedIdx];
     if (!wep) return;
 
     // Fire rate cooldown
@@ -144,23 +154,57 @@ export class VehicleFireController {
     const isHitscan = wep.projectileSpeed === 0;
 
     if (!isHitscan) {
-      // ── PROJECTILE PATH (Rockets) ──
-      // Spawn client-side vehicle projectile using RPG config for visuals
-      const spawned = ctx.projectileManager.spawnLocalVehicle(
-        2, origin, dir,
-        ctx.vehicleManager.vehicleWeaponIndex, ctx.mountedVehicleId,
-      );
-      if (spawned) {
-        // Visual uses RPG projectile config; destruction shape handled by vehicle oblate spheroid
+      // ── CARPET BOMB PATH (weapon index 3) ──
+      if (resolvedIdx === 3) {
+        // Drop bomb from jet position, alternating left/right
+        const side = ctx.vehicleManager.carpetBombSide;
+        ctx.vehicleManager.carpetBombSide *= -1; // Alternate for next drop
+
+        // Compute right vector from yaw
+        const rightX = Math.cos(lookYaw);
+        const rightZ = -Math.sin(lookYaw);
+        const offset = side * 2.5; // Lateral offset
+
+        const bombOrigin = new THREE.Vector3(
+          pose.x + rightX * offset,
+          pose.y - 1.0,
+          pose.z + rightZ * offset,
+        );
+        // Bomb drops mostly downward with a small forward velocity component
+        const bombDir = new THREE.Vector3(dir.x * 0.15, -0.98, dir.z * 0.15).normalize();
+
+        ctx.projectileManager.spawnLocalVehicle(
+          2, bombOrigin, bombDir,
+          resolvedIdx, ctx.mountedVehicleId,
+        );
+
+        this.syncVehicleFireToServer(bombDir, [], [], []);
+        ctx.audio.playCarpetBombDrop(ctx.localAudioSource(-0.1));
+        ctx.vfx.emitMuzzleFlashAt(bombOrigin, bombDir, 0xff6600);
+        ctx.vfx.shake(0.3);
+        return;
       }
+
+      // ── PROJECTILE PATH (Rockets / Bunker Buster) ──
+      ctx.projectileManager.spawnLocalVehicle(
+        2, origin, dir,
+        resolvedIdx, ctx.mountedVehicleId,
+      );
 
       // Sync to server
       this.syncVehicleFireToServer(dir, [], [], []);
 
       // Audio + VFX
-      ctx.audio.playVehicleRocket(ctx.localAudioSource(-0.1));
-      ctx.vfx.emitMuzzleFlashAt(origin, dir, 0xff4400);
-      ctx.vfx.shake(0.6);
+      if (resolvedIdx === 2) {
+        // Bunker buster: heavier launch sound
+        ctx.audio.playBunkerBusterDrop(ctx.localAudioSource(-0.1));
+        ctx.vfx.emitMuzzleFlashAt(origin, dir, 0xff2200);
+        ctx.vfx.shake(0.8);
+      } else {
+        ctx.audio.playVehicleRocket(ctx.localAudioSource(-0.1));
+        ctx.vfx.emitMuzzleFlashAt(origin, dir, 0xff4400);
+        ctx.vfx.shake(0.6);
+      }
       return;
     }
 

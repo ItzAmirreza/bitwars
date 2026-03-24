@@ -191,6 +191,11 @@ pub fn vehicle_type_fighter_jet() -> u8 {
     shared_config::config().vehicle_types.fighter_jet
 }
 
+/// Bunker Buster weapon index (jet slot 0).
+pub fn jet_weapon_slot0() -> u8 { 2 }
+/// Carpet Bomb weapon index (jet slot 1).
+pub fn jet_weapon_slot1() -> u8 { 3 }
+
 /// Not in shared JSON — server-only spawn config.
 pub const SANDBOX_JET_COUNT: usize = 1;
 /// Not in shared JSON — server-only spawn config.

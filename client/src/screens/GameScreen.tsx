@@ -14,6 +14,7 @@ import { BottomHud } from './hud/BottomHud';
 import { Crosshair } from './hud/Crosshair';
 import { ChatOverlay } from './hud/ChatOverlay';
 import { DeathScreen } from './hud/DeathScreen';
+import { BunkerBusterDepthView } from './hud/BunkerBusterDepthView';
 import { useKillTracking } from './hooks/useKillTracking';
 import { useChat } from './hooks/useChat';
 
@@ -55,8 +56,11 @@ export function GameScreen() {
     vehicleSpeed: 0,
     vehicleThrottle: 0,
     vehicleReloading: false,
+    vehicleWeaponSlots: [{ name: 'MINIGUN', color: '#ffaa00' }, { name: 'ROCKETS', color: '#ff4400' }],
     nearVehicle: false,
     nearVehicleName: null,
+    bunkerBusterActive: false,
+    bunkerBusterDepthData: null as { blockTypes: number[]; bombY: number; columnTopY: number; columnBottomY: number } | null,
   });
 
   // ── Kill tracking hook ──
@@ -582,7 +586,13 @@ export function GameScreen() {
           hitMarkerType={state.hitMarkerType}
           mountedVehicleName={state.mountedVehicleName}
           vehicleWeapon={state.vehicleWeapon}
+          vehicleWeaponColor={state.vehicleWeaponSlots[state.vehicleWeapon]?.color}
         />
+      )}
+
+      {/* ═══ BUNKER BUSTER DEPTH VIEW ═══ */}
+      {state.locked && state.bunkerBusterActive && state.bunkerBusterDepthData && (
+        <BunkerBusterDepthView depthData={state.bunkerBusterDepthData} />
       )}
 
       {/* Click to deploy overlay */}
@@ -749,8 +759,10 @@ export function GameScreen() {
         vehicleAmmo={state.vehicleAmmo}
         vehicleReloading={state.vehicleReloading}
         vehicleAltitude={state.vehicleAltitude}
+        vehicleMaxAmmo={state.vehicleMaxAmmo}
         vehicleSpeed={state.vehicleSpeed}
         vehicleThrottle={state.vehicleThrottle}
+        vehicleWeaponSlots={state.vehicleWeaponSlots}
       />
     </div>
   );

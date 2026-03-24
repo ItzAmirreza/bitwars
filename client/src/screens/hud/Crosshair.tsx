@@ -1,19 +1,12 @@
-import { VEHICLE_WEAPONS_CONFIG } from '../../shared-config';
-
-// Vehicle weapon data for crosshair color — sourced from shared config
-const VEHICLE_WEAPON_DATA = VEHICLE_WEAPONS_CONFIG.map((w) => ({
-  name: w.name,
-  color: w.color,
-}));
-
 export interface CrosshairProps {
   hitMarker: boolean;
   hitMarkerType: string;
   mountedVehicleName: string | null;
   vehicleWeapon: number;
+  vehicleWeaponColor?: string;
 }
 
-export function Crosshair({ hitMarker, hitMarkerType, mountedVehicleName, vehicleWeapon }: CrosshairProps) {
+export function Crosshair({ hitMarker, hitMarkerType, mountedVehicleName, vehicleWeaponColor }: CrosshairProps) {
   return (
     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
       {mountedVehicleName ? (
@@ -21,16 +14,16 @@ export function Crosshair({ hitMarker, hitMarkerType, mountedVehicleName, vehicl
         <div className="relative" style={{ width: '64px', height: '64px' }}>
           {/* Outer circle */}
           <svg width="64" height="64" viewBox="0 0 64 64" fill="none" style={{ position: 'absolute', top: 0, left: 0 }}>
-            <circle cx="32" cy="32" r="28" stroke={VEHICLE_WEAPON_DATA[vehicleWeapon]?.color ?? '#ffaa00'} strokeWidth="1" opacity="0.4" strokeDasharray="4 4"/>
+            <circle cx="32" cy="32" r="28" stroke={vehicleWeaponColor ?? '#ffaa00'} strokeWidth="1" opacity="0.4" strokeDasharray="4 4"/>
             {/* Cardinal ticks */}
-            <line x1="32" y1="2" x2="32" y2="8" stroke={VEHICLE_WEAPON_DATA[vehicleWeapon]?.color ?? '#ffaa00'} strokeWidth="1.5" opacity="0.7"/>
-            <line x1="32" y1="56" x2="32" y2="62" stroke={VEHICLE_WEAPON_DATA[vehicleWeapon]?.color ?? '#ffaa00'} strokeWidth="1.5" opacity="0.7"/>
-            <line x1="2" y1="32" x2="8" y2="32" stroke={VEHICLE_WEAPON_DATA[vehicleWeapon]?.color ?? '#ffaa00'} strokeWidth="1.5" opacity="0.7"/>
-            <line x1="56" y1="32" x2="62" y2="32" stroke={VEHICLE_WEAPON_DATA[vehicleWeapon]?.color ?? '#ffaa00'} strokeWidth="1.5" opacity="0.7"/>
+            <line x1="32" y1="2" x2="32" y2="8" stroke={vehicleWeaponColor ?? '#ffaa00'} strokeWidth="1.5" opacity="0.7"/>
+            <line x1="32" y1="56" x2="32" y2="62" stroke={vehicleWeaponColor ?? '#ffaa00'} strokeWidth="1.5" opacity="0.7"/>
+            <line x1="2" y1="32" x2="8" y2="32" stroke={vehicleWeaponColor ?? '#ffaa00'} strokeWidth="1.5" opacity="0.7"/>
+            <line x1="56" y1="32" x2="62" y2="32" stroke={vehicleWeaponColor ?? '#ffaa00'} strokeWidth="1.5" opacity="0.7"/>
             {/* Inner circle */}
-            <circle cx="32" cy="32" r="6" stroke={VEHICLE_WEAPON_DATA[vehicleWeapon]?.color ?? '#ffaa00'} strokeWidth="1" opacity="0.6"/>
+            <circle cx="32" cy="32" r="6" stroke={vehicleWeaponColor ?? '#ffaa00'} strokeWidth="1" opacity="0.6"/>
             {/* Center dot */}
-            <circle cx="32" cy="32" r="1.5" fill={VEHICLE_WEAPON_DATA[vehicleWeapon]?.color ?? '#ffaa00'} opacity="0.9"/>
+            <circle cx="32" cy="32" r="1.5" fill={vehicleWeaponColor ?? '#ffaa00'} opacity="0.9"/>
           </svg>
 
           {/* Hit marker — X shape, colored by hit type */}

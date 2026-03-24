@@ -623,3 +623,194 @@ export function playSwitch(core: AudioCore, spatial?: SpatialSoundOptions): void
   osc.start(t);
   osc.stop(t + 0.08);
 }
+
+// ── Fighter Jet weapon sounds ──
+
+export function playBunkerBusterDrop(core: AudioCore, spatial?: SpatialSoundOptions): void {
+  const busOptions: SpatialBusOptions = {
+    gain: 1,
+    minDistance: 6,
+    maxDistance: 300,
+    rolloff: 0.9,
+    coneInner: 80,
+    coneOuter: 260,
+    coneOuterGain: 0.25,
+    occlusionStrength: 0.8,
+    baseLowpass: 8000,
+    reverbAmount: 0.18,
+    bus: 'weapon',
+    voiceCategory: 'weapon',
+    voiceDuration: 0.8,
+  };
+  const result = core.resolveOutput(spatial, busOptions, 0.4);
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
+  const t0 = t + delay;
+
+  // Heavy descending whistle (bomb falling)
+  const whistle = ctx.createOscillator();
+  whistle.type = 'sine';
+  whistle.frequency.setValueAtTime(900, t0);
+  whistle.frequency.exponentialRampToValueAtTime(200, t0 + 0.7);
+  const wLp = ctx.createBiquadFilter();
+  wLp.type = 'lowpass';
+  wLp.frequency.value = 2200;
+  const wg = ctx.createGain();
+  wg.gain.setValueAtTime(0.25, t0);
+  wg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.7);
+  whistle.connect(wLp).connect(wg).connect(out);
+  whistle.start(t0);
+  whistle.stop(t0 + 0.72);
+
+  // Thuddy release
+  const thud = ctx.createOscillator();
+  thud.type = 'sine';
+  thud.frequency.setValueAtTime(90, t0);
+  thud.frequency.exponentialRampToValueAtTime(35, t0 + 0.15);
+  const tg = ctx.createGain();
+  tg.gain.setValueAtTime(0.35, t0);
+  tg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.15);
+  thud.connect(tg).connect(out);
+  thud.start(t0);
+  thud.stop(t0 + 0.16);
+
+  // Wind noise layer
+  const windSrc = ctx.createBufferSource();
+  windSrc.buffer = core.noise(0.6, 0.3);
+  const windBp = ctx.createBiquadFilter();
+  windBp.type = 'bandpass';
+  windBp.frequency.value = 1200;
+  windBp.Q.value = 0.6;
+  const windG = ctx.createGain();
+  windG.gain.setValueAtTime(0.15, t0);
+  windG.gain.exponentialRampToValueAtTime(0.001, t0 + 0.6);
+  windSrc.connect(windBp).connect(windG).connect(out);
+  windSrc.start(t0);
+  windSrc.stop(t0 + 0.62);
+}
+
+export function playBunkerBusterDetonation(core: AudioCore, spatial?: SpatialSoundOptions): void {
+  const busOptions: SpatialBusOptions = {
+    gain: 1,
+    minDistance: 10,
+    maxDistance: 350,
+    rolloff: 0.7,
+    coneInner: 360,
+    coneOuter: 360,
+    coneOuterGain: 1,
+    occlusionStrength: 0.6,
+    baseLowpass: 6000,
+    reverbAmount: 0.3,
+    bus: 'combat',
+    voiceCategory: 'combat',
+    voiceDuration: 1.5,
+  };
+  const result = core.resolveOutput(spatial, busOptions, 0.5);
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
+  const t0 = t + delay;
+
+  // Deep sub-bass rumble
+  const subOsc = ctx.createOscillator();
+  subOsc.type = 'sine';
+  subOsc.frequency.setValueAtTime(45, t0);
+  subOsc.frequency.exponentialRampToValueAtTime(18, t0 + 1.2);
+  const subG = ctx.createGain();
+  subG.gain.setValueAtTime(0.45, t0);
+  subG.gain.exponentialRampToValueAtTime(0.001, t0 + 1.2);
+  subOsc.connect(subG).connect(out);
+  subOsc.start(t0);
+  subOsc.stop(t0 + 1.22);
+
+  // Heavy blast noise
+  const blast = ctx.createBufferSource();
+  blast.buffer = core.noise(0.8, 0.2);
+  const blastLp = ctx.createBiquadFilter();
+  blastLp.type = 'lowpass';
+  blastLp.frequency.setValueAtTime(1200, t0);
+  blastLp.frequency.exponentialRampToValueAtTime(300, t0 + 0.8);
+  const blastG = ctx.createGain();
+  blastG.gain.setValueAtTime(0.35, t0);
+  blastG.gain.exponentialRampToValueAtTime(0.001, t0 + 0.9);
+  blast.connect(blastLp).connect(blastG).connect(out);
+  blast.start(t0);
+  blast.stop(t0 + 0.92);
+
+  // Crumbling aftermath
+  const crumble = ctx.createBufferSource();
+  crumble.buffer = core.noise(1.2, 0.15);
+  const crumbleBp = ctx.createBiquadFilter();
+  crumbleBp.type = 'bandpass';
+  crumbleBp.frequency.value = 400;
+  crumbleBp.Q.value = 0.4;
+  const crumbleG = ctx.createGain();
+  crumbleG.gain.setValueAtTime(0.001, t0);
+  crumbleG.gain.linearRampToValueAtTime(0.18, t0 + 0.2);
+  crumbleG.gain.exponentialRampToValueAtTime(0.001, t0 + 1.3);
+  crumble.connect(crumbleBp).connect(crumbleG).connect(out);
+  crumble.start(t0);
+  crumble.stop(t0 + 1.32);
+}
+
+export function playCarpetBombDrop(core: AudioCore, spatial?: SpatialSoundOptions): void {
+  const busOptions: SpatialBusOptions = {
+    gain: 1,
+    minDistance: 5,
+    maxDistance: 250,
+    rolloff: 1.0,
+    coneInner: 90,
+    coneOuter: 260,
+    coneOuterGain: 0.3,
+    occlusionStrength: 0.75,
+    baseLowpass: 9000,
+    reverbAmount: 0.14,
+    bus: 'weapon',
+    voiceCategory: 'weapon',
+    voiceDuration: 0.4,
+  };
+  const result = core.resolveOutput(spatial, busOptions, 0.25);
+  if (!result) return;
+  const { ctx, t, out, delay } = result;
+  const t0 = t + delay;
+
+  // Thuddy bomb release clunk
+  const clunk = ctx.createOscillator();
+  clunk.type = 'sine';
+  clunk.frequency.setValueAtTime(120, t0);
+  clunk.frequency.exponentialRampToValueAtTime(50, t0 + 0.12);
+  const cg = ctx.createGain();
+  cg.gain.setValueAtTime(0.30, t0);
+  cg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.12);
+  clunk.connect(cg).connect(out);
+  clunk.start(t0);
+  clunk.stop(t0 + 0.13);
+
+  // Mechanical release noise
+  const mech = ctx.createBufferSource();
+  mech.buffer = core.noise(0.08, 0.1);
+  const mechBp = ctx.createBiquadFilter();
+  mechBp.type = 'bandpass';
+  mechBp.frequency.value = 1800;
+  mechBp.Q.value = 1.2;
+  const mg = ctx.createGain();
+  mg.gain.setValueAtTime(0.18, t0);
+  mg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.08);
+  mech.connect(mechBp).connect(mg).connect(out);
+  mech.start(t0);
+  mech.stop(t0 + 0.09);
+
+  // Short whoosh as bomb departs
+  const whoosh = ctx.createBufferSource();
+  whoosh.buffer = core.noise(0.2, 0.2);
+  const whooshBp = ctx.createBiquadFilter();
+  whooshBp.type = 'bandpass';
+  whooshBp.frequency.setValueAtTime(800, t0);
+  whooshBp.frequency.exponentialRampToValueAtTime(400, t0 + 0.18);
+  whooshBp.Q.value = 0.5;
+  const wg = ctx.createGain();
+  wg.gain.setValueAtTime(0.12, t0 + 0.03);
+  wg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.2);
+  whoosh.connect(whooshBp).connect(wg).connect(out);
+  whoosh.start(t0);
+  whoosh.stop(t0 + 0.22);
+}

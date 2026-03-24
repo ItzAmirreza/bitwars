@@ -4,10 +4,27 @@
 use spacetimedb::{reducer, Identity, ReducerContext, Table};
 
 use crate::combat::*;
+use crate::constants;
 use crate::helpers::*;
 use crate::tables::*;
 use crate::types::*;
 use crate::weapons;
+
+/// Map a vehicle's weapon slot (0 or 1) to the actual vehicleWeapons index.
+/// Helicopter: slot 0 → index 0 (MINIGUN), slot 1 → index 1 (ROCKETS)
+/// Fighter Jet: slot 0 → index 2 (BUNKER BUSTER), slot 1 → index 3 (CARPET BOMB)
+fn resolve_vehicle_weapon_index(vehicle_type: u8, slot: u8) -> u8 {
+    if vehicle_type == constants::vehicle_type_fighter_jet() {
+        if slot == 0 {
+            constants::jet_weapon_slot0()
+        } else {
+            constants::jet_weapon_slot1()
+        }
+    } else {
+        // Helicopter: slot == index
+        slot
+    }
+}
 
 #[reducer]
 pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(), String> {
@@ -21,8 +38,9 @@ pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(
     if player.mounted_vehicle_id == 0 {
         return Err("Not in a vehicle".to_string());
     }
-    if weapon_index >= weapons::num_vehicle_weapons() {
-        return Err("Invalid vehicle weapon index".to_string());
+    // weapon_index is a slot (0 or 1), not the global weapon index
+    if weapon_index > 1 {
+        return Err("Invalid vehicle weapon slot".to_string());
     }
     let vehicle = ctx
         .db
@@ -75,17 +93,18 @@ pub fn fire_vehicle_weapon(
         return Err("Vehicle is destroyed".to_string());
     }
 
-    let weapon_idx = vehicle.weapon_type;
-    if weapon_idx >= weapons::num_vehicle_weapons() {
+    let slot = vehicle.weapon_type;
+    let resolved_idx = resolve_vehicle_weapon_index(vehicle.vehicle_type, slot);
+    if resolved_idx >= weapons::num_vehicle_weapons() {
         return Err("Invalid vehicle weapon".to_string());
     }
-    let def = weapons::get_vehicle_weapon(weapon_idx);
+    let def = weapons::get_vehicle_weapon(resolved_idx);
 
     // Shared fire rate check
     weapons::check_fire_rate(ctx, vehicle.weapon_last_fire, def.fire_rate)?;
 
     // Ammo check
-    let current_ammo = if vehicle.weapon_type == 0 {
+    let current_ammo = if slot == 0 {
         vehicle.weapon_ammo_primary
     } else {
         vehicle.weapon_ammo_secondary
@@ -120,19 +139,43 @@ pub fn fire_vehicle_weapon(
         z: entity.pos.z + entity.vel.z * dt,
     };
 
-    let origin = Vec3 {
-        x: muzzle_base.x + normalized_dir.x * 3.5,
-        y: muzzle_base.y + 1.0,
-        z: muzzle_base.z + normalized_dir.z * 3.5,
+    // Carpet bomb: compute origin from jet position, direction straight down
+    // with forward velocity inheritance. Alternate left/right offset.
+    let (origin, shot_direction) = if resolved_idx == constants::jet_weapon_slot1() {
+        let side = if current_ammo % 2 == 0 { 1.0f32 } else { -1.0f32 };
+        let right_x = entity.rot.yaw.cos();
+        let right_z = -entity.rot.yaw.sin();
+        let bomb_origin = Vec3 {
+            x: muzzle_base.x + right_x * side * 2.5,
+            y: muzzle_base.y - 1.0,
+            z: muzzle_base.z + right_z * side * 2.5,
+        };
+        // Direction: straight down + forward velocity inheritance
+        let fwd_x = -entity.rot.yaw.sin();
+        let fwd_z = -entity.rot.yaw.cos();
+        let speed = (entity.vel.x * entity.vel.x + entity.vel.z * entity.vel.z).sqrt();
+        let bomb_dir = Vec3 {
+            x: fwd_x * speed * 0.3,
+            y: -1.0,
+            z: fwd_z * speed * 0.3,
+        };
+        (bomb_origin, bomb_dir)
+    } else {
+        let origin = Vec3 {
+            x: muzzle_base.x + normalized_dir.x * 3.5,
+            y: muzzle_base.y + 1.0,
+            z: muzzle_base.z + normalized_dir.z * 3.5,
+        };
+        (origin, direction.clone())
     };
 
     // Deduct ammo
-    let new_ammo_primary = if vehicle.weapon_type == 0 {
+    let new_ammo_primary = if slot == 0 {
         vehicle.weapon_ammo_primary - 1
     } else {
         vehicle.weapon_ammo_primary
     };
-    let new_ammo_secondary = if vehicle.weapon_type == 1 {
+    let new_ammo_secondary = if slot == 1 {
         vehicle.weapon_ammo_secondary - 1
     } else {
         vehicle.weapon_ammo_secondary
@@ -145,7 +188,7 @@ pub fn fire_vehicle_weapon(
         ..vehicle
     });
 
-    let weapon_code = 100 + weapon_idx;
+    let weapon_code = 100 + resolved_idx;
 
     // Projectile weapons: just record shot
     if !def.is_hitscan() {
@@ -153,7 +196,7 @@ pub fn fire_vehicle_weapon(
             id: 0,
             shooter: sender,
             origin,
-            direction,
+            direction: shot_direction,
             hit_pos: ZERO_VEL,
             has_hit: false,
             weapon: weapon_code,
@@ -168,7 +211,7 @@ pub fn fire_vehicle_weapon(
         ctx,
         sender,
         &origin,
-        &direction,
+        &shot_direction,
         dir_len,
         &hit_players,
         def.damage,
@@ -199,7 +242,7 @@ pub fn fire_vehicle_weapon(
         id: 0,
         shooter: sender,
         origin: origin.clone(),
-        direction,
+        direction: shot_direction,
         hit_pos: shot_hit_pos,
         has_hit: shot_has_hit,
         weapon: weapon_code,
@@ -230,14 +273,6 @@ pub fn vehicle_projectile_impact(
         .identity()
         .find(sender)
         .ok_or("Not registered")?;
-    if vehicle_weapon >= weapons::num_vehicle_weapons() {
-        return Err("Invalid vehicle weapon".to_string());
-    }
-
-    let def = weapons::get_vehicle_weapon(vehicle_weapon);
-    if def.is_hitscan() {
-        return Err("Not a projectile weapon".to_string());
-    }
 
     if source_vehicle_id == 0 {
         return Err("Invalid source vehicle".to_string());
@@ -252,7 +287,22 @@ pub fn vehicle_projectile_impact(
         return Err("Not pilot of source vehicle".to_string());
     }
 
-    let weapon_code = 100 + vehicle_weapon;
+    // The client sends the weapon_code (100 + resolved_idx). Extract the resolved index.
+    let resolved_idx = if vehicle_weapon >= 100 {
+        vehicle_weapon - 100
+    } else {
+        vehicle_weapon
+    };
+    if resolved_idx >= weapons::num_vehicle_weapons() {
+        return Err("Invalid vehicle weapon".to_string());
+    }
+
+    let def = weapons::get_vehicle_weapon(resolved_idx);
+    if def.is_hitscan() {
+        return Err("Not a projectile weapon".to_string());
+    }
+
+    let weapon_code = 100 + resolved_idx;
     let Some(shot) = find_matching_projectile_shot(
         ctx,
         sender,
@@ -267,7 +317,7 @@ pub fn vehicle_projectile_impact(
         log::debug!(
             "Ignoring unmatched vehicle projectile impact (player={:?}, weapon={}, vehicle={}, pos=({:.2},{:.2},{:.2}))",
             sender,
-            vehicle_weapon,
+            resolved_idx,
             source_vehicle_id,
             impact_pos.x,
             impact_pos.y,
@@ -283,6 +333,21 @@ pub fn vehicle_projectile_impact(
 
     consume_projectile_shot(ctx, shot, &impact_pos);
 
+    // Bunker buster: drill down and detonate underground
+    if resolved_idx == constants::jet_weapon_slot0() {
+        crate::combat::bunker_buster::bunker_buster_drill_and_detonate(
+            ctx,
+            sender,
+            &impact_pos,
+            def.damage,
+            def.radius,
+            weapon_code,
+            source_vehicle_id,
+        );
+        return Ok(());
+    }
+
+    // Standard projectile impact (rockets, carpet bomb, etc.)
     let hit_players = collect_all_player_ids(ctx);
     let hit_vehicles = collect_all_vehicle_ids(ctx);
     apply_splash_player_damage(
@@ -345,18 +410,19 @@ pub fn reload_vehicle_weapon(ctx: &ReducerContext) -> Result<(), String> {
         return Err("Not the pilot".to_string());
     }
 
-    let weapon_idx = vehicle.weapon_type;
-    if weapon_idx >= weapons::num_vehicle_weapons() {
+    let slot = vehicle.weapon_type;
+    let resolved_idx = resolve_vehicle_weapon_index(vehicle.vehicle_type, slot);
+    if resolved_idx >= weapons::num_vehicle_weapons() {
         return Err("Invalid vehicle weapon".to_string());
     }
-    let def = weapons::get_vehicle_weapon(weapon_idx);
+    let def = weapons::get_vehicle_weapon(resolved_idx);
 
-    let new_ammo_primary = if vehicle.weapon_type == 0 {
+    let new_ammo_primary = if slot == 0 {
         def.max_ammo
     } else {
         vehicle.weapon_ammo_primary
     };
-    let new_ammo_secondary = if vehicle.weapon_type == 1 {
+    let new_ammo_secondary = if slot == 1 {
         def.max_ammo
     } else {
         vehicle.weapon_ammo_secondary

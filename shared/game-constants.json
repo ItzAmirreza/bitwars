@@ -148,6 +148,34 @@
       "delivery": "projectile",
       "color": "#ff4400",
       "reloadTime": 2.5
+    },
+    {
+      "index": 2,
+      "name": "BUNKER BUSTER",
+      "damage": 150,
+      "radius": 10.0,
+      "fireRate": 0.4,
+      "maxAmmo": 4,
+      "maxRange": 200.0,
+      "projectileSpeed": 60.0,
+      "gravity": 25.0,
+      "delivery": "projectile",
+      "color": "#ff2200",
+      "reloadTime": 8.0
+    },
+    {
+      "index": 3,
+      "name": "CARPET BOMB",
+      "damage": 90,
+      "radius": 7.0,
+      "fireRate": 10.0,
+      "maxAmmo": 28,
+      "maxRange": 300.0,
+      "projectileSpeed": 5.0,
+      "gravity": 20.0,
+      "delivery": "projectile",
+      "color": "#ff6600",
+      "reloadTime": 6.0
     }
   ],
 
@@ -211,7 +239,7 @@
     "camera": {
       "distance": 18,
       "height": 6.0,
-      "pitchMin": -0.72,
+      "pitchMin": -1.2,
       "pitchMax": 0.52
     }
   },

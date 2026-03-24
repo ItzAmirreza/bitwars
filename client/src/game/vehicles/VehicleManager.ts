@@ -192,6 +192,35 @@ export default class VehicleManager {
     return vt ? vt.name : null;
   }
 
+  /**
+   * Resolve the actual vehicle weapon index from the current slot.
+   * Fighter jets use weapon indices 2/3 (Bunker Buster/Carpet Bomb),
+   * while helicopters use 0/1 (Minigun/Rockets).
+   */
+  getResolvedVehicleWeaponIndex(): number {
+    const vt = this.getMountedVehicleType();
+    if (vt && vt.typeId === VEHICLE_TYPES.FighterJet) {
+      // Jet slot 0 → weapon index 2 (Bunker Buster), slot 1 → weapon index 3 (Carpet Bomb)
+      return this.vehicleWeaponIndex + 2;
+    }
+    return this.vehicleWeaponIndex;
+  }
+
+  /**
+   * Resolve the actual weapon index for a specific slot (without changing vehicleWeaponIndex).
+   * Used by Engine.ts to get correct maxAmmo on mount.
+   */
+  getResolvedWeaponIndexForSlot(slot: number): number {
+    const vt = this.getMountedVehicleType();
+    if (vt && vt.typeId === VEHICLE_TYPES.FighterJet) {
+      return slot + 2;
+    }
+    return slot;
+  }
+
+  /** Alternating side for carpet bomb drops: +1 = right, -1 = left */
+  carpetBombSide = 1;
+
   // ══════════════════════════════════════════════════════════════
   //  ENTITY MANAGEMENT
   // ══════════════════════════════════════════════════════════════

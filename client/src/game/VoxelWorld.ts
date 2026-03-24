@@ -71,6 +71,7 @@ export class VoxelWorld {
   private dirtyChunks: Set<number> = new Set();
   private chunkRevision: Map<number, number> = new Map();
   private mat: THREE.MeshPhongMaterial;
+  private chunkShader: THREE.WebGLProgramParametersWithUniforms | null = null;
 
   private workers: Worker[] = [];
   private workersEnabled = false;
@@ -93,6 +94,48 @@ export class VoxelWorld {
       shininess: 6,
       specular: new THREE.Color(0x111418),
     });
+
+    this.mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uBombActive = { value: 0.0 };
+      shader.uniforms.uBombPos = { value: new THREE.Vector3() };
+      shader.uniforms.uBombRadius = { value: 10.0 };
+
+      this.chunkShader = shader;
+
+      // Vertex shader: pass world position to fragment
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vWorldPos;`,
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
+      );
+
+      // Fragment shader: X-ray transparency near bomb
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vWorldPos;
+        uniform float uBombActive;
+        uniform vec3 uBombPos;
+        uniform float uBombRadius;`,
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+        if (uBombActive > 0.5) {
+          float dist = distance(vWorldPos, uBombPos);
+          if (dist < uBombRadius) {
+            float alpha = smoothstep(0.0, uBombRadius, dist) * 0.85 + 0.15;
+            gl_FragColor.a = alpha;
+          }
+        }`,
+      );
+    };
+
     this.initWorkers();
   }
 
@@ -554,6 +597,17 @@ export class VoxelWorld {
       const shouldCast = castRadiusChunks > 0 && (dx * dx + dz * dz) <= castRadiusSq;
       if (mesh.castShadow !== shouldCast) mesh.castShadow = shouldCast;
       if (!mesh.receiveShadow) mesh.receiveShadow = true;
+    }
+  }
+
+  setBombXRay(active: boolean, pos?: THREE.Vector3): void {
+    if (!this.chunkShader) return;
+    this.chunkShader.uniforms.uBombActive.value = active ? 1.0 : 0.0;
+    if (pos) this.chunkShader.uniforms.uBombPos.value.copy(pos);
+    // Only enable expensive transparency when bomb is active
+    if (this.mat.transparent !== active) {
+      this.mat.transparent = active;
+      this.mat.needsUpdate = true;
     }
   }
 

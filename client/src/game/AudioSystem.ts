@@ -196,6 +196,18 @@ export class AudioSystem {
     WeaponAudio.playVehicleRocket(this.core, spatial);
   }
 
+  playBunkerBusterDrop(spatial?: SpatialSoundOptions): void {
+    WeaponAudio.playBunkerBusterDrop(this.core, spatial);
+  }
+
+  playBunkerBusterDetonation(spatial?: SpatialSoundOptions): void {
+    WeaponAudio.playBunkerBusterDetonation(this.core, spatial);
+  }
+
+  playCarpetBombDrop(spatial?: SpatialSoundOptions): void {
+    WeaponAudio.playCarpetBombDrop(this.core, spatial);
+  }
+
   playProjectileFlyby(speed: number, spatial?: SpatialSoundOptions): void {
     WeaponAudio.playProjectileFlyby(this.core, speed, spatial);
   }

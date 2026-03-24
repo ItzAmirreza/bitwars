@@ -79,8 +79,16 @@ export interface EngineState {
   vehicleSpeed: number;
   vehicleThrottle: number;   // 0..1 for jet throttle
   vehicleReloading: boolean;
+  vehicleWeaponSlots: { name: string; color: string }[];
   nearVehicle: boolean;
   nearVehicleName: string | null;
+  bunkerBusterActive: boolean;
+  bunkerBusterDepthData: {
+    blockTypes: number[];
+    bombY: number;
+    columnTopY: number;
+    columnBottomY: number;
+  } | null;
 }
 
 export class Engine {
@@ -395,6 +403,7 @@ export class Engine {
     // ── Input ──
     container.addEventListener('mousedown', this.onMouseDown);
     container.addEventListener('mouseup', this.onMouseUp);
+    container.addEventListener('contextmenu', this.onContextMenu);
     document.addEventListener('keydown', this.onKeyDown);
     document.addEventListener('mousemove', this.onVehicleMouseMove);
     document.addEventListener('wheel', this.onVehicleWheel, { passive: true });
@@ -625,7 +634,20 @@ export class Engine {
       this.mouseDown = true;
       if (this.mountedVehicleId !== 0) this.tryVehicleFire();
       else this.tryFire();
+    } else if (e.button === 2 && this.controls.locked) {
+      this.tryBunkerBusterDetonate();
     }
+  };
+
+  private tryBunkerBusterDetonate(): void {
+    if (this.mountedVehicleId === 0) return;
+    const resolvedIdx = this.vehicleManager.getResolvedVehicleWeaponIndex();
+    if (resolvedIdx !== 2) return;
+    this.projectileManager.detonateActiveBunkerBuster();
+  }
+
+  private onContextMenu = (e: Event): void => {
+    e.preventDefault();
   };
 
   setPerfSandboxMotion(enabled: boolean, mode: HarnessMode): void {
@@ -1065,7 +1087,7 @@ export class Engine {
       if (this.mountedVehicleId !== 0) {
         // Vehicle weapon switching: 1=Minigun, 2=Rockets
         const slot = parseInt(e.code.charAt(5), 10) - 1;
-        if (slot >= 0 && slot < VEHICLE_WEAPONS.length && slot !== this.vehicleManager.vehicleWeaponIndex) {
+        if (slot >= 0 && slot < 2 && slot !== this.vehicleManager.vehicleWeaponIndex) {
           this.vehicleManager.vehicleWeaponIndex = slot;
           this.audio.playSwitch(this.localAudioSource(-0.1));
           // Sync to server
@@ -1252,6 +1274,8 @@ export class Engine {
     // Vehicle weapons (100+ namespace)
     else if (weaponIdx === 100) this.audio.playVehicleMinigun(spatial); // Minigun
     else if (weaponIdx === 101) this.audio.playVehicleRocket(spatial);  // Rockets
+    else if (weaponIdx === 102) this.audio.playBunkerBusterDrop(spatial); // Bunker Buster
+    else if (weaponIdx === 103) this.audio.playCarpetBombDrop(spatial);   // Carpet Bomb
   }
 
   private localAudioSource(heightOffset = 0): {
@@ -1595,12 +1619,17 @@ export class Engine {
             this.vehicleManager.vehicleReloadingUntil[1] = 0;
             this.vehicleManager.vehicleCameraDistance = this.vehicleManager.CAMERA_DISTANCE;
             const vRow = this.vehicleManager.getVehicleRow(this.mountedVehicleId);
+            // Resolve weapon indices based on vehicle type for correct maxAmmo
+            const wep0Idx = this.vehicleManager.getResolvedWeaponIndexForSlot(0);
+            const wep1Idx = this.vehicleManager.getResolvedWeaponIndexForSlot(1);
+            const maxAmmo0 = VEHICLE_WEAPONS[wep0Idx]?.maxAmmo ?? VEHICLE_WEAPONS[0].maxAmmo;
+            const maxAmmo1 = VEHICLE_WEAPONS[wep1Idx]?.maxAmmo ?? VEHICLE_WEAPONS[1].maxAmmo;
             if (vRow) {
-              this.vehicleManager.vehicleAmmo[0] = Number(vRow.weaponAmmoPrimary ?? VEHICLE_WEAPONS[0].maxAmmo);
-              this.vehicleManager.vehicleAmmo[1] = Number(vRow.weaponAmmoSecondary ?? VEHICLE_WEAPONS[1].maxAmmo);
+              this.vehicleManager.vehicleAmmo[0] = Number(vRow.weaponAmmoPrimary ?? maxAmmo0);
+              this.vehicleManager.vehicleAmmo[1] = Number(vRow.weaponAmmoSecondary ?? maxAmmo1);
             } else {
-              this.vehicleManager.vehicleAmmo[0] = VEHICLE_WEAPONS[0].maxAmmo;
-              this.vehicleManager.vehicleAmmo[1] = VEHICLE_WEAPONS[1].maxAmmo;
+              this.vehicleManager.vehicleAmmo[0] = maxAmmo0;
+              this.vehicleManager.vehicleAmmo[1] = maxAmmo1;
             }
           } else {
             // Dismounting — snap camera to server player position so infantry
@@ -1701,7 +1730,7 @@ export class Engine {
         this.playRemoteWeaponAudio(weaponIdx, origin, dir);
 
         if (vw.projectileSpeed > 0) {
-          // Rocket: spawn projectile (reuse RPG config index 2 for visual)
+          // Projectile weapon: spawn with vehicle-specific visual config
           let approxAgeMs = 0;
           const firedAt = shot.firedAt;
           if (firedAt && typeof firedAt.toMillis === 'function') {
@@ -1711,9 +1740,10 @@ export class Engine {
             }
           }
           const firedAtPerf = performance.now() - approxAgeMs;
-          this.projectileManager.spawnRemote(2, origin, dir, firedAtPerf, shooterId);
-          // Muzzle flash at launch point
-          this.vfx.emitMuzzleFlashAt(origin, dir, 0xff4400);
+          this.projectileManager.spawnRemoteVehicle(2, origin, dir, firedAtPerf, shooterId, vehWeaponIdx, 0);
+          // Muzzle flash at launch point (color varies by weapon)
+          const flashColor = vehWeaponIdx === 2 ? 0xff2200 : vehWeaponIdx === 3 ? 0xff6600 : 0xff4400;
+          this.vfx.emitMuzzleFlashAt(origin, dir, flashColor);
         } else {
           // Hitscan (minigun): tracer + muzzle flash + impact
           const hasHit = shot.hasHit as boolean;
@@ -1951,6 +1981,7 @@ export class Engine {
           this.vehicleManager.vehicleReloadingUntil[1] = 0;
           this.vehicleManager.vehicleCameraDistance = this.vehicleManager.CAMERA_DISTANCE;
           this.vehicleManager.jetThrottle = 0;
+          this.vehicleManager.carpetBombSide = 1;
         }
 
         // ── Camera + Controls ──
@@ -2790,7 +2821,7 @@ export class Engine {
         if (Number.isFinite(serverAmmoSecondary) && this.vehicleManager.vehicleReloadingUntil[1] <= now) this.vehicleManager.vehicleAmmo[1] = serverAmmoSecondary;
         // Sync weapon type from server
         const serverWeaponType = Number(vRow.weaponType ?? 0);
-        if (Number.isFinite(serverWeaponType) && serverWeaponType < VEHICLE_WEAPONS.length) {
+        if (Number.isFinite(serverWeaponType) && serverWeaponType < 2) {
           this.vehicleManager.vehicleWeaponIndex = serverWeaponType;
         }
       }
@@ -2808,7 +2839,33 @@ export class Engine {
       nearVehicleName = nearName;
     }
 
-    const curVehWep = VEHICLE_WEAPONS[this.vehicleManager.vehicleWeaponIndex];
+    const resolvedVehWepIdx = this.vehicleManager.getResolvedVehicleWeaponIndex();
+    const curVehWep = VEHICLE_WEAPONS[resolvedVehWepIdx];
+
+    // ── Bunker buster depth data + X-ray ──
+    let bbActive = false;
+    let bbDepthData: EngineState['bunkerBusterDepthData'] = null;
+    const bbProj = this.projectileManager.getActiveBunkerBuster();
+    if (this.mountedVehicleId !== 0 && resolvedVehWepIdx === 2 && bbProj) {
+      bbActive = true;
+      const bx = Math.floor(bbProj.pos.x);
+      const bz = Math.floor(bbProj.pos.z);
+      const bombY = bbProj.pos.y;
+      const columnTopY = Math.floor(bombY) + 10;
+      const columnBottomY = Math.floor(bombY) - 30;
+      const blockTypes: number[] = [];
+      for (let y = columnTopY; y >= columnBottomY; y--) {
+        blockTypes.push(this.world.getBlock(bx, y, bz));
+      }
+      bbDepthData = { blockTypes, bombY, columnTopY, columnBottomY };
+    }
+
+    // Update chunk X-ray transparency around active bunker buster
+    if (bbProj) {
+      this.world.setBombXRay(true, bbProj.pos);
+    } else {
+      this.world.setBombXRay(false);
+    }
 
     this.onStateChange({
       weapon: this.weapons.currentWeapon,
@@ -2837,8 +2894,14 @@ export class Engine {
       vehicleSpeed,
       vehicleThrottle: this.vehicleManager.jetThrottle,
       vehicleReloading: this.mountedVehicleId !== 0 && this.vehicleManager.vehicleReloadingUntil[this.vehicleManager.vehicleWeaponIndex] > performance.now(),
+      vehicleWeaponSlots: [
+        { name: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.name ?? '', color: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.color ?? '#fff' },
+        { name: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(1)]?.name ?? '', color: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(1)]?.color ?? '#fff' },
+      ],
       nearVehicle,
       nearVehicleName,
+      bunkerBusterActive: bbActive,
+      bunkerBusterDepthData: bbDepthData,
     });
   }
 
@@ -2859,6 +2922,7 @@ export class Engine {
     this.clock.dispose();
     this.container.removeEventListener('mousedown', this.onMouseDown);
     this.container.removeEventListener('mouseup', this.onMouseUp);
+    this.container.removeEventListener('contextmenu', this.onContextMenu);
     document.removeEventListener('keydown', this.onKeyDown);
     document.removeEventListener('mousemove', this.onVehicleMouseMove);
     document.removeEventListener('wheel', this.onVehicleWheel);

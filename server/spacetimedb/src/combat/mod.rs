@@ -2,6 +2,7 @@
 // Modular combat: damage resolution, weapon firing, projectile impacts.
 
 pub mod blocks;
+pub mod bunker_buster;
 pub mod damage;
 pub mod fire;
 pub mod projectile;

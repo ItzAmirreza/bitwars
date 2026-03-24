@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { VoxelWorld, BlockType } from './VoxelWorld';
 import { WeaponSystem, WEAPONS } from './Weapons';
+import { VEHICLE_WEAPONS } from './vehicles/VehicleManager';
 import { VFX } from './VFX';
 import type { AudioSystem } from './AudioSystem';
 
@@ -8,6 +9,37 @@ const MAX_PROJECTILES = 64;
 const MAX_LIGHTS = 4;
 const FLYBY_TRIGGER_DIST = 25;    // Start whiz when projectile enters this radius
 const FLYBY_MIN_SPEED = 20;       // Min speed to trigger flyby sound
+
+// ── Vehicle weapon visual configs (keyed by vehicle weapon index) ──
+interface VehicleProjectileVisual {
+  speed: number;
+  gravity: number;
+  size: number;
+  trailLength: number;
+  trailColor: number;
+  lightIntensity: number;
+  lightColor: number;
+  lightRange: number;
+  lifetime: number;
+}
+
+const VEHICLE_PROJECTILE_VISUALS: Record<number, VehicleProjectileVisual> = {
+  // Rockets (index 1): same as existing RPG-style
+  1: {
+    speed: 80, gravity: 3, size: 0.15, trailLength: 0.5,
+    trailColor: 0xff6600, lightIntensity: 3, lightColor: 0xff4400, lightRange: 8, lifetime: 5,
+  },
+  // Bunker Buster (index 2): larger, deep red trail, brighter light
+  2: {
+    speed: 60, gravity: 25, size: 0.4, trailLength: 0.4,
+    trailColor: 0xff2200, lightIntensity: 4, lightColor: 0xff2200, lightRange: 12, lifetime: 8,
+  },
+  // Carpet Bomb (index 3): medium, orange trail
+  3: {
+    speed: 5, gravity: 20, size: 0.3, trailLength: 0.3,
+    trailColor: 0xff6600, lightIntensity: 2.5, lightColor: 0xff4400, lightRange: 6, lifetime: 10,
+  },
+};
 
 export interface ProjectileImpact {
   weaponIndex: number;
@@ -53,6 +85,11 @@ interface ActiveProjectile {
   // Flyby audio
   flybyPlayed: boolean;
   prevDistToListener: number;
+  // Bunker buster drilling state
+  drilling: boolean;
+  drillStartY: number;
+  drillSurfaceX: number;
+  drillSurfaceZ: number;
 }
 
 // Shared geometry/material for all projectile meshes
@@ -69,6 +106,7 @@ export class ProjectileManager {
   private otherPlayers: Map<string, THREE.Group>;
   private onLocalImpact: (impact: ProjectileImpact) => void;
   private activeLightCount = 0;
+  private bbIndicator: THREE.Sprite | null = null;
 
   constructor(
     scene: THREE.Scene,
@@ -88,6 +126,158 @@ export class ProjectileManager {
     this.camera = camera;
     this.otherPlayers = otherPlayers;
     this.onLocalImpact = onLocalImpact;
+  }
+
+  /** Return the currently active local bunker buster projectile, if any. */
+  getActiveBunkerBuster(): { pos: THREE.Vector3; vel: THREE.Vector3; age: number } | null {
+    for (const p of this.projectiles) {
+      if (p.isLocal && p.isVehicle && p.vehicleWeaponIndex === 2) {
+        return { pos: p.pos, vel: p.vel, age: p.age };
+      }
+    }
+    return null;
+  }
+
+  /** Force-detonate the active local bunker buster at its current position. Returns true if detonated. */
+  detonateActiveBunkerBuster(): boolean {
+    for (let i = 0; i < this.projectiles.length; i++) {
+      const p = this.projectiles[i];
+      if (p.isLocal && p.isVehicle && p.vehicleWeaponIndex === 2) {
+        this.bunkerBusterDetonate(p, i);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Detonate the bunker buster's main charge at its current position (oblate spheroid + upward blast column + surface eruption). */
+  private bunkerBusterDetonate(p: ActiveProjectile, index: number): void {
+    const bx = Math.floor(p.pos.x);
+    const by = Math.floor(p.pos.y);
+    const bz = Math.floor(p.pos.z);
+    const destroyed: ProjectileImpact['destroyedBlocks'] = [];
+
+    // Phase 1: Oblate spheroid detonation (hr=16, vr=7)
+    const hr = 16.0, vr = 7.0;
+    const hr2 = hr * hr, vr2 = vr * vr;
+    for (let x = Math.floor(bx - hr); x <= Math.ceil(bx + hr); x++) {
+      for (let y = Math.floor(by - vr); y <= Math.ceil(by + vr); y++) {
+        for (let z = Math.floor(bz - hr); z <= Math.ceil(bz + hr); z++) {
+          const dx = x - bx, dy = y - by, dz = z - bz;
+          if ((dx * dx + dz * dz) / hr2 + (dy * dy) / vr2 <= 1.0) {
+            const bt = this.world.getBlock(x, y, z);
+            if (bt !== 0 && bt !== BlockType.Bedrock) {
+              this.weapons.trackPendingDestruction(x, y, z, bt);
+              this.world.setBlock(x, y, z, 0);
+              destroyed.push({ x, y, z, blockType: bt });
+            }
+          }
+        }
+      }
+    }
+
+    // Phase 2: Upward blast column from detonation back to surface (5x5 plus shape)
+    const surfaceY = p.drillStartY;
+    for (let y = by; y <= surfaceY; y++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        for (let dz = -2; dz <= 2; dz++) {
+          if (Math.abs(dx) + Math.abs(dz) > 2) continue; // Manhattan distance <= 2
+          const bt = this.world.getBlock(bx + dx, y, bz + dz);
+          if (bt !== 0 && bt !== BlockType.Bedrock) {
+            this.weapons.trackPendingDestruction(bx + dx, y, bz + dz, bt);
+            this.world.setBlock(bx + dx, y, bz + dz, 0);
+            destroyed.push({ x: bx + dx, y, z: bz + dz, blockType: bt });
+          }
+        }
+      }
+    }
+
+    // Phase 3: Surface eruption crater (sphere radius 3 at surface)
+    const eruptR = 3.0;
+    const eruptR2 = eruptR * eruptR;
+    for (let x = Math.floor(bx - eruptR); x <= Math.ceil(bx + eruptR); x++) {
+      for (let y = Math.floor(surfaceY - eruptR); y <= Math.ceil(surfaceY + eruptR); y++) {
+        for (let z = Math.floor(bz - eruptR); z <= Math.ceil(bz + eruptR); z++) {
+          const dx = x - bx, dy = y - surfaceY, dz = z - bz;
+          if (dx * dx + dy * dy + dz * dz <= eruptR2) {
+            const bt = this.world.getBlock(x, y, z);
+            if (bt !== 0 && bt !== BlockType.Bedrock) {
+              this.weapons.trackPendingDestruction(x, y, z, bt);
+              this.world.setBlock(x, y, z, 0);
+              destroyed.push({ x, y, z, blockType: bt });
+            }
+          }
+        }
+      }
+    }
+
+    // VFX + audio
+    this.vfx.emitExplosion(bx, by, bz, 10);
+    this.vfx.emitBunkerBusterDrill(p.drillSurfaceX, p.drillStartY, p.drillSurfaceZ, p.drillStartY - by);
+    this.audio.playBunkerBusterDetonation({ position: { x: bx, y: by, z: bz } });
+
+    // Sync to server — send bomb's current position as impact
+    this.onLocalImpact({
+      weaponIndex: p.weaponIndex,
+      hitPos: { x: bx, y: by, z: bz },
+      destroyedBlocks: destroyed,
+      hitPlayerIds: [],
+      hitVehicleIds: [],
+      origin: p.origin,
+      direction: new THREE.Vector3(0, -1, 0),
+      travelTimeMs: performance.now() - p.firedAt,
+      isVehicle: true,
+      vehicleWeaponIndex: p.vehicleWeaponIndex,
+      sourceVehicleId: p.sourceVehicleId,
+    });
+
+    this.removeProjectile(index);
+  }
+
+  private createBBIndicator(): THREE.Sprite {
+    const size = 32;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, size, size);
+
+    // Diamond/crosshair shape in bright red/white
+    const cx = size / 2;
+    const cy = size / 2;
+    ctx.strokeStyle = '#ff4422';
+    ctx.lineWidth = 3;
+
+    // Diamond
+    ctx.beginPath();
+    ctx.moveTo(cx, 4);
+    ctx.lineTo(size - 4, cy);
+    ctx.lineTo(cx, size - 4);
+    ctx.lineTo(4, cy);
+    ctx.closePath();
+    ctx.stroke();
+
+    // Crosshair lines
+    ctx.beginPath();
+    ctx.moveTo(cx, 0);
+    ctx.lineTo(cx, size);
+    ctx.moveTo(0, cy);
+    ctx.lineTo(size, cy);
+    ctx.stroke();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(3.5, 3.5, 1);
+    sprite.renderOrder = 999;
+    sprite.visible = false;
+    this.scene.add(sprite);
+    return sprite;
   }
 
   /** Spawn a projectile from the local player's fire */
@@ -130,6 +320,31 @@ export class ProjectileManager {
     }
   }
 
+  /** Spawn a remote vehicle projectile with correct visual config */
+  spawnRemoteVehicle(
+    weaponIndex: number,
+    origin: THREE.Vector3,
+    direction: THREE.Vector3,
+    firedAt: number,
+    shooterId: string,
+    vehicleWeaponIndex: number,
+    sourceVehicleId: number,
+  ): void {
+    const p = this.spawn(weaponIndex, origin, direction, firedAt, false, shooterId, {
+      vehicleWeaponIndex,
+      sourceVehicleId,
+    });
+    if (!p) return;
+
+    const latencyMs = performance.now() - firedAt;
+    if (latencyMs > 0 && latencyMs < 3000) {
+      const catchupDt = latencyMs / 1000;
+      p.pos.addScaledVector(p.vel, catchupDt);
+      p.vel.y -= p.gravity * catchupDt;
+      p.age += catchupDt;
+    }
+  }
+
   private spawn(
     weaponIndex: number,
     origin: THREE.Vector3,
@@ -159,7 +374,12 @@ export class ProjectileManager {
     }
 
     const w = WEAPONS[weaponIndex];
-    const cfg = w.projectile;
+    const isVehicle = !!vehicleOpts;
+    const vehWepIdx = vehicleOpts?.vehicleWeaponIndex ?? 0;
+
+    // Use vehicle-specific visual config when available, otherwise infantry projectile config
+    const vehVisual = isVehicle ? VEHICLE_PROJECTILE_VISUALS[vehWepIdx] : null;
+    const cfg = vehVisual ?? w.projectile;
     if (!isFinite(cfg.speed) || cfg.speed <= 0) return null;
 
     const dir = direction.clone().normalize();
@@ -185,6 +405,9 @@ export class ProjectileManager {
       this.activeLightCount++;
     }
 
+    // Vehicle projectiles use their own radius from VEHICLE_WEAPONS
+    const radius = isVehicle ? (VEHICLE_WEAPONS[vehWepIdx]?.radius ?? w.radius) : w.radius;
+
     const proj: ActiveProjectile = {
       weaponIndex,
       pos: origin.clone(),
@@ -195,7 +418,7 @@ export class ProjectileManager {
       firedAt,
       lifetime: cfg.lifetime,
       age: 0,
-      radius: w.radius,
+      radius,
       trailColor: cfg.trailColor,
       trailTimer: 0,
       trailSpacing: cfg.trailLength,
@@ -203,11 +426,15 @@ export class ProjectileManager {
       shooterId,
       mesh,
       light,
-      isVehicle: !!vehicleOpts,
-      vehicleWeaponIndex: vehicleOpts?.vehicleWeaponIndex ?? 0,
+      isVehicle,
+      vehicleWeaponIndex: vehWepIdx,
       sourceVehicleId: vehicleOpts?.sourceVehicleId ?? 0,
       flybyPlayed: isLocal, // Local projectiles never play flyby on yourself
       prevDistToListener: Infinity,
+      drilling: false,
+      drillStartY: 0,
+      drillSurfaceX: 0,
+      drillSurfaceZ: 0,
     };
 
     this.projectiles.push(proj);
@@ -223,6 +450,44 @@ export class ProjectileManager {
       // Lifetime check
       if (p.age >= p.lifetime) {
         this.removeProjectile(i);
+        continue;
+      }
+
+      // ── Bunker buster drilling phase ──
+      if (p.drilling) {
+        const DRILL_SPEED = 30; // blocks per second
+        p.pos.y -= DRILL_SPEED * delta;
+        const drillDepth = p.drillStartY - p.pos.y;
+
+        // Destroy 5x5 cross (Manhattan distance <= 2) at current depth
+        const cx = p.drillSurfaceX;
+        const cz = p.drillSurfaceZ;
+        const cy = Math.floor(p.pos.y);
+        let hitBedrock = false;
+        for (let dx = -2; dx <= 2; dx++) {
+          for (let dz = -2; dz <= 2; dz++) {
+            if (Math.abs(dx) + Math.abs(dz) > 2) continue; // Plus/diamond shape
+            const bt = this.world.getBlock(cx + dx, cy, cz + dz);
+            if (bt === BlockType.Bedrock) { hitBedrock = true; continue; }
+            if (bt !== 0) {
+              this.weapons.trackPendingDestruction(cx + dx, cy, cz + dz, bt);
+              this.world.setBlock(cx + dx, cy, cz + dz, 0);
+            }
+          }
+        }
+
+        // Auto-detonate at max depth, bedrock, or below world
+        if (drillDepth >= 20 || hitBedrock || cy < 1) {
+          this.bunkerBusterDetonate(p, i);
+          continue;
+        }
+
+        // Emit drilling debris particles
+        this.vfx.emitProjectileTrail(p.pos.x, p.pos.y + 1, p.pos.z, 0x8b6b4a);
+
+        // Update visuals
+        p.mesh.position.copy(p.pos);
+        if (p.light) p.light.position.copy(p.pos);
         continue;
       }
 
@@ -245,6 +510,31 @@ export class ProjectileManager {
           // Block collision
           const blockHit = this.weapons.raycastVoxels(segOrigin, segDir, subDist);
           if (blockHit) {
+            // Bunker buster: enter drilling mode instead of full impact
+            if (p.isVehicle && p.vehicleWeaponIndex === 2) {
+              p.pos.set(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
+              p.drilling = true;
+              p.drillStartY = blockHit.y;
+              p.drillSurfaceX = blockHit.x;
+              p.drillSurfaceZ = blockHit.z;
+              p.vel.set(0, 0, 0);
+              p.gravity = 0;
+              // Small entry hole explosion
+              this.vfx.emitExplosion(blockHit.x, blockHit.y, blockHit.z, 3);
+              // Destroy entry hole (5x5 cross at surface)
+              for (let dx = -2; dx <= 2; dx++) {
+                for (let dz = -2; dz <= 2; dz++) {
+                  if (Math.abs(dx) + Math.abs(dz) > 2) continue; // Manhattan distance <= 2
+                  const bt = this.world.getBlock(blockHit.x + dx, blockHit.y, blockHit.z + dz);
+                  if (bt !== 0 && bt !== BlockType.Bedrock) {
+                    this.weapons.trackPendingDestruction(blockHit.x + dx, blockHit.y, blockHit.z + dz, bt);
+                    this.world.setBlock(blockHit.x + dx, blockHit.y, blockHit.z + dz, 0);
+                  }
+                }
+              }
+              impacted = true;
+              break;
+            }
             p.pos.set(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
             this.handleImpact(p, blockHit);
             this.removeProjectile(i);
@@ -317,8 +607,9 @@ export class ProjectileManager {
       if (speed > 1) {
         p.mesh.lookAt(p.pos.clone().add(p.vel));
         const stretch = Math.min(3, speed / p.speed * 2);
-        const cfg = WEAPONS[p.weaponIndex].projectile;
-        p.mesh.scale.set(cfg.size, cfg.size, cfg.size * stretch);
+        const vehVis = p.isVehicle ? VEHICLE_PROJECTILE_VISUALS[p.vehicleWeaponIndex] : null;
+        const projSize = vehVis?.size ?? WEAPONS[p.weaponIndex].projectile.size;
+        p.mesh.scale.set(projSize, projSize, projSize * stretch);
       }
 
       // Trail particles
@@ -352,6 +643,17 @@ export class ProjectileManager {
         p.prevDistToListener = dist;
       }
     }
+
+    // ── Bunker buster through-wall indicator ──
+    const bb = this.getActiveBunkerBuster();
+    if (bb) {
+      if (!this.bbIndicator) this.bbIndicator = this.createBBIndicator();
+      this.bbIndicator.position.copy(bb.pos);
+      this.bbIndicator.visible = true;
+      this.bbIndicator.material.opacity = 1.0;
+    } else if (this.bbIndicator) {
+      this.bbIndicator.visible = false;
+    }
   }
 
   private handleImpact(
@@ -363,8 +665,27 @@ export class ProjectileManager {
       const destroyed: ProjectileImpact['destroyedBlocks'] = [];
       const w = WEAPONS[p.weaponIndex];
 
-      if (p.isVehicle) {
-        // Vehicle rockets: oblate spheroid — wide horizontal, shallow vertical
+      if (p.isVehicle && p.vehicleWeaponIndex === 3) {
+        // ── CARPET BOMB: spherical destruction radius 7 ──
+        const r = 7.0;
+        const r2 = r * r;
+        for (let bx = Math.floor(blockHit.x - r); bx <= Math.ceil(blockHit.x + r); bx++) {
+          for (let by = Math.floor(blockHit.y - r); by <= Math.ceil(blockHit.y + r); by++) {
+            for (let bz = Math.floor(blockHit.z - r); bz <= Math.ceil(blockHit.z + r); bz++) {
+              const dx = bx - blockHit.x, dy = by - blockHit.y, dz = bz - blockHit.z;
+              if (dx * dx + dy * dy + dz * dz <= r2) {
+                const bt = this.world.getBlock(bx, by, bz);
+                if (bt !== 0 && bt !== BlockType.Bedrock) {
+                  this.weapons.trackPendingDestruction(bx, by, bz, bt);
+                  this.world.setBlock(bx, by, bz, 0);
+                  destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
+                }
+              }
+            }
+          }
+        }
+      } else if (p.isVehicle) {
+        // Vehicle rockets (index 0/1): oblate spheroid — wide horizontal, shallow vertical
         const hr = 6.0; // horizontal radius (x/z)
         const vr = 3.0; // vertical radius (y)
         const hr2 = hr * hr;
@@ -413,7 +734,9 @@ export class ProjectileManager {
 
       // Check for player hits near impact (for explosive projectiles)
       const hitPlayerIds: string[] = [];
-      const splashRadius = p.isVehicle ? 6.0 : w.radius;
+      const splashRadius = p.isVehicle
+        ? (VEHICLE_WEAPONS[p.vehicleWeaponIndex]?.radius ?? 6.0)
+        : w.radius;
       if (splashRadius > 0) {
         const impactPos = new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5);
         for (const [id, group] of this.otherPlayers) {
@@ -445,7 +768,9 @@ export class ProjectileManager {
       // Remote projectile: just VFX
       const w = WEAPONS[p.weaponIndex];
       this.vfx.emitImpact(blockHit.x, blockHit.y, blockHit.z);
-      const vfxRadius = p.isVehicle ? 6.0 : w.radius;
+      const vfxRadius = p.isVehicle
+        ? (VEHICLE_WEAPONS[p.vehicleWeaponIndex]?.radius ?? 6.0)
+        : w.radius;
       if (vfxRadius > 0) {
         this.vfx.emitExplosion(blockHit.x, blockHit.y, blockHit.z, vfxRadius);
       }
@@ -459,7 +784,9 @@ export class ProjectileManager {
   ): void {
     if (p.isLocal) {
       const travelTimeMs = performance.now() - p.firedAt;
-      const splashRadius = p.isVehicle ? 6.0 : WEAPONS[p.weaponIndex].radius;
+      const splashRadius = p.isVehicle
+        ? (VEHICLE_WEAPONS[p.vehicleWeaponIndex]?.radius ?? 6.0)
+        : WEAPONS[p.weaponIndex].radius;
       this.onLocalImpact({
         weaponIndex: p.weaponIndex,
         hitPos,
@@ -480,7 +807,9 @@ export class ProjectileManager {
 
     // VFX for all (local and remote)
     const w = WEAPONS[p.weaponIndex];
-    const vfxRadius = p.isVehicle ? 6.0 : w.radius;
+    const vfxRadius = p.isVehicle
+      ? (VEHICLE_WEAPONS[p.vehicleWeaponIndex]?.radius ?? 6.0)
+      : w.radius;
     if (vfxRadius > 0) {
       this.vfx.emitExplosion(hitPos.x, hitPos.y, hitPos.z, vfxRadius);
     }
@@ -495,7 +824,9 @@ export class ProjectileManager {
     if (p.isLocal) {
       const w = WEAPONS[p.weaponIndex];
       const impactCenter = new THREE.Vector3(hitPos.x + 0.5, hitPos.y + 0.5, hitPos.z + 0.5);
-      const splashRadius = p.isVehicle ? 6.0 : w.radius;
+      const splashRadius = p.isVehicle
+        ? (VEHICLE_WEAPONS[p.vehicleWeaponIndex]?.radius ?? 6.0)
+        : w.radius;
 
       const hitPlayerIds: string[] = [];
       if (splashRadius > 0) {
@@ -534,7 +865,9 @@ export class ProjectileManager {
 
     // VFX for all (local and remote)
     const w = WEAPONS[p.weaponIndex];
-    const vfxRadius = p.isVehicle ? 6.0 : w.radius;
+    const vfxRadius = p.isVehicle
+      ? (VEHICLE_WEAPONS[p.vehicleWeaponIndex]?.radius ?? 6.0)
+      : w.radius;
     if (vfxRadius > 0) {
       this.vfx.emitExplosion(hitPos.x, hitPos.y, hitPos.z, vfxRadius);
     }
@@ -597,5 +930,11 @@ export class ProjectileManager {
 
   dispose(): void {
     this.clearAll();
+    if (this.bbIndicator) {
+      this.scene.remove(this.bbIndicator);
+      this.bbIndicator.material.map?.dispose();
+      this.bbIndicator.material.dispose();
+      this.bbIndicator = null;
+    }
   }
 }

@@ -270,6 +270,58 @@ export class VFX {
     }
   }
 
+  // ── Bunker buster drill effect ──
+  emitBunkerBusterDrill(x: number, y: number, z: number, depth: number): void {
+    // Brown/grey debris shooting upward through the drill column
+    const debrisCount = Math.min(40, Math.floor(depth * 3));
+    for (let i = 0; i < debrisCount && this.particles.length < MAX_PARTICLES; i++) {
+      const t = Math.random();
+      const isBrown = Math.random() > 0.4;
+      let r: number, g: number, b: number;
+      if (isBrown) {
+        r = 0.45 + Math.random() * 0.2;
+        g = 0.3 + Math.random() * 0.15;
+        b = 0.15 + Math.random() * 0.1;
+      } else {
+        const v = 0.3 + Math.random() * 0.25;
+        r = v; g = v; b = v;
+      }
+      this.particles.push({
+        x: x + 0.5 + (Math.random() - 0.5) * 1.5,
+        y: y + 0.5 - depth * t,
+        z: z + 0.5 + (Math.random() - 0.5) * 1.5,
+        vx: (Math.random() - 0.5) * 3,
+        vy: 8 + Math.random() * 14 + depth * 0.5,
+        vz: (Math.random() - 0.5) * 3,
+        r, g, b,
+        life: 0,
+        maxLife: 0.6 + Math.random() * 0.8,
+        size: 10 + Math.random() * 8,
+        gravity: true,
+      });
+    }
+
+    // Orange/red underground detonation glow shooting upward through drill hole
+    const glowCount = Math.min(30, Math.floor(depth * 2));
+    for (let i = 0; i < glowCount && this.particles.length < MAX_PARTICLES; i++) {
+      const hue = 0.02 + Math.random() * 0.08;
+      const col = new THREE.Color().setHSL(hue, 1, 0.5 + Math.random() * 0.3);
+      this.particles.push({
+        x: x + 0.5 + (Math.random() - 0.5) * 1.0,
+        y: y + 0.5 - depth + Math.random() * depth * 0.3,
+        z: z + 0.5 + (Math.random() - 0.5) * 1.0,
+        vx: (Math.random() - 0.5) * 2,
+        vy: 12 + Math.random() * 18,
+        vz: (Math.random() - 0.5) * 2,
+        r: col.r, g: col.g, b: col.b,
+        life: 0,
+        maxLife: 0.4 + Math.random() * 0.6,
+        size: 14 + Math.random() * 10,
+        gravity: false,
+      });
+    }
+  }
+
   // ── Bullet tracer ──
   emitTracer(from: THREE.Vector3, to: THREE.Vector3, color: number): void {
     const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]);

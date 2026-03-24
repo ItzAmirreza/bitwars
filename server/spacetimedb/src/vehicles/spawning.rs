@@ -115,8 +115,8 @@ pub fn spawn_fighter_jet(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
         updated_at: ctx.timestamp,
     });
 
-    let minigun = weapons::get_vehicle_weapon(0);
-    let rockets = weapons::get_vehicle_weapon(1);
+    let bb = weapons::get_vehicle_weapon(jet_weapon_slot0());
+    let cb = weapons::get_vehicle_weapon(jet_weapon_slot1());
 
     ctx.db.vehicle().insert(Vehicle {
         entity_id: entity.id,
@@ -135,8 +135,8 @@ pub fn spawn_fighter_jet(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
         rotor_spin: 0.0,
         health: jet_health_max(),
         weapon_type: 0,
-        weapon_ammo_primary: minigun.max_ammo,
-        weapon_ammo_secondary: rockets.max_ammo,
+        weapon_ammo_primary: bb.max_ammo,
+        weapon_ammo_secondary: cb.max_ammo,
         weapon_last_fire: ctx.timestamp,
         created_at: ctx.timestamp,
         last_input_at: ctx.timestamp,
