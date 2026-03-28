@@ -28,6 +28,7 @@ bitwars/
 │   ├── vehicles/                  1 file per vehicle type (dispatcher pattern)
 │   │   ├── mod.rs                 tick_vehicles dispatcher
 │   │   ├── helicopter.rs          Helicopter physics
+│   │   ├── fighter_jet.rs         Fighter jet physics
 │   │   ├── interaction.rs         Mount/dismount
 │   │   ├── weapons.rs             Vehicle fire/reload
 │   │   └── spawning.rs            Spawn logic
@@ -35,26 +36,29 @@ bitwars/
 │   │   ├── damage.rs              Shared hitscan/splash/kill helpers
 │   │   ├── fire.rs                fire_weapon, reload_weapon
 │   │   ├── projectile.rs          projectile_impact
+│   │   ├── bunker_buster.rs       Bunker buster weapon logic
 │   │   └── blocks.rs              destroy_blocks_physics, sync_entity_transform
 │   ├── worldgen/                  Procedural generation
 │   │   ├── mod.rs                 generate_chunk + RLE
 │   │   ├── noise.rs, biomes.rs, roads.rs, structural.rs
 │   │   └── structures/            1 file per structure type
-│   ├── helpers/                   math.rs, entity_ops.rs, player_state.rs, vehicle_helpers.rs, vehicle_input.rs
-│   ├── grenades.rs, player.rs, admin.rs, chat.rs
+│   ├── helpers/                   math.rs, entity_ops.rs, player_state.rs, vehicle_helpers.rs, vehicle_input.rs, terrain_cache.rs
+│   ├── grenades.rs, player.rs, admin.rs, chat.rs, chunks.rs
 │   ├── lifecycle.rs, environment.rs, cleanup.rs, map.rs
-│   └── (50 files total, all under 420 lines)
+│   └── (56 files total)
 │
 ├── client/src/
 │   ├── shared-config.ts           Typed imports from game-constants.json
 │   ├── game/
-│   │   ├── Engine.ts              Orchestrator (1,889 lines — animate loop + server listeners)
+│   │   ├── Engine.ts              Orchestrator (2,981 lines — animate loop + server listeners)
 │   │   ├── WeaponRegistry.ts      Single source of truth for client weapon data
 │   │   ├── Weapons.ts             Weapon fire logic (raycasting, spread, recoil)
 │   │   ├── vehicles/
 │   │   │   ├── VehicleBase.ts     Abstract VehicleType interface
 │   │   │   ├── VehicleManager.ts  Universal vehicle manager with type registry
-│   │   │   └── HelicopterType.ts  Helicopter model + animation + breakup
+│   │   │   ├── VehiclePhysics.ts  Vehicle physics simulation
+│   │   │   ├── HelicopterType.ts  Helicopter model + animation + breakup
+│   │   │   └── FighterJetType.ts  Fighter jet model + animation + breakup
 │   │   ├── audio/                 Ray-traced procedural audio system
 │   │   │   ├── AudioCore.ts       Submix buses, dynamic reverb, spatial bus, voice mgmt
 │   │   │   ├── AudioRayTracer.worker.ts  Web Worker: DDA voxel raycasting for acoustics
@@ -72,12 +76,17 @@ bitwars/
 │   │   ├── VoxelWorld.ts, PhysicsSystem.ts, FPSControls.ts
 │   │   ├── SkySystem.ts, ProjectileManager.ts, VFX.ts
 │   │   ├── WeaponModel.ts, PostFX.ts, InterpolationBuffer.ts
-│   │   └── (40+ files total)
+│   │   └── (45 files total)
 │   ├── screens/
-│   │   ├── GameScreen.tsx         Slim orchestrator (527 lines)
-│   │   ├── hud/                   7 extracted HUD components
+│   │   ├── GameScreen.tsx         Slim orchestrator (769 lines)
+│   │   ├── LobbyScreen.tsx        Lobby / match browser
+│   │   ├── LoginScreen.tsx        Login flow
+│   │   ├── PerfPanel.tsx          Performance debug overlay
+│   │   ├── SettingsPanel.tsx      Settings UI
+│   │   ├── hud/                   8 extracted HUD components
 │   │   │   ├── BottomHud.tsx, TopHudBar.tsx, LoadoutOverlay.tsx
 │   │   │   ├── Crosshair.tsx, KillFeed.tsx, ChatOverlay.tsx, DeathScreen.tsx
+│   │   │   └── BunkerBusterDepthView.tsx
 │   │   └── hooks/                 useKillTracking.ts, useChat.ts
 │   ├── store.ts, db.ts, App.tsx
 │   └── module_bindings/           Auto-generated — do NOT edit
@@ -343,7 +352,7 @@ When implementing ANY new feature:
 
 ## Client Architecture Details
 
-### Engine.ts (1,889 lines — the orchestrator)
+### Engine.ts (2,981 lines — the orchestrator)
 
 Engine.ts is the game's main class. It owns the Three.js scene, camera, renderer, and coordinates all sub-systems. Its two largest methods are:
 
