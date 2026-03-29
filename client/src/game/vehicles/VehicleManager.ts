@@ -679,6 +679,20 @@ export default class VehicleManager {
     return top >= 0 ? top + 1 : 0;
   }
 
+  /** Reconcile collision-pending blocks when an authoritative chunk update arrives.
+   *  Removes all pending entries within the chunk so subsequent queries read from
+   *  the freshly-loaded authoritative voxel data instead of stale predictions. */
+  reconcileCollisionPendingForChunk(cx: number, cy: number, cz: number): void {
+    if (this.collisionPendingBlocks.size === 0) return;
+    const ox = cx * 16, oy = cy * 16, oz = cz * 16;
+    for (const key of this.collisionPendingBlocks) {
+      const [bx, by, bz] = key.split(',').map(Number);
+      if (bx >= ox && bx < ox + 16 && by >= oy && by < oy + 16 && bz >= oz && bz < oz + 16) {
+        this.collisionPendingBlocks.delete(key);
+      }
+    }
+  }
+
   /** Block query for collision prediction. Returns 0 (air) for blocks already
    *  collided with locally, preventing repeated slowdown before the chunk update. */
   private getCollisionBlock(x: number, y: number, z: number): number {

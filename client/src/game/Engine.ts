@@ -1483,6 +1483,7 @@ export class Engine {
       const data = chunk.data instanceof Uint8Array ? chunk.data : new Uint8Array(chunk.data);
       const decoded = VoxelWorld.rleDecodeChunk(data);
       this.world.loadChunk(cx, cy, cz, decoded);
+      this.vehicleManager.reconcileCollisionPendingForChunk(cx, cy, cz);
       this.lanterns.syncLanternLightsForChunk(cx, cy, cz, this.getLanternContext(), decoded);
       this.audio.sendChunkToWorker(id, decoded);
       this.chunkStreamer.pendingChunkRequests.delete(id);
@@ -1543,6 +1544,8 @@ export class Engine {
 
       // Apply authoritative chunk data (naturally corrects any rejected predictions)
       this.world.loadChunk(cx, cy, cz, newDecoded);
+      // Reconcile collision-pending blocks so prediction reads authoritative voxel data
+      this.vehicleManager.reconcileCollisionPendingForChunk(cx, cy, cz);
       this.lanterns.syncLanternLightsForChunk(cx, cy, cz, this.getLanternContext(), newDecoded);
       this.audio.sendChunkToWorker(id, newDecoded);
       this.chunkStreamer.pendingChunkRequests.delete(id);
