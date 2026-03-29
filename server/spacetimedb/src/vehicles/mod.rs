@@ -17,6 +17,7 @@ pub use anti_air::tick_anti_air;
 pub use fighter_jet::tick_fighter_jet;
 pub use helicopter::tick_helicopter;
 pub use interaction::{interact_vehicle, update_vehicle_input};
+pub use spawning::spawn_aa_at_outposts;
 pub use spawning::spawn_anti_air;
 pub use spawning::spawn_fighter_jet;
 pub use spawning::spawn_helicopter;

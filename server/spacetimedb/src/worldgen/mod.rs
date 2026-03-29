@@ -287,5 +287,8 @@ pub fn generate_chunk(cx: usize, cy: usize, cz: usize, seed: u64) -> Vec<u8> {
     // Phase 3c: Hardcoded airport layouts for Airport biome cells
     structures::place_airport_layouts(&mut chunk_blocks, chunk_wx, chunk_wy, chunk_wz, seed);
 
+    // Phase 3d: Hardcoded military outpost layouts for MilitaryOutpost biome cells
+    structures::place_outpost_layouts(&mut chunk_blocks, chunk_wx, chunk_wy, chunk_wz, seed);
+
     rle_encode(&chunk_blocks)
 }
