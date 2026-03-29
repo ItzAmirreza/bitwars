@@ -35,6 +35,16 @@ const VEHICLE_PROJECTILE_VISUALS: Record<number, VehicleProjectileVisual> = {
     speed: 5, gravity: 20, size: 0.3, trailLength: 0.3,
     trailColor: 0xff6600, lightIntensity: 2.5, lightColor: 0xff4400, lightRange: 6, lifetime: 10,
   },
+  // SAM Missile (index 5): red trail
+  5: {
+    speed: 90, gravity: 2, size: 0.15, trailLength: 0.5,
+    trailColor: 0xff3333, lightIntensity: 3, lightColor: 0xff3333, lightRange: 8, lifetime: 5,
+  },
+  // Air Missile (index 6): cyan trail
+  6: {
+    speed: 120, gravity: 2, size: 0.15, trailLength: 0.6,
+    trailColor: 0x00ccff, lightIntensity: 3.5, lightColor: 0x00ccff, lightRange: 10, lifetime: 5,
+  },
 };
 
 export interface ProjectileImpact {
