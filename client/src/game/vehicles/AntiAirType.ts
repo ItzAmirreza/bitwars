@@ -1,8 +1,8 @@
 /**
- * AntiAirType.ts — VehicleType implementation for the anti-air vehicle.
+ * AntiAirType.ts — VehicleType implementation for the anti-air emplacement.
  *
- * Ground-based tracked vehicle with a rotating turret and dual-barrel autocannon
- * plus SAM missile launcher. Procedural voxel-style model.
+ * Stationary ground emplacement with a rotating turret, dual-barrel autocannon,
+ * and SAM missile launchers. Sits on a concrete platform with sandbag fortification.
  */
 
 import * as THREE from 'three';
@@ -123,83 +123,89 @@ export class AntiAirType implements VehicleType {
       hex: number, pos: [number, number, number], rot?: [number, number, number],
     ) => shadedBox(parent, size, hex, pos, rot);
 
-    // ── Color palette (olive drab / military green) ──
+    // ── Color palette (military emplacement) ──
+    const CONCRETE  = 0x6a6a62;
+    const CONC_DK   = 0x505048;
+    const CONC_LT   = 0x7a7a72;
+    const SANDBAG   = 0x8a7a5a;
+    const SAND_DK   = 0x6a5a3a;
     const HULL      = 0x3a4032;
     const HULL_LT   = 0x4a5240;
     const HULL_DK   = 0x2a3022;
-    const UNDER     = 0x1e2218;
     const DARK      = 0x151810;
-    const TRACK_COL = 0x1a1c16;
-    const WHEEL_COL = 0x222418;
     const ACCENT    = 0xff4433;
     const ACCENT2   = 0xffdd33;
     const RADAR_COL = 0x556655;
     const BARREL    = 0x3a3e42;
     const BARREL_TIP = 0xff8833;
+    const METAL_DK  = 0x2a2e30;
 
     // ═══════════════════════════════════════════════
-    //  HULL (main body, builds along +X = forward)
+    //  CONCRETE BASE PLATFORM
     // ═══════════════════════════════════════════════
-    const hull = new THREE.Group();
-    hull.name = 'hull';
-    root.add(hull);
+    const base = new THREE.Group();
+    base.name = 'base';
+    root.add(base);
 
-    // Main hull block
-    B(hull, [7.0, 1.6, 3.6], HULL,    [0, 0.8, 0]);
-    // Front slope
-    B(hull, [2.0, 1.0, 3.2], HULL_LT, [4.2, 1.1, 0], [0, 0, -0.15]);
-    // Rear plate
-    B(hull, [1.5, 1.8, 3.4], HULL_DK, [-3.8, 0.9, 0]);
-    // Top deck
-    B(hull, [5.0, 0.25, 3.0], HULL_LT, [0, 1.65, 0]);
-    // Undercarriage
-    B(hull, [6.5, 0.3, 3.2], UNDER,   [0, -0.05, 0]);
-
-    // Side skirts
-    for (const side of [-1, 1]) {
-      B(hull, [6.0, 0.9, 0.25], HULL_DK, [0, 0.5, side * 2.0]);
-      // Armor plate detail
-      B(hull, [2.0, 0.6, 0.1], HULL_LT, [1.5, 0.8, side * 2.15]);
-      B(hull, [2.0, 0.6, 0.1], HULL_LT, [-1.0, 0.8, side * 2.15]);
-    }
-
-    // ── Driver viewport ──
-    B(hull, [0.8, 0.3, 0.6], DARK, [4.5, 1.5, 0]);
-
-    // ── Exhaust pipes (rear) ──
-    for (const side of [-1, 1]) {
-      B(hull, [0.8, 0.3, 0.3], DARK, [-4.2, 1.3, side * 0.8]);
-    }
+    // Main concrete slab
+    B(base, [6.0, 0.6, 6.0], CONCRETE, [0, 0.3, 0]);
+    // Raised center platform
+    B(base, [3.5, 0.4, 3.5], CONC_DK, [0, 0.8, 0]);
+    // Platform edge trim
+    B(base, [4.0, 0.15, 0.15], CONC_LT, [0, 0.62, 2.9]);
+    B(base, [4.0, 0.15, 0.15], CONC_LT, [0, 0.62, -2.9]);
+    B(base, [0.15, 0.15, 6.0], CONC_LT, [2.9, 0.62, 0]);
+    B(base, [0.15, 0.15, 6.0], CONC_LT, [-2.9, 0.62, 0]);
 
     // ═══════════════════════════════════════════════
-    //  TRACKS (on each side)
+    //  SANDBAG WALLS (fortification around base)
     // ═══════════════════════════════════════════════
-    for (const side of [-1, 1]) {
-      const trackGroup = new THREE.Group();
-      trackGroup.name = side < 0 ? 'track-left' : 'track-right';
 
-      // Track belt
-      B(trackGroup, [7.5, 0.8, 0.6], TRACK_COL, [0, 0.1, side * 2.5]);
-      // Track top plate
-      B(trackGroup, [7.0, 0.15, 0.5], HULL_DK,  [0, 0.55, side * 2.5]);
-
-      // Wheels (road wheels)
-      for (let w = -3; w <= 3; w++) {
-        B(trackGroup, [0.3, 0.5, 0.3], WHEEL_COL, [w * 1.0, 0.0, side * 2.5]);
+    // Front and back sandbag walls
+    for (const fwd of [-1, 1]) {
+      // Bottom row
+      for (let i = -2; i <= 2; i++) {
+        B(base, [1.0, 0.45, 0.6], SANDBAG, [i * 1.1, 0.85, fwd * 3.3]);
       }
-      // Drive sprockets (front/rear)
-      B(trackGroup, [0.4, 0.6, 0.4], WHEEL_COL, [3.5, 0.2, side * 2.5]);
-      B(trackGroup, [0.4, 0.6, 0.4], WHEEL_COL, [-3.5, 0.2, side * 2.5]);
-
-      hull.add(trackGroup);
+      // Top row (staggered)
+      for (let i = -1; i <= 1; i++) {
+        B(base, [1.0, 0.45, 0.6], SAND_DK, [i * 1.1 + 0.55, 1.28, fwd * 3.3]);
+      }
+    }
+    // Side sandbag walls
+    for (const side of [-1, 1]) {
+      for (let i = -2; i <= 2; i++) {
+        B(base, [0.6, 0.45, 1.0], SANDBAG, [side * 3.3, 0.85, i * 1.1]);
+      }
+      for (let i = -1; i <= 1; i++) {
+        B(base, [0.6, 0.45, 1.0], SAND_DK, [side * 3.3, 1.28, i * 1.1 + 0.55]);
+      }
     }
 
     // ═══════════════════════════════════════════════
-    //  TURRET (rotates on yaw, child of root)
+    //  PEDESTAL (turret mount)
+    // ═══════════════════════════════════════════════
+    // Cylindrical pedestal approximation
+    B(base, [1.2, 1.0, 1.2], METAL_DK, [0, 1.5, 0]);
+    B(base, [1.6, 0.2, 1.6], HULL_DK, [0, 2.05, 0]);
+    // Mounting bolts
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        B(base, [0.12, 0.15, 0.12], DARK, [sx * 0.5, 1.0, sz * 0.5]);
+      }
+    }
+
+    // ── Ammo crates near base ──
+    B(base, [0.8, 0.5, 0.5], HULL_DK, [2.2, 0.85, -1.5]);
+    B(base, [0.8, 0.5, 0.5], HULL_DK, [2.2, 0.85, -0.8]);
+    B(base, [0.5, 0.5, 0.8], HULL, [-2.0, 0.85, 1.2]);
+
+    // ═══════════════════════════════════════════════
+    //  TURRET (rotates on yaw, sits on pedestal)
     // ═══════════════════════════════════════════════
     const turret = new THREE.Group();
     turret.name = 'turret';
-    turret.position.set(-0.3, 1.8, 0);
+    turret.position.set(0, 2.15, 0);
     root.add(turret);
 
     // Turret base ring
@@ -267,31 +273,13 @@ export class AntiAirType implements VehicleType {
     //  DETAILS & ACCENTS
     // ═══════════════════════════════════════════════
 
-    // Headlights (front of hull)
-    for (const side of [-1, 1]) {
-      B(hull, [0.15, 0.15, 0.15], ACCENT2, [5.1, 1.2, side * 1.0]);
-    }
-
-    // Rear taillights
-    for (const side of [-1, 1]) {
-      B(hull, [0.12, 0.12, 0.12], ACCENT, [-4.5, 1.2, side * 1.0]);
-    }
-
-    // Antenna whip
-    B(hull, [0.06, 1.5, 0.06], HULL_DK, [-3.0, 2.3, 1.2]);
-
-    // Stowage boxes on hull sides
-    for (const side of [-1, 1]) {
-      B(hull, [1.2, 0.4, 0.3], HULL_LT, [-2.0, 1.8, side * 1.7]);
-    }
-
-    // Tow hooks (front/rear)
-    B(hull, [0.3, 0.15, 0.5], DARK, [5.2, 0.4, 0]);
-    B(hull, [0.3, 0.15, 0.5], DARK, [-4.5, 0.4, 0]);
-
-    // Accent stripes on hull
-    B(hull, [5.0, 0.08, 0.08], ACCENT2, [0, 1.68, -1.3]);
-    B(hull, [5.0, 0.08, 0.08], ACCENT2, [0, 1.68, 1.3]);
+    // Warning light on base
+    B(base, [0.15, 0.15, 0.15], ACCENT, [2.8, 1.5, 2.8]);
+    // Antenna whip near base edge
+    B(base, [0.06, 2.0, 0.06], HULL_DK, [-2.5, 1.6, 2.0]);
+    // Warning stripe on concrete edge
+    B(base, [5.0, 0.08, 0.08], ACCENT2, [0, 0.62, 2.7]);
+    B(base, [5.0, 0.08, 0.08], ACCENT2, [0, 0.62, -2.7]);
 
     // Orient wrapper — model faces +X, wrapper rotates so -Z forward matches server
     const orientWrapper = new THREE.Group();
@@ -312,42 +300,15 @@ export class AntiAirType implements VehicleType {
   updatePerFrame(
     instance: VehicleInstance,
     delta: number,
-    isLocal: boolean,
+    _isLocal: boolean,
     ctx: VehicleTypeFrameContext,
   ): void {
     const mesh = instance.mesh;
-    const id = instance.entityId;
 
     // Find orient wrapper and turret
     const orientWrapper = mesh.getObjectByName('anti-air-orient-wrapper');
     const turret = orientWrapper?.getObjectByName('turret');
     const radar = turret?.getObjectByName('radar');
-
-    // ── Track animation (from derived velocity) ──
-    const prevPos = mesh.userData.prevFramePos as THREE.Vector3 | undefined;
-    let hSpeed = 0;
-    if (prevPos && delta > 0) {
-      const rawVelX = (mesh.position.x - prevPos.x) / delta;
-      const rawVelZ = (mesh.position.z - prevPos.z) / delta;
-
-      const velSmooth = 1 - Math.pow(0.00001, delta);
-      const prevDvx = (mesh.userData.smoothDerivedVelX as number) ?? rawVelX;
-      const prevDvz = (mesh.userData.smoothDerivedVelZ as number) ?? rawVelZ;
-      const smoothVelX = prevDvx + (rawVelX - prevDvx) * velSmooth;
-      const smoothVelZ = prevDvz + (rawVelZ - prevDvz) * velSmooth;
-      mesh.userData.smoothDerivedVelX = smoothVelX;
-      mesh.userData.smoothDerivedVelZ = smoothVelZ;
-
-      hSpeed = Math.sqrt(smoothVelX * smoothVelX + smoothVelZ * smoothVelZ);
-      mesh.userData.derivedHSpeed = hSpeed;
-    } else {
-      hSpeed = (mesh.userData.derivedHSpeed as number) ?? 0;
-    }
-    if (!mesh.userData.prevFramePos) {
-      mesh.userData.prevFramePos = mesh.position.clone();
-    } else {
-      (mesh.userData.prevFramePos as THREE.Vector3).copy(mesh.position);
-    }
 
     // ── Radar dish rotation (constant spin) ──
     if (radar) {
@@ -356,22 +317,14 @@ export class AntiAirType implements VehicleType {
       radar.rotation.y = radarSpin;
     }
 
-    // ── Idle sway (very subtle for a heavy vehicle) ──
+    // ── Static base — no sway or movement animation ──
     if (orientWrapper) {
-      const idleBlend = Math.max(0, 1 - hSpeed / 8);
-      const phase = id * 2.3;
-      const t = ctx.elapsedTime;
-
-      const bobY = Math.sin(t * 0.6 + phase) * 0.015 * idleBlend;
-      const swayRoll = Math.sin(t * 0.35 + phase + 2.0) * 0.006 * idleBlend;
-
-      orientWrapper.position.set(0, bobY, 0);
-      // Preserve base rotation + add subtle sway
-      orientWrapper.rotation.set(0, Math.PI / 2, swayRoll);
+      orientWrapper.position.set(0, 0, 0);
+      orientWrapper.rotation.set(0, Math.PI / 2, 0);
     }
 
-    // ── Audio: reuse jet engine sound (diesel engine feel) ──
-    ctx.audio.updateJetEngineSound(id, mesh.position, hSpeed * 2, isLocal);
+    // No engine sound — stationary emplacement
+    void ctx;
   }
 
   // ══════════════════════════════════════════════════════════════

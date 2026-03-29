@@ -339,8 +339,9 @@ export class ProjectileManager {
             break;
           }
 
-          // Vehicle collision
-          const hitVehicleIds = this.weapons.raycastVehicles(segOrigin, segDir, subDist);
+          // Vehicle collision (exclude source vehicle to prevent self-hit)
+          const hitVehicleIds = this.weapons.raycastVehicles(segOrigin, segDir, subDist)
+            .filter(id => id !== p.sourceVehicleId);
           if (hitVehicleIds.length > 0) {
             // Impact at current position
             const hitPos = {

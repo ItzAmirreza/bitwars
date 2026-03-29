@@ -241,7 +241,25 @@ export class VehicleFireController {
         return;
       }
 
-      // ── PROJECTILE PATH (Rockets / SAM) ──
+      // ── SAM MISSILE PATH (weapon index 5) — needs larger offset to clear AA hitbox ──
+      if (resolvedIdx === 5) {
+        const samOrigin = new THREE.Vector3(
+          pose.x + dir.x * 6.0,
+          pose.y + 2.0,
+          pose.z + dir.z * 6.0,
+        );
+        ctx.projectileManager.spawnLocalVehicle(
+          2, samOrigin, dir,
+          resolvedIdx, ctx.mountedVehicleId,
+        );
+        this.syncVehicleFireToServer(dir, [], [], []);
+        ctx.audio.playVehicleRocket(ctx.localAudioSource(-0.1));
+        ctx.vfx.emitMuzzleFlashAt(samOrigin, dir, 0xff3333);
+        ctx.vfx.shake(0.5);
+        return;
+      }
+
+      // ── PROJECTILE PATH (Rockets) ──
       ctx.projectileManager.spawnLocalVehicle(
         2, origin, dir,
         resolvedIdx, ctx.mountedVehicleId,
