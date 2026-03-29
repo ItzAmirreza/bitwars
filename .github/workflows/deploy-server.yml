@@ -1,0 +1,65 @@
+name: Deploy Server
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'server/**'
+      - 'shared/game-constants.json'
+
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            server/spacetimedb/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('server/spacetimedb/Cargo.lock', 'server/spacetimedb/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build server WASM
+        working-directory: server/spacetimedb
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Install SpacetimeDB CLI
+        run: curl -sSf https://install.spacetimedb.com | sh
+
+      - name: Authenticate
+        run: spacetime login --token "${{ secrets.SPACETIMEDB_TOKEN }}"
+
+      - name: Publish to SpacetimeDB
+        working-directory: server
+        run: spacetime publish bitwars --clear-database -y --module-path ./spacetimedb
+
+      - name: Regenerate client bindings
+        working-directory: server
+        run: spacetime generate --lang typescript --out-dir ../client/src/module_bindings --module-path ./spacetimedb
+
+      - name: Check for binding changes
+        id: bindings
+        run: |
+          if git diff --quiet client/src/module_bindings/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit updated bindings
+        if: steps.bindings.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add client/src/module_bindings/
+          git commit -m "chore: regenerate client bindings after server deploy"
+          git push
