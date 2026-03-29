@@ -133,7 +133,12 @@ pub fn fire_vehicle_weapon(
         return Err("Vehicle is destroyed".to_string());
     }
 
-    let slot = vehicle.weapon_type;
+    // Clamp slot to 0 for AA (self-heal legacy rows stuck on old SAM slot)
+    let slot = if vehicle.vehicle_type == constants::vehicle_type_anti_air() {
+        0
+    } else {
+        vehicle.weapon_type
+    };
     let resolved_idx = resolve_vehicle_weapon_index(vehicle.vehicle_type, slot);
     if resolved_idx >= weapons::num_vehicle_weapons() {
         return Err("Invalid vehicle weapon".to_string());
@@ -516,7 +521,12 @@ pub fn reload_vehicle_weapon(ctx: &ReducerContext) -> Result<(), String> {
         return Err("Not the pilot".to_string());
     }
 
-    let slot = vehicle.weapon_type;
+    // Clamp slot to 0 for AA (self-heal legacy rows stuck on old SAM slot)
+    let slot = if vehicle.vehicle_type == constants::vehicle_type_anti_air() {
+        0
+    } else {
+        vehicle.weapon_type
+    };
     let resolved_idx = resolve_vehicle_weapon_index(vehicle.vehicle_type, slot);
     if resolved_idx >= weapons::num_vehicle_weapons() {
         return Err("Invalid vehicle weapon".to_string());
