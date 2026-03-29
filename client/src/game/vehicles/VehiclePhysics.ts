@@ -131,6 +131,27 @@ export function tickHelicopter(
   if (nz < WORLD_MIN_Z) { nz = WORLD_MIN_Z; vz = Math.abs(vz) * BOUNDS_BOUNCE; }
   if (nz > WORLD_MAX_Z) { nz = WORLD_MAX_Z; vz = -Math.abs(vz) * BOUNDS_BOUNCE; }
 
+  // ── Block collision (BEFORE ground clamping) ──
+  // Runs first so destroyed blocks don't push the vehicle upward via ground height.
+  if (blockQuery) {
+    const col = checkBlockCollision(
+      nx, ny, nz,
+      HELICOPTER.hitbox.halfX, HELICOPTER.hitbox.halfY, HELICOPTER.hitbox.halfZ,
+      HELICOPTER.hitbox.centerY,
+      vx, vy, vz,
+      blockQuery,
+    );
+    if (col.count > 0) {
+      const f = Math.pow(VEHICLE_BLOCK_COLLISION.speedRetainPerBlock, col.count);
+      vx *= f; vy *= f; vz *= f;
+      if (collisionOut) {
+        collisionOut.count += col.count;
+        collisionOut.cx = col.cx; collisionOut.cy = col.cy; collisionOut.cz = col.cz;
+      }
+    }
+  }
+
+  // ── Ground collision ──
   const ground = gnd(nx, nz);
   const minAlt = ground + HELICOPTER.minAltitude;
   if (ny < minAlt) {
@@ -260,6 +281,27 @@ export function tickFighterJet(
   if (nz < WORLD_MIN_Z) { nz = WORLD_MIN_Z; vz = Math.abs(vz) * BOUNDS_BOUNCE; }
   if (nz > WORLD_MAX_Z) { nz = WORLD_MAX_Z; vz = -Math.abs(vz) * BOUNDS_BOUNCE; }
 
+  // ── Block collision (BEFORE ground clamping) ──
+  // Runs first so destroyed blocks don't push the vehicle upward via ground height.
+  if (blockQuery) {
+    const col = checkBlockCollision(
+      nx, ny, nz,
+      FIGHTER_JET.hitbox.halfX, FIGHTER_JET.hitbox.halfY, FIGHTER_JET.hitbox.halfZ,
+      FIGHTER_JET.hitbox.centerY,
+      vx, vy, vz,
+      blockQuery,
+    );
+    if (col.count > 0) {
+      const f = Math.pow(VEHICLE_BLOCK_COLLISION.speedRetainPerBlock, col.count);
+      vx *= f; vy *= f; vz *= f;
+      if (collisionOut) {
+        collisionOut.count += col.count;
+        collisionOut.cx = col.cx; collisionOut.cy = col.cy; collisionOut.cz = col.cz;
+      }
+    }
+  }
+
+  // ── Ground collision ──
   const gndHeight = gnd(nx, nz);
   const minAlt = gndHeight + FIGHTER_JET.minAltitude;
   if (ny < minAlt) {

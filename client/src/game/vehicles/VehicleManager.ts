@@ -680,6 +680,19 @@ export default class VehicleManager {
     return top >= 0 ? top + 1 : 0;
   }
 
+  /** Reconcile collision-pending blocks when an authoritative chunk update arrives.
+   *  Removes all pending entries within the chunk so subsequent queries read from
+   *  the freshly-loaded authoritative voxel data instead of stale predictions. */
+  reconcileCollisionPendingForChunk(cx: number, cy: number, cz: number): void {
+    if (this.collisionPendingBlocks.size === 0) return;
+    const ox = cx * 16, oy = cy * 16, oz = cz * 16;
+    for (const key of this.collisionPendingBlocks) {
+      const [bx, by, bz] = key.split(',').map(Number);
+      if (bx >= ox && bx < ox + 16 && by >= oy && by < oy + 16 && bz >= oz && bz < oz + 16) {
+        this.collisionPendingBlocks.delete(key);
+      }
+    }
+  }
   /** Block query for collision prediction. Returns 0 (air) for blocks already
    *  collided with locally, preventing repeated slowdown before the chunk update. */
   private getCollisionBlock(x: number, y: number, z: number): number {
@@ -694,7 +707,19 @@ export default class VehicleManager {
   }
 
   private getPredictionGroundHeight(typeId: number, x: number, z: number): number {
-    const top = this.engine.world.getHighestBlock(x, z);
+    // Scan the column top-down, skipping pending collision blocks so the ground
+    // height drops after the vehicle punches through (matches server invalidation).
+    const bx = Math.floor(x);
+    const bz = Math.floor(z);
+    const world = this.engine.world;
+    let top = -1;
+    if (bx >= 0 && bx < world.sizeX && bz >= 0 && bz < world.sizeZ) {
+      for (let y = world.sizeY - 1; y >= 0; y--) {
+        const key = `${bx},${y},${bz}`;
+        if (this.collisionPendingBlocks.has(key)) continue;
+        if (world.getBlock(bx, y, bz) !== 0) { top = y; break; }
+      }
+    }
     // Match server TerrainSampler fallback when no surface sample is available.
     const surface = top >= 0 ? top : 3.0;
     // Server parity:

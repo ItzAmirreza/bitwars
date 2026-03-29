@@ -221,11 +221,23 @@ pub fn tick_fighter_jet(
         entity.vel.z = -entity.vel.z.abs() * 0.2;
     }
 
+    entity.pos = next_pos;
+
+    // ── Block collision (BEFORE ground clamping) ──
+    // Must run first so destroyed blocks don't push the vehicle upward via ground height.
+    let (_blocks_hit, destroyed) =
+        super::collision::check_vehicle_block_collision(ctx, &mut entity, &mut vehicle, terrain);
+    if destroyed {
+        return;
+    }
+
     // ── Ground collision ──
-    let ground = terrain.fighter_jet_ground_height(ctx, next_pos.x, next_pos.z);
+    // After block collision: terrain cache is invalidated, so ground height
+    // now reflects the hole the vehicle punched through.
+    let ground = terrain.fighter_jet_ground_height(ctx, entity.pos.x, entity.pos.z);
     let min_alt = ground + jet_min_altitude();
-    if next_pos.y < min_alt {
-        next_pos.y = min_alt;
+    if entity.pos.y < min_alt {
+        entity.pos.y = min_alt;
         if entity.vel.y < 0.0 {
             entity.vel.y *= -0.05;
         }
@@ -236,17 +248,16 @@ pub fn tick_fighter_jet(
         }
     }
     // On the ground at low speed: zero vertical velocity to prevent bouncing
-    if next_pos.y <= min_alt + 0.5 && current_speed < jet_stall_speed() {
+    if entity.pos.y <= min_alt + 0.5 && current_speed < jet_stall_speed() {
         entity.vel.y = 0.0;
     }
-    if next_pos.y > jet_max_altitude() {
-        next_pos.y = jet_max_altitude();
+    if entity.pos.y > jet_max_altitude() {
+        entity.pos.y = jet_max_altitude();
         if entity.vel.y > 0.0 {
             entity.vel.y *= 0.1;
         }
     }
 
-    entity.pos = next_pos;
     entity.sim_tick = next_sim_tick;
     entity.updated_at = ctx.timestamp;
 
