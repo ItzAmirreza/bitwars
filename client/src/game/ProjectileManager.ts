@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { VoxelWorld, BlockType } from './VoxelWorld';
 import { WeaponSystem, WEAPONS } from './Weapons';
 import { VEHICLE_WEAPONS } from './vehicles/VehicleManager';
+import { COMBAT } from '../shared-config';
 import { VFX } from './VFX';
 import type { AudioSystem } from './AudioSystem';
 
@@ -656,83 +657,87 @@ export class ProjectileManager {
     }
   }
 
+  /**
+   * Predict block destruction matching server's destroy_spherical_blocks ellipsoid.
+   * Server uses oblate spheroid: hr = radius, vr = radius * 0.5 for vehicle weapons,
+   * hr = vr = radius for infantry weapons.
+   * Bunker buster (vehicleWeaponIndex 2) uses a separate drill-and-detonate path
+   * on the server, so we skip prediction here (the block-hit path handles it).
+   */
+  private predictBlockDestruction(
+    p: ActiveProjectile,
+    center: { x: number; y: number; z: number },
+  ): ProjectileImpact['destroyedBlocks'] {
+    const destroyed: ProjectileImpact['destroyedBlocks'] = [];
+
+    // Bunker buster uses server-authoritative drill logic, not ellipsoid destruction.
+    // Block-hit impacts are handled by the drilling simulation in update().
+    if (p.isVehicle && p.vehicleWeaponIndex === 2) return destroyed;
+
+    const w = WEAPONS[p.weaponIndex];
+
+    // Determine radii to match server's destroy_spherical_blocks
+    let hr: number, vr: number;
+    if (p.isVehicle) {
+      const vw = VEHICLE_WEAPONS[p.vehicleWeaponIndex];
+      const r = vw?.radius ?? 6.0;
+      hr = r;
+      vr = Math.max(r * 0.5, 0.1); // Server: (def.radius * 0.5).max(0.1)
+    } else {
+      hr = w.radius;
+      vr = w.radius; // Server: def.radius, def.radius (sphere)
+    }
+
+    if (hr <= 0) {
+      // No radius — single block
+      const bt = this.world.getBlock(center.x, center.y, center.z);
+      if (bt !== 0 && bt !== BlockType.Bedrock) {
+        this.weapons.trackPendingDestruction(center.x, center.y, center.z, bt);
+        this.world.setBlock(center.x, center.y, center.z, 0);
+        destroyed.push({ x: center.x, y: center.y, z: center.z, blockType: bt });
+      }
+      return destroyed;
+    }
+
+    // Match server's max_block_destroy_per_call cap on candidate positions.
+    // Server counts all in-ellipsoid positions (not just solid blocks) and stops
+    // at this cap, so we must count the same way to predict the same set.
+    const maxCandidates = COMBAT.maxBlockDestroyPerCall;
+    let candidates = 0;
+
+    const hr2 = hr * hr;
+    const vr2 = vr * vr;
+    outer:
+    for (let bx = Math.floor(center.x - hr); bx <= Math.ceil(center.x + hr); bx++) {
+      for (let by = Math.floor(center.y - vr); by <= Math.ceil(center.y + vr); by++) {
+        for (let bz = Math.floor(center.z - hr); bz <= Math.ceil(center.z + hr); bz++) {
+          const dx = bx - center.x, dy = by - center.y, dz = bz - center.z;
+          if ((dx * dx + dz * dz) / hr2 + (dy * dy) / vr2 <= 1.0
+            && this.world.inBounds(bx, by, bz)) {
+            candidates++;
+            if (candidates > maxCandidates) break outer;
+            const bt = this.world.getBlock(bx, by, bz);
+            if (bt !== 0 && bt !== BlockType.Bedrock) {
+              this.weapons.trackPendingDestruction(bx, by, bz, bt);
+              this.world.setBlock(bx, by, bz, 0);
+              destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
+            }
+          }
+        }
+      }
+    }
+    return destroyed;
+  }
+
   private handleImpact(
     p: ActiveProjectile,
     blockHit: { x: number; y: number; z: number },
   ): void {
     if (p.isLocal) {
-      // Compute destroyed blocks (radius logic)
-      const destroyed: ProjectileImpact['destroyedBlocks'] = [];
-      const w = WEAPONS[p.weaponIndex];
-
-      if (p.isVehicle && p.vehicleWeaponIndex === 3) {
-        // ── CARPET BOMB: spherical destruction radius 7 ──
-        const r = 7.0;
-        const r2 = r * r;
-        for (let bx = Math.floor(blockHit.x - r); bx <= Math.ceil(blockHit.x + r); bx++) {
-          for (let by = Math.floor(blockHit.y - r); by <= Math.ceil(blockHit.y + r); by++) {
-            for (let bz = Math.floor(blockHit.z - r); bz <= Math.ceil(blockHit.z + r); bz++) {
-              const dx = bx - blockHit.x, dy = by - blockHit.y, dz = bz - blockHit.z;
-              if (dx * dx + dy * dy + dz * dz <= r2) {
-                const bt = this.world.getBlock(bx, by, bz);
-                if (bt !== 0 && bt !== BlockType.Bedrock) {
-                  this.weapons.trackPendingDestruction(bx, by, bz, bt);
-                  this.world.setBlock(bx, by, bz, 0);
-                  destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
-                }
-              }
-            }
-          }
-        }
-      } else if (p.isVehicle) {
-        // Vehicle rockets (index 0/1): oblate spheroid — wide horizontal, shallow vertical
-        const hr = 6.0; // horizontal radius (x/z)
-        const vr = 3.0; // vertical radius (y)
-        const hr2 = hr * hr;
-        const vr2 = vr * vr;
-        for (let bx = Math.floor(blockHit.x - hr); bx <= Math.ceil(blockHit.x + hr); bx++) {
-          for (let by = Math.floor(blockHit.y - vr); by <= Math.ceil(blockHit.y + vr); by++) {
-            for (let bz = Math.floor(blockHit.z - hr); bz <= Math.ceil(blockHit.z + hr); bz++) {
-              const dx = bx - blockHit.x, dy = by - blockHit.y, dz = bz - blockHit.z;
-              if ((dx * dx + dz * dz) / hr2 + (dy * dy) / vr2 <= 1.0) {
-                const bt = this.world.getBlock(bx, by, bz);
-                if (bt !== 0 && bt !== BlockType.Bedrock) {
-                  this.weapons.trackPendingDestruction(bx, by, bz, bt);
-                  this.world.setBlock(bx, by, bz, 0);
-                  destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
-                }
-              }
-            }
-          }
-        }
-      } else if (w.radius > 0) {
-        const r = w.radius;
-        const r2 = r * r;
-        for (let bx = Math.floor(blockHit.x - r); bx <= Math.ceil(blockHit.x + r); bx++) {
-          for (let by = Math.floor(blockHit.y - r); by <= Math.ceil(blockHit.y + r); by++) {
-            for (let bz = Math.floor(blockHit.z - r); bz <= Math.ceil(blockHit.z + r); bz++) {
-              const dx = bx - blockHit.x, dy = by - blockHit.y, dz = bz - blockHit.z;
-              if (dx * dx + dy * dy + dz * dz <= r2) {
-                const bt = this.world.getBlock(bx, by, bz);
-                if (bt !== 0 && bt !== BlockType.Bedrock) {
-                  this.weapons.trackPendingDestruction(bx, by, bz, bt);
-                  this.world.setBlock(bx, by, bz, 0);
-                  destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
-                }
-              }
-            }
-          }
-        }
-      } else {
-        const bt = this.world.getBlock(blockHit.x, blockHit.y, blockHit.z);
-        if (bt !== 0 && bt !== BlockType.Bedrock) {
-          this.weapons.trackPendingDestruction(blockHit.x, blockHit.y, blockHit.z, bt);
-          this.world.setBlock(blockHit.x, blockHit.y, blockHit.z, 0);
-          destroyed.push({ x: blockHit.x, y: blockHit.y, z: blockHit.z, blockType: bt });
-        }
-      }
+      const destroyed = this.predictBlockDestruction(p, blockHit);
 
       // Check for player hits near impact (for explosive projectiles)
+      const w = WEAPONS[p.weaponIndex];
       const hitPlayerIds: string[] = [];
       const splashRadius = p.isVehicle
         ? (VEHICLE_WEAPONS[p.vehicleWeaponIndex]?.radius ?? 6.0)
@@ -783,6 +788,9 @@ export class ProjectileManager {
     hitPlayerIds: string[],
   ): void {
     if (p.isLocal) {
+      // Predict block destruction so server chunk updates don't cause pop-in
+      const destroyed = this.predictBlockDestruction(p, hitPos);
+
       const travelTimeMs = performance.now() - p.firedAt;
       const splashRadius = p.isVehicle
         ? (VEHICLE_WEAPONS[p.vehicleWeaponIndex]?.radius ?? 6.0)
@@ -790,7 +798,7 @@ export class ProjectileManager {
       this.onLocalImpact({
         weaponIndex: p.weaponIndex,
         hitPos,
-        destroyedBlocks: [],
+        destroyedBlocks: destroyed,
         hitPlayerIds,
         hitVehicleIds: this.weapons.vehiclesWithinRadius(
           new THREE.Vector3(hitPos.x + 0.5, hitPos.y + 0.5, hitPos.z + 0.5),
@@ -822,6 +830,9 @@ export class ProjectileManager {
     directHitVehicleIds: number[],
   ): void {
     if (p.isLocal) {
+      // Predict block destruction so server chunk updates don't cause pop-in
+      const destroyed = this.predictBlockDestruction(p, hitPos);
+
       const w = WEAPONS[p.weaponIndex];
       const impactCenter = new THREE.Vector3(hitPos.x + 0.5, hitPos.y + 0.5, hitPos.z + 0.5);
       const splashRadius = p.isVehicle
@@ -851,7 +862,7 @@ export class ProjectileManager {
       this.onLocalImpact({
         weaponIndex: p.weaponIndex,
         hitPos,
-        destroyedBlocks: [],
+        destroyedBlocks: destroyed,
         hitPlayerIds,
         hitVehicleIds,
         origin: p.origin,
