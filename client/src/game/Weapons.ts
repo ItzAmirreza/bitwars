@@ -45,6 +45,8 @@ export interface FireResult {
   origin: THREE.Vector3;
   direction: THREE.Vector3;
   isProjectile: boolean;
+  /** Shotgun pellet endpoints for multi-tracer VFX */
+  pelletEnds?: THREE.Vector3[];
 }
 
 // Player hitbox: axis-aligned bounding box (width 0.6, height 1.9, centered at feet+0.95)
@@ -241,6 +243,12 @@ export class WeaponSystem {
       };
     }
 
+    // ── Shotgun: multi-pellet spread ──
+    const isShotgun = this.currentWeapon === 1;
+    if (isShotgun) {
+      return this.fireShotgun(origin, dir);
+    }
+
     // Hitscan path: instant raycast
     const hit = this.raycastVoxels(origin, dir, this.weapon.range);
 
@@ -294,6 +302,94 @@ export class WeaponSystem {
       origin,
       direction: dir,
       isProjectile: false,
+    };
+  }
+
+  /**
+   * Shotgun multi-pellet fire: casts N rays in a cone spread, aggregates hits.
+   * Each pellet independently raycasts against voxels, players, and vehicles.
+   * Duplicate player/vehicle IDs are intentional — server applies damage per entry.
+   */
+  private fireShotgun(origin: THREE.Vector3, centerDir: THREE.Vector3): FireResult {
+    const PELLET_COUNT = 7;
+    const SPREAD = 0.1; // radians of cone half-angle
+    const range = this.weapon.range;
+
+    // Build a local coordinate frame around the center direction
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3();
+    if (Math.abs(centerDir.y) < 0.99) {
+      right.crossVectors(centerDir, new THREE.Vector3(0, 1, 0)).normalize();
+    } else {
+      right.crossVectors(centerDir, new THREE.Vector3(1, 0, 0)).normalize();
+    }
+    up.crossVectors(right, centerDir).normalize();
+
+    const allHitPlayerIds: string[] = [];
+    const allHitVehicleIds: number[] = [];
+    const destroyed: FireResult['destroyedBlocks'] = [];
+    const pelletEnds: THREE.Vector3[] = [];
+    let firstBlockHit: { x: number; y: number; z: number } | null = null;
+
+    for (let i = 0; i < PELLET_COUNT; i++) {
+      // Random point in a disc, scaled by spread
+      const angle = Math.random() * Math.PI * 2;
+      const radius = Math.sqrt(Math.random()) * SPREAD;
+      const offX = Math.cos(angle) * radius;
+      const offY = Math.sin(angle) * radius;
+
+      const pelletDir = centerDir.clone()
+        .addScaledVector(right, offX)
+        .addScaledVector(up, offY)
+        .normalize();
+
+      // Voxel raycast
+      const hit = this.raycastVoxels(origin, pelletDir, range);
+
+      // Pellet tracer endpoint
+      const pelletEnd = hit
+        ? new THREE.Vector3(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5)
+        : origin.clone().add(pelletDir.clone().multiplyScalar(range));
+      pelletEnds.push(pelletEnd);
+
+      // Block destruction: each pellet destroys the block it hits
+      if (hit) {
+        if (!firstBlockHit) firstBlockHit = hit;
+        const bt = this.world.getBlock(hit.x, hit.y, hit.z);
+        if (bt !== 0 && bt !== BlockType.Bedrock) {
+          const key = `${hit.x},${hit.y},${hit.z}`;
+          if (!this.pendingBlockDestructions.has(key)) {
+            this.pendingBlockDestructions.set(key, bt);
+            this.world.setBlock(hit.x, hit.y, hit.z, 0);
+            destroyed.push({ x: hit.x, y: hit.y, z: hit.z, blockType: bt });
+          }
+        }
+      }
+
+      // Player hits — duplicates are intentional (multi-pellet damage)
+      const playerHits = this.raycastPlayers(origin, pelletDir, range);
+      allHitPlayerIds.push(...playerHits);
+
+      // Vehicle hits — duplicates are intentional
+      const vehicleHits = this.raycastVehicles(origin, pelletDir, range);
+      allHitVehicleIds.push(...vehicleHits);
+    }
+
+    const tracerEnd = firstBlockHit
+      ? new THREE.Vector3(firstBlockHit.x + 0.5, firstBlockHit.y + 0.5, firstBlockHit.z + 0.5)
+      : origin.clone().add(centerDir.clone().multiplyScalar(range));
+
+    return {
+      weaponIndex: this.currentWeapon,
+      hitPos: firstBlockHit,
+      destroyedBlocks: destroyed,
+      tracerEnd,
+      hitPlayerIds: allHitPlayerIds,
+      hitVehicleIds: allHitVehicleIds,
+      origin,
+      direction: centerDir,
+      isProjectile: false,
+      pelletEnds,
     };
   }
 
