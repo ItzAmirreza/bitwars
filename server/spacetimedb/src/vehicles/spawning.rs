@@ -235,8 +235,9 @@ pub fn spawn_jets_at_airstrips(ctx: &ReducerContext, world_seed: u64) {
                 ctx,
                 Vec3 {
                     x: rx as f32 + 0.5,
-                    // Match jet ground-rest altitude so wheels touch runway.
-                    y: ry as f32 + 1.95,
+                    // airport_runway_start returns runway surface Y. Spawn at
+                    // surface + jet minAltitude (0.95) so wheels start grounded.
+                    y: ry as f32 + 0.95,
                     z: rz as f32 + 0.5,
                 },
                 -std::f32::consts::FRAC_PI_2, // yaw=-PI/2 → forward is +X (down the runway)
