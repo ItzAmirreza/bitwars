@@ -309,6 +309,7 @@ export class AntiAirType implements VehicleType {
     const orientWrapper = mesh.getObjectByName('anti-air-orient-wrapper');
     const turret = orientWrapper?.getObjectByName('turret');
     const radar = turret?.getObjectByName('radar');
+    const barrelGroup = turret?.getObjectByName('barrel-group');
 
     // ── Radar dish rotation (constant spin) ──
     if (radar) {
@@ -323,8 +324,42 @@ export class AntiAirType implements VehicleType {
       orientWrapper.rotation.set(0, Math.PI / 2, 0);
     }
 
-    // No engine sound — stationary emplacement
-    void ctx;
+    // ── Turret rotation — follow pilot's aim direction ──
+    const pilotAim = ctx.getPilotAim(instance.entityId);
+    if (turret && pilotAim) {
+      // The orient wrapper rotates the model by PI/2 so +X model forward maps
+      // to -Z world forward. The turret yaw needs to be relative to the base
+      // orientation. Since the base entity yaw = mesh.rotation.y (set by
+      // VehicleManager), subtract it to get turret-local yaw.
+      const baseYaw = mesh.rotation.y;
+      const turretYaw = pilotAim.yaw - baseYaw;
+
+      // Smooth turret rotation for remote vehicles
+      const prevYaw = (mesh.userData.turretYaw as number) ?? turretYaw;
+      const prevPitch = (mesh.userData.turretPitch as number) ?? pilotAim.pitch;
+      const smoothRate = 12; // radians/sec convergence rate
+      const t = Math.min(1, smoothRate * delta);
+
+      // Handle yaw wrapping for shortest-path interpolation
+      let dyaw = turretYaw - prevYaw;
+      if (dyaw > Math.PI) dyaw -= Math.PI * 2;
+      if (dyaw < -Math.PI) dyaw += Math.PI * 2;
+      const smoothYaw = prevYaw + dyaw * t;
+      const smoothPitch = prevPitch + (pilotAim.pitch - prevPitch) * t;
+
+      mesh.userData.turretYaw = smoothYaw;
+      mesh.userData.turretPitch = smoothPitch;
+
+      // Apply yaw to turret group (rotates on pedestal)
+      turret.rotation.y = smoothYaw;
+
+      // Apply pitch to barrel group (elevates/depresses the guns)
+      if (barrelGroup) {
+        // Clamp pitch to reasonable range for an AA gun
+        const clampedPitch = Math.max(-0.8, Math.min(1.2, smoothPitch));
+        barrelGroup.rotation.z = clampedPitch;
+      }
+    }
   }
 
   // ══════════════════════════════════════════════════════════════
