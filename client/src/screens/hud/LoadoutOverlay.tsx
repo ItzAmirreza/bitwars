@@ -162,6 +162,51 @@ function GrenadeSVG({ color, glow }: { color: string; glow?: boolean }) {
   );
 }
 
+function SniperSVG({ color, glow }: { color: string; glow?: boolean }) {
+  return (
+    <svg width="80" height="28" viewBox="0 0 80 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {glow && (
+        <defs>
+          <filter id="sniper-glow">
+            <feGaussianBlur stdDeviation="1.5" result="blur" />
+            <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
+      )}
+      <g stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+         filter={glow ? 'url(#sniper-glow)' : undefined} opacity={glow ? 1 : 0.6}>
+        {/* Long barrel */}
+        <line x1="2" y1="12" x2="44" y2="12" />
+        {/* Front sight */}
+        <line x1="8" y1="9" x2="8" y2="12" />
+        {/* Receiver */}
+        <rect x="44" y="9" width="14" height="7" rx="1" />
+        {/* Scope body */}
+        <rect x="30" y="4" width="22" height="4" rx="1.5" />
+        {/* Scope lens front */}
+        <ellipse cx="30" cy="6" rx="1" ry="2.5" />
+        {/* Scope lens rear */}
+        <ellipse cx="52" cy="6" rx="1" ry="2" />
+        {/* Stock */}
+        <line x1="58" y1="10" x2="76" y2="10" />
+        <line x1="58" y1="16" x2="72" y2="16" />
+        <line x1="76" y1="10" x2="76" y2="13" />
+        <line x1="72" y1="16" x2="76" y2="13" />
+        {/* Bolt handle */}
+        <line x1="50" y1="9" x2="53" y2="7" />
+        {/* Magazine */}
+        <rect x="48" y="16" width="5" height="6" rx="0.5" />
+        {/* Grip */}
+        <line x1="55" y1="16" x2="53" y2="24" />
+        <line x1="53" y1="24" x2="57" y2="24" />
+        <line x1="57" y1="24" x2="58" y2="18" />
+        {/* Trigger guard */}
+        <path d="M50 16 Q50 20 53 20" fill="none" />
+      </g>
+    </svg>
+  );
+}
+
 function WeaponSilhouette({ weaponIndex, color, active }: { weaponIndex: number; color: string; active: boolean }) {
   switch (weaponIndex) {
     case 0: return <RifleSVG color={color} glow={active} />;
@@ -169,6 +214,7 @@ function WeaponSilhouette({ weaponIndex, color, active }: { weaponIndex: number;
     case 2: return <RpgSVG color={color} glow={active} />;
     case 3: return <MachineGunSVG color={color} glow={active} />;
     case 4: return <GrenadeSVG color={color} glow={active} />;
+    case 5: return <SniperSVG color={color} glow={active} />;
     default: return null;
   }
 }
@@ -183,7 +229,7 @@ const WEAPON_DATA = WEAPON_DEFINITIONS.map((_, i) => getWeaponHudData(i));
 const WEAPON_INDEXES = REGISTRY_INDEXES;
 
 // Stat normalization maxima for bar display
-const STAT_MAX = { damage: 100, fireRate: 15, range: 100, ammo: 200 } as const;
+const STAT_MAX = { damage: 100, fireRate: 15, range: 200, ammo: 200 } as const;
 
 function StatBar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
   const pct = Math.min(100, (value / max) * 100);
