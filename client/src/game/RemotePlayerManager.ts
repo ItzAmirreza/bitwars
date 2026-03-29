@@ -383,10 +383,12 @@ export class RemotePlayerManager {
       // ── Sniper scope glint ──
       const weaponIdx = group.userData.currentWeapon as number;
       if (weaponIdx === SNIPER_WEAPON_INDEX) {
+        // group.position is at foot level (pos.y - 1.7), so eye height is +1.7
+        const eyeY = group.position.y + 1.7;
         // Vector from remote player's eye to local camera
         toPlayer.set(
           camPos.x - group.position.x,
-          camPos.y - group.position.y,
+          camPos.y - eyeY,
           camPos.z - group.position.z,
         );
         const dist = toPlayer.length();
@@ -394,8 +396,13 @@ export class RemotePlayerManager {
         if (dist > GLINT_MIN_DIST && dist < GLINT_MAX_DIST) {
           toPlayer.divideScalar(dist); // normalize
 
-          // Remote player's look direction from yaw (they face -Z in local space)
-          lookDir.set(-Math.sin(interpRot.yaw), 0, -Math.cos(interpRot.yaw));
+          // Remote player's look direction from yaw + pitch
+          const cosPitch = Math.cos(interpRot.pitch);
+          lookDir.set(
+            -Math.sin(interpRot.yaw) * cosPitch,
+            -Math.sin(interpRot.pitch),
+            -Math.cos(interpRot.yaw) * cosPitch,
+          );
 
           const dot = lookDir.dot(toPlayer);
 
@@ -413,10 +420,10 @@ export class RemotePlayerManager {
               this.ctx.scene.add(sprite);
               this.glintSprites.set(id, sprite);
             }
-            // Position at remote player's eye height
+            // Position at remote player's scope height (eye level)
             sprite.position.set(
               group.position.x,
-              group.position.y + 0.15,
+              eyeY,
               group.position.z,
             );
             // Scale grows with distance so it remains visible from afar
