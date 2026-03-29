@@ -142,7 +142,12 @@ pub fn update_vehicle_input(
         return Ok(());
     }
 
-    let Some(mut vehicle) = ctx.db.vehicle().entity_id().find(&player.mounted_vehicle_id) else {
+    let Some(mut vehicle) = ctx
+        .db
+        .vehicle()
+        .entity_id()
+        .find(&player.mounted_vehicle_id)
+    else {
         return Ok(());
     };
     if vehicle.pilot_identity != Some(sender) {

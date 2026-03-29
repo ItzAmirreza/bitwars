@@ -104,7 +104,8 @@ pub fn tick_vehicles(ctx: &ReducerContext, job: VehicleTick) {
     };
     let next_tick = intended_time + Duration::from_millis(HELI_TICK_INTERVAL_MS);
     // If we fell too far behind (>5 ticks), reset to now to avoid burst catch-up
-    let next_tick = if next_tick + Duration::from_millis(HELI_TICK_INTERVAL_MS * 5) < ctx.timestamp {
+    let next_tick = if next_tick + Duration::from_millis(HELI_TICK_INTERVAL_MS * 5) < ctx.timestamp
+    {
         ctx.timestamp + Duration::from_millis(HELI_TICK_INTERVAL_MS)
     } else {
         next_tick

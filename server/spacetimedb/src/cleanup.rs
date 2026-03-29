@@ -18,7 +18,10 @@ pub fn cleanup_shots_scheduled(ctx: &ReducerContext, _job: ShotCleanup) {
         .db
         .shot_event()
         .iter()
-        .filter(|s| now_micros.saturating_sub(timestamp_micros(s.fired_at)) > 2_000_000)
+        .filter(|s| {
+            now_micros.saturating_sub(timestamp_micros(s.fired_at))
+                > crate::weapons::shot_event_retention_us(s.weapon)
+        })
         .map(|s| s.id)
         .collect();
     for id in stale_shots {

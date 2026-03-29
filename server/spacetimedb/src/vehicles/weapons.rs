@@ -44,9 +44,21 @@ fn get_slot_ammo(vehicle: &Vehicle, slot: u8) -> i32 {
 /// Return updated ammo tuple (primary, secondary, tertiary) after decrementing the given slot.
 fn deduct_slot_ammo(vehicle: &Vehicle, slot: u8) -> (i32, i32, i32) {
     match slot {
-        0 => (vehicle.weapon_ammo_primary - 1, vehicle.weapon_ammo_secondary, vehicle.weapon_ammo_tertiary),
-        1 => (vehicle.weapon_ammo_primary, vehicle.weapon_ammo_secondary - 1, vehicle.weapon_ammo_tertiary),
-        _ => (vehicle.weapon_ammo_primary, vehicle.weapon_ammo_secondary, vehicle.weapon_ammo_tertiary - 1),
+        0 => (
+            vehicle.weapon_ammo_primary - 1,
+            vehicle.weapon_ammo_secondary,
+            vehicle.weapon_ammo_tertiary,
+        ),
+        1 => (
+            vehicle.weapon_ammo_primary,
+            vehicle.weapon_ammo_secondary - 1,
+            vehicle.weapon_ammo_tertiary,
+        ),
+        _ => (
+            vehicle.weapon_ammo_primary,
+            vehicle.weapon_ammo_secondary,
+            vehicle.weapon_ammo_tertiary - 1,
+        ),
     }
 }
 
@@ -72,7 +84,11 @@ pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(
         return Err("Not the pilot".to_string());
     }
     // Max slots: 2 for helicopter, 3 for jet
-    let max_slots: u8 = if vehicle.vehicle_type == constants::vehicle_type_fighter_jet() { 3 } else { 2 };
+    let max_slots: u8 = if vehicle.vehicle_type == constants::vehicle_type_fighter_jet() {
+        3
+    } else {
+        2
+    };
     if weapon_index >= max_slots {
         return Err("Invalid vehicle weapon slot".to_string());
     }
@@ -167,12 +183,20 @@ pub fn fire_vehicle_weapon(
             y: muzzle_base.y - 1.0,
             z: muzzle_base.z,
         };
-        let kp_dir = Vec3 { x: 0.0, y: -1.0, z: 0.0 };
+        let kp_dir = Vec3 {
+            x: 0.0,
+            y: -1.0,
+            z: 0.0,
+        };
         (kp_origin, kp_dir)
     // Carpet bomb: compute origin from jet position, direction straight down
     // with forward velocity inheritance. Alternate left/right offset.
     } else if resolved_idx == constants::jet_weapon_slot1() {
-        let side = if current_ammo % 2 == 0 { 1.0f32 } else { -1.0f32 };
+        let side = if current_ammo % 2 == 0 {
+            1.0f32
+        } else {
+            -1.0f32
+        };
         let right_x = entity.rot.yaw.cos();
         let right_z = -entity.rot.yaw.sin();
         let bomb_origin = Vec3 {
@@ -200,7 +224,8 @@ pub fn fire_vehicle_weapon(
     };
 
     // Deduct ammo
-    let (new_ammo_primary, new_ammo_secondary, new_ammo_tertiary) = deduct_slot_ammo(&vehicle, slot);
+    let (new_ammo_primary, new_ammo_secondary, new_ammo_tertiary) =
+        deduct_slot_ammo(&vehicle, slot);
     let vehicle_id = vehicle.entity_id;
     ctx.db.vehicle().entity_id().update(Vehicle {
         weapon_ammo_primary: new_ammo_primary,
@@ -330,7 +355,7 @@ pub fn vehicle_projectile_impact(
     impact_pos: Vec3,
     _direction: Vec3,
     vehicle_weapon: u8,
-    _travel_time_ms: u32,
+    travel_time_ms: u32,
     _hit_players: Vec<Identity>,
     _hit_vehicles: Vec<u64>,
     _hit_blocks: Vec<Vec3>,
@@ -381,6 +406,7 @@ pub fn vehicle_projectile_impact(
         def.max_range,
         &impact_pos,
         &shot_origin,
+        travel_time_ms,
         Some(source_vehicle_id),
         true,
     ) else {
@@ -400,6 +426,13 @@ pub fn vehicle_projectile_impact(
     if dist_sq(&shot.origin, &impact_pos) > max_range * max_range {
         return Err("Impact too far from origin".to_string());
     }
+
+    weapons::validate_travel_time(
+        &shot.origin,
+        &impact_pos,
+        def.projectile_speed,
+        travel_time_ms,
+    );
 
     consume_projectile_shot(ctx, shot, &impact_pos);
 
@@ -473,9 +506,21 @@ pub fn reload_vehicle_weapon(ctx: &ReducerContext) -> Result<(), String> {
     }
     let def = weapons::get_vehicle_weapon(resolved_idx);
 
-    let new_ammo_primary = if slot == 0 { def.max_ammo } else { vehicle.weapon_ammo_primary };
-    let new_ammo_secondary = if slot == 1 { def.max_ammo } else { vehicle.weapon_ammo_secondary };
-    let new_ammo_tertiary = if slot == 2 { def.max_ammo } else { vehicle.weapon_ammo_tertiary };
+    let new_ammo_primary = if slot == 0 {
+        def.max_ammo
+    } else {
+        vehicle.weapon_ammo_primary
+    };
+    let new_ammo_secondary = if slot == 1 {
+        def.max_ammo
+    } else {
+        vehicle.weapon_ammo_secondary
+    };
+    let new_ammo_tertiary = if slot == 2 {
+        def.max_ammo
+    } else {
+        vehicle.weapon_ammo_tertiary
+    };
 
     ctx.db.vehicle().entity_id().update(Vehicle {
         weapon_ammo_primary: new_ammo_primary,

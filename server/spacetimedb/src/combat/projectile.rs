@@ -20,6 +20,7 @@ pub fn find_matching_projectile_shot(
     max_range: f32,
     impact_pos: &Vec3,
     client_shot_origin: &Vec3,
+    reported_travel_time_ms: u32,
     source_vehicle_filter: Option<u64>,
     require_vehicle_source: bool,
 ) -> Option<ShotEvent> {
@@ -44,8 +45,7 @@ pub fn find_matching_projectile_shot(
 
         let fired_at_us = timestamp_micros(shot.fired_at);
         let age_us = now_us.saturating_sub(fired_at_us);
-        // Keep this in sync with shot event cleanup TTL (+ headroom).
-        if age_us > 8_000_000 {
+        if age_us > weapons::shot_event_retention_us(weapon_code) {
             continue;
         }
 
@@ -79,21 +79,36 @@ pub fn find_matching_projectile_shot(
         }
         let dir_dot =
             shot_dir.x * impact_dir.x + shot_dir.y * impact_dir.y + shot_dir.z * impact_dir.z;
-        let min_dir_dot = if shot.source_vehicle == 0 { 0.45 } else { 0.35 };
+        let min_dir_dot = if shot.source_vehicle == 0 { 0.45 } else { 0.05 };
         if dir_dot < min_dir_dot {
             continue;
         }
 
         let expected_ms = impact_len / projectile_speed * 1000.0;
         let age_ms = age_us as f32 / 1000.0;
-        let min_ms = (expected_ms * 0.2).max(15.0);
-        let max_ms = expected_ms * 3.2 + 600.0;
+        let target_ms = if reported_travel_time_ms > 0 {
+            reported_travel_time_ms as f32
+        } else {
+            expected_ms
+        };
+        let early_slack_ms = if shot.source_vehicle == 0 {
+            250.0
+        } else {
+            1_200.0
+        };
+        let late_slack_ms = if shot.source_vehicle == 0 {
+            1_200.0
+        } else {
+            2_500.0
+        };
+        let min_ms = (target_ms - early_slack_ms).max(0.0);
+        let max_ms = target_ms + late_slack_ms;
         if age_ms < min_ms || age_ms > max_ms {
             continue;
         }
 
         let origin_dist_sq = dist_sq(&shot.origin, client_shot_origin);
-        let score = (age_ms - expected_ms).abs() + origin_dist_sq * 0.35;
+        let score = (age_ms - target_ms).abs() + origin_dist_sq * 0.35;
         match &best {
             Some((_, best_score)) if score >= *best_score => {}
             _ => best = Some((shot, score)),
@@ -176,7 +191,7 @@ pub fn projectile_impact(
     impact_pos: Vec3,
     _direction: Vec3,
     weapon: u8,
-    _travel_time_ms: u32,
+    travel_time_ms: u32,
     _hit_players: Vec<Identity>,
     _hit_vehicles: Vec<u64>,
     _hit_blocks: Vec<Vec3>,
@@ -208,6 +223,7 @@ pub fn projectile_impact(
         def.max_range,
         &impact_pos,
         &shot_origin,
+        travel_time_ms,
         Some(0),
         false,
     ) else {
@@ -226,6 +242,13 @@ pub fn projectile_impact(
     if dist_sq(&shot.origin, &impact_pos) > max_range * max_range {
         return Err("Impact too far from origin".to_string());
     }
+
+    weapons::validate_travel_time(
+        &shot.origin,
+        &impact_pos,
+        def.projectile_speed,
+        travel_time_ms,
+    );
 
     consume_projectile_shot(ctx, shot, &impact_pos);
 

@@ -2,9 +2,9 @@
 // Modular combat: damage resolution, weapon firing, projectile impacts.
 
 pub mod blocks;
-pub mod kinetic_penetrator;
 pub mod damage;
 pub mod fire;
+pub mod kinetic_penetrator;
 pub mod projectile;
 
 // Re-export everything for backward compat

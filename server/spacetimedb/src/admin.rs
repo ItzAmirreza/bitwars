@@ -253,17 +253,11 @@ pub fn process_admin_command(
             match parts[1].to_lowercase().as_str() {
                 "heli" | "helicopter" => {
                     let eid = crate::vehicles::spawn_helicopter(ctx, spawn_pos, yaw);
-                    insert_system_message(
-                        ctx,
-                        &format!("Spawned helicopter (entity {})", eid),
-                    );
+                    insert_system_message(ctx, &format!("Spawned helicopter (entity {})", eid));
                 }
                 "jet" | "fighterjet" | "fighter_jet" => {
                     let eid = crate::vehicles::spawn_fighter_jet(ctx, spawn_pos, yaw);
-                    insert_system_message(
-                        ctx,
-                        &format!("Spawned fighter jet (entity {})", eid),
-                    );
+                    insert_system_message(ctx, &format!("Spawned fighter jet (entity {})", eid));
                 }
                 "aa" | "antiair" | "anti_air" => {
                     let eid = crate::vehicles::spawn_anti_air(ctx, spawn_pos, yaw);

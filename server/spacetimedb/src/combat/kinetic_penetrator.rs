@@ -136,14 +136,7 @@ pub fn kinetic_penetrator_strike(
 
     // Phase 4: Emit explosion events
     // Small surface impact
-    emit_explosion(
-        ctx,
-        sender,
-        impact_pos,
-        3.0,
-        weapon_code,
-        &drill_destroyed,
-    );
+    emit_explosion(ctx, sender, impact_pos, 3.0, weapon_code, &drill_destroyed);
     // Big underground detonation
     emit_explosion(
         ctx,

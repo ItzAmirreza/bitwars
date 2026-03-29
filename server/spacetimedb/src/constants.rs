@@ -192,11 +192,17 @@ pub fn vehicle_type_fighter_jet() -> u8 {
 }
 
 /// Kinetic Penetrator weapon index (jet slot 0).
-pub fn jet_weapon_slot0() -> u8 { 2 }
+pub fn jet_weapon_slot0() -> u8 {
+    2
+}
 /// Carpet Bomb weapon index (jet slot 1).
-pub fn jet_weapon_slot1() -> u8 { 3 }
+pub fn jet_weapon_slot1() -> u8 {
+    3
+}
 /// Air Missile weapon index (jet slot 2).
-pub fn jet_weapon_slot2() -> u8 { 6 }
+pub fn jet_weapon_slot2() -> u8 {
+    6
+}
 
 /// Not in shared JSON — server-only spawn config.
 pub const SANDBOX_JET_COUNT: usize = 1;
@@ -286,9 +292,13 @@ pub fn vehicle_type_anti_air() -> u8 {
 }
 
 /// Anti-Air weapon slot 0 → vehicleWeapons index 4 (AUTOCANNON)
-pub fn aa_weapon_slot0() -> u8 { 4 }
+pub fn aa_weapon_slot0() -> u8 {
+    4
+}
 /// Anti-Air weapon slot 1 → vehicleWeapons index 5 (SAM MISSILE)
-pub fn aa_weapon_slot1() -> u8 { 5 }
+pub fn aa_weapon_slot1() -> u8 {
+    5
+}
 
 /// Not in shared JSON — server-only spawn config.
 pub const SANDBOX_AA_COUNT: usize = 1;

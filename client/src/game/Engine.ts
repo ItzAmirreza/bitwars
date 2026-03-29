@@ -1716,7 +1716,7 @@ export class Engine {
 
       // Vehicle weapons use 100+ namespace
       if (weaponIdx >= 100) {
-        const vehWeaponIdx = weaponIdx - 100; // 0=minigun, 1=rockets
+        const vehWeaponIdx = weaponIdx - 100; // 0=minigun, 1=rockets, 2=penetrator, 3=carpet bomb
         const vw = VEHICLE_WEAPONS[vehWeaponIdx];
         if (!vw) return;
 
@@ -1737,6 +1737,14 @@ export class Engine {
           // Muzzle flash at launch point (color varies by weapon)
           const flashColor = vehWeaponIdx === 6 ? 0x00ccff : vehWeaponIdx === 2 ? 0xff2200 : vehWeaponIdx === 3 ? 0xff6600 : vehWeaponIdx === 4 ? 0xffdd33 : 0xff4400;
           this.vfx.emitMuzzleFlashAt(origin, dir, flashColor);
+        } else if (vehWeaponIdx === 2) {
+          // Kinetic penetrator is a dedicated jet strike, not a minigun tracer.
+          const hasHit = shot.hasHit as boolean;
+          const hitPos = shot.hitPos;
+          const end = hasHit && hitPos
+            ? new THREE.Vector3(hitPos.x + 0.5, hitPos.y + 0.5, hitPos.z + 0.5)
+            : origin.clone().add(dir.clone().normalize().multiplyScalar(vw.maxRange));
+          this.vfx.emitKineticBeam(origin, end);
         } else {
           // Hitscan (minigun): tracer + muzzle flash + impact
           const hasHit = shot.hasHit as boolean;

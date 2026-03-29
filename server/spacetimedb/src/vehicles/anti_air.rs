@@ -145,7 +145,8 @@ pub fn tick_anti_air(
     }
 
     // ── Ground snapping (tracked vehicle stays on terrain) ──
-    let ground = terrain.ground_surface_height(ctx, next_pos.x, next_pos.z) + aa_min_altitude() + 1.0;
+    let ground =
+        terrain.ground_surface_height(ctx, next_pos.x, next_pos.z) + aa_min_altitude() + 1.0;
     // Smoothly snap to ground: apply gravity if above, clamp if below
     if next_pos.y > ground + 0.5 {
         entity.vel.y -= 25.0 * dt; // gravity
