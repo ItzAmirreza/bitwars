@@ -334,6 +334,8 @@
     "damagePerBlock": 8,
     "speedRetainPerBlock": 0.92,
     "minSpeedToCollide": 1.0,
+    "speedDestroyReference": 40.0,
+    "minDestroyFraction": 0.25,
     "maxBlocksPerTick": 50,
     "collisionHitboxScale": 0.5
   },
