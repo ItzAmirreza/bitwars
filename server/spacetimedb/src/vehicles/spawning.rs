@@ -286,7 +286,7 @@ pub fn spawn_aa_at_outposts(ctx: &ReducerContext, world_seed: u64) {
                 ctx,
                 Vec3 {
                     x: sx as f32 + 0.5,
-                    y: sy as f32 + 1.0,
+                    y: sy as f32,
                     z: sz as f32 + 0.5,
                 },
                 0.0, // facing north

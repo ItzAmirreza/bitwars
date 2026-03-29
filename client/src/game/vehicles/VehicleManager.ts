@@ -653,12 +653,14 @@ export default class VehicleManager {
 
   private getPredictionGroundHeight(typeId: number, x: number, z: number): number {
     const top = this.engine.world.getHighestBlock(x, z);
-    if (top < 0) return 3.0;
+    // Match server TerrainSampler fallback when no surface sample is available.
+    const surface = top >= 0 ? top : 3.0;
     // Server parity:
-    // - helicopter_ground_rest_height: y + 2
-    // - fighter_jet_ground_height: y + 1
-    const offset = typeId === VEHICLE_TYPES.Helicopter ? 2 : 1;
-    return top + offset;
+    // - helicopter_ground_rest_height: surface + 2
+    // - fighter_jet_ground_height:    surface + 1
+    // - anti-air ground snap:         surface + 1
+    if (typeId === VEHICLE_TYPES.Helicopter) return surface + 2;
+    return surface + 1;
   }
 
   // ══════════════════════════════════════════════════════════════

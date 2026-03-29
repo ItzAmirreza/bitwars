@@ -293,17 +293,11 @@ export function tickAntiAir(
   if (nz < WORLD_MIN_Z) { nz = WORLD_MIN_Z; vz = Math.abs(vz) * BB; }
   if (nz > WORLD_MAX_Z) { nz = WORLD_MAX_Z; vz = -Math.abs(vz) * BB; }
 
-  // Ground snapping
-  const ground = gnd(nx, nz) + ANTI_AIR.minAltitude + 1.0;
-  if (ny > ground + 0.5) {
-    vy -= 25.0 * TICK_DT;
-  } else if (ny < ground) {
-    ny = ground;
-    vy = 0;
-  } else {
-    vy = (ground - ny) * 5.0;
-  }
-  ny = Math.max(ny, ground);
+  // Ground snapping: stationary emplacement stays exactly on terrain.
+  // `gnd` already matches server AA semantics (surface + 1).
+  const ground = gnd(nx, nz) + ANTI_AIR.minAltitude;
+  ny = ground;
+  vy = 0;
 
   // pitch stays 0 (ground vehicle)
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch: 0 };
