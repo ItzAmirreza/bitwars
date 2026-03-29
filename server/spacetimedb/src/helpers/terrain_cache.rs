@@ -20,7 +20,9 @@ impl TerrainSampler {
     }
 
     pub fn helicopter_ground_rest_height(&mut self, ctx: &ReducerContext, x: f32, z: f32) -> f32 {
-        self.surface_height(ctx, x, z) + 2.0
+        // Helicopter skids sit ~0.525u below entity origin in the model.
+        // Place origin at surface + 0.475 so skids rest on the ground.
+        self.surface_height(ctx, x, z) + 0.475
     }
 
     pub fn fighter_jet_ground_height(&mut self, ctx: &ReducerContext, x: f32, z: f32) -> f32 {

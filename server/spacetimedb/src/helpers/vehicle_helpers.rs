@@ -108,7 +108,8 @@ pub fn helicopter_ground_rest_height(ctx: &ReducerContext, x: f32, z: f32) -> f3
     }
     for y in (0..WORLD_SIZE_Y as i32).rev() {
         if matches!(get_block_type(ctx, sx, y, sz), Some(bt) if bt != AIR) {
-            return y as f32 + 2.0;
+            // Ground surface for players standing on terrain (top solid + 1.0).
+            return y as f32 + 1.0;
         }
     }
     3.0

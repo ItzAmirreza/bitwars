@@ -256,7 +256,7 @@
     "healthMax": 750,
     "scale": 2.0,
     "mountRange": 7.0,
-    "minAltitude": 3.0,
+    "minAltitude": 0.95,
     "maxAltitude": 140.0,
     "minSpeed": 18.0,
     "maxSpeed": 140.0,

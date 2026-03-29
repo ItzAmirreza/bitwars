@@ -144,7 +144,9 @@ pub fn helicopter_spawn_y_if_fit(
 
     let center = crate::types::Vec3 {
         x: center_x as f32 + 0.5,
-        y: (base_y as f32) + 1.0,
+        // Helicopter origin should spawn at its ground-rest height so skids
+        // are already touching terrain (no initial settle hover).
+        y: (base_y as f32) - 0.525,
         z: center_z as f32 + 0.5,
     };
 
