@@ -125,6 +125,8 @@ export interface VehicleTypeFrameContext {
   /** Dynamic light helpers. */
   updateDynamicLight(id: string, patch: any): void;
   mountedVehicleId: number;
+  /** Get the pilot's aim direction for a vehicle (yaw/pitch). Returns null if no pilot. */
+  getPilotAim(entityId: number): { yaw: number; pitch: number } | null;
 }
 
 /** Helpers available during vehicle destruction. */

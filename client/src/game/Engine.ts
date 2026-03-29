@@ -2324,21 +2324,18 @@ export class Engine {
   private sendPositionUpdate(): void {
     if (!this.conn) return;
     if (this.health <= 0) return; // Dead — don't send position updates
-    // While mounted, vehicle input already carries look direction at high rate.
-    // Extra updatePosition calls only add load and can delay input processing.
-    if (this.mountedVehicleId !== 0) return;
     const now = performance.now();
+    const isMounted = this.mountedVehicleId !== 0;
     // Adaptive rate:
-    //   Mounted: 50ms (~20Hz) — only sending aim direction + weapon; server
-    //     already computes player position from the vehicle entity in
-    //     tick_vehicles, so high-rate position updates are redundant.
+    //   Mounted: 100ms (~10Hz) — only aim direction matters; server already
+    //     computes player position from vehicle entity in tick_vehicles.
     //   Active infantry: 33ms (~30Hz)
     //   Idle infantry: 100ms (~10Hz)
     const vel = this.controls.getVelocity();
     const isActive = this.controls.horizontalSpeed > 0.5
       || Math.abs(vel.y) > 0.5
       || this.mouseDown;
-    const interval = isActive ? 33 : 100;
+    const interval = isMounted ? 100 : isActive ? 33 : 100;
     if (now - this.lastPositionUpdate < interval) return;
     this.lastPositionUpdate = now;
 

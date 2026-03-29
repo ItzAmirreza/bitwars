@@ -246,6 +246,31 @@ export default class VehicleManager {
     return null;
   }
 
+  /** Get the pilot's aim direction for a vehicle. For local vehicle uses
+   *  direct pilot yaw/pitch; for remote vehicles reads the pilot's Player row. */
+  getPilotAim(entityId: number): { yaw: number; pitch: number } | null {
+    // Local vehicle: use the local pilot aim directly
+    if (entityId === this.engine.mountedVehicleId) {
+      return { yaw: this.vehiclePilotYaw, pitch: this.vehiclePilotPitch };
+    }
+    // Remote vehicle: look up pilot identity from Vehicle row, then Player row
+    const vehicle = this.getVehicleRow(entityId);
+    if (!vehicle || !vehicle.pilotIdentity) return null;
+    const playerTable = (this.engine.conn?.db as any)?.player;
+    if (!playerTable) return null;
+    for (const p of playerTable.iter()) {
+      const player = p as any;
+      if (player.identity && vehicle.pilotIdentity &&
+          player.identity.toHexString() === vehicle.pilotIdentity.toHexString()) {
+        return {
+          yaw: Number(player.rot?.yaw ?? 0),
+          pitch: Number(player.rot?.pitch ?? 0),
+        };
+      }
+    }
+    return null;
+  }
+
   findNearestVehicleOfType(typeId: number, around: THREE.Vector3): {
     entityId: number;
     position: THREE.Vector3;
@@ -930,6 +955,7 @@ export default class VehicleManager {
       sky: this.engine.sky,
       updateDynamicLight: (id, patch) => this.engine.updateDynamicLight(id, patch),
       mountedVehicleId: this.engine.mountedVehicleId,
+      getPilotAim: (eid) => this.getPilotAim(eid),
     };
 
     for (const [id, mesh] of this.vehicles) {
