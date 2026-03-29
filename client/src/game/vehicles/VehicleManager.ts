@@ -194,13 +194,13 @@ export default class VehicleManager {
 
   /**
    * Resolve the actual vehicle weapon index from the current slot.
-   * Fighter jets use weapon indices 2/3 (Bunker Buster/Carpet Bomb),
+   * Fighter jets use weapon indices 2/3 (Kinetic Penetrator/Carpet Bomb),
    * while helicopters use 0/1 (Minigun/Rockets).
    */
   getResolvedVehicleWeaponIndex(): number {
     const vt = this.getMountedVehicleType();
     if (vt && vt.typeId === VEHICLE_TYPES.FighterJet) {
-      // Jet slot 0 → weapon index 2 (Bunker Buster), slot 1 → weapon index 3 (Carpet Bomb)
+      // Jet slot 0 → weapon index 2 (Kinetic Penetrator), slot 1 → weapon index 3 (Carpet Bomb)
       return this.vehicleWeaponIndex + 2;
     }
     return this.vehicleWeaponIndex;

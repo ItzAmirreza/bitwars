@@ -145,7 +145,7 @@ function buildVehicleWeaponDefinition(cfg: VehicleWeaponConfig): VehicleWeaponDe
   const spreads: Record<number, { x: number; y: number }> = {
     0: { x: 0.035, y: 0.02 },  // Minigun
     1: { x: 0, y: 0 },          // Rockets
-    2: { x: 0, y: 0 },          // Bunker Buster
+    2: { x: 0, y: 0 },          // Kinetic Penetrator
     3: { x: 0, y: 0 },          // Carpet Bomb
   };
 

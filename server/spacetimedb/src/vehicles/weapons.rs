@@ -12,7 +12,7 @@ use crate::weapons;
 
 /// Map a vehicle's weapon slot (0 or 1) to the actual vehicleWeapons index.
 /// Helicopter: slot 0 → index 0 (MINIGUN), slot 1 → index 1 (ROCKETS)
-/// Fighter Jet: slot 0 → index 2 (BUNKER BUSTER), slot 1 → index 3 (CARPET BOMB)
+/// Fighter Jet: slot 0 → index 2 (KINETIC PENETRATOR), slot 1 → index 3 (CARPET BOMB)
 fn resolve_vehicle_weapon_index(vehicle_type: u8, slot: u8) -> u8 {
     if vehicle_type == constants::vehicle_type_fighter_jet() {
         if slot == 0 {
@@ -139,9 +139,18 @@ pub fn fire_vehicle_weapon(
         z: entity.pos.z + entity.vel.z * dt,
     };
 
+    // Kinetic penetrator: fires straight down from jet position
+    let (origin, shot_direction) = if resolved_idx == constants::jet_weapon_slot0() {
+        let kp_origin = Vec3 {
+            x: muzzle_base.x,
+            y: muzzle_base.y - 1.0,
+            z: muzzle_base.z,
+        };
+        let kp_dir = Vec3 { x: 0.0, y: -1.0, z: 0.0 };
+        (kp_origin, kp_dir)
     // Carpet bomb: compute origin from jet position, direction straight down
     // with forward velocity inheritance. Alternate left/right offset.
-    let (origin, shot_direction) = if resolved_idx == constants::jet_weapon_slot1() {
+    } else if resolved_idx == constants::jet_weapon_slot1() {
         let side = if current_ammo % 2 == 0 { 1.0f32 } else { -1.0f32 };
         let right_x = entity.rot.yaw.cos();
         let right_z = -entity.rot.yaw.sin();
@@ -206,7 +215,55 @@ pub fn fire_vehicle_weapon(
         return Ok(());
     }
 
-    // Hitscan path
+    // Kinetic Penetrator: hitscan downward strike — delegate to specialized handler
+    if resolved_idx == constants::jet_weapon_slot0() {
+        let mut validated_impact: Option<Vec3> = None;
+        if !hit_blocks.is_empty() {
+            let impact = &hit_blocks[0];
+            // Validate: impact must be directly below the server-authoritative origin
+            let horiz_dist_sq = (impact.x - origin.x).powi(2) + (impact.z - origin.z).powi(2);
+            let max_horiz_tolerance = 5.0; // Allow small drift from extrapolation
+            let vert_dist = origin.y - impact.y;
+            if horiz_dist_sq <= max_horiz_tolerance * max_horiz_tolerance
+                && vert_dist >= 0.0
+                && vert_dist <= def.max_range
+                && block_in_bounds(impact.x as i32, impact.y as i32, impact.z as i32)
+            {
+                crate::combat::kinetic_penetrator::kinetic_penetrator_strike(
+                    ctx,
+                    sender,
+                    impact,
+                    def.damage,
+                    def.radius,
+                    weapon_code,
+                    vehicle_id,
+                );
+                validated_impact = Some(impact.clone());
+            } else {
+                log::warn!(
+                    "[KINETIC_PENETRATOR] Rejected impact: origin=({:.1},{:.1},{:.1}) impact=({:.1},{:.1},{:.1}) hdist={:.1} vdist={:.1}",
+                    origin.x, origin.y, origin.z,
+                    impact.x, impact.y, impact.z,
+                    horiz_dist_sq.sqrt(), vert_dist,
+                );
+            }
+        }
+        // Emit shot event so remote clients see the beam VFX
+        ctx.db.shot_event().insert(ShotEvent {
+            id: 0,
+            shooter: sender,
+            origin: origin.clone(),
+            direction: shot_direction,
+            hit_pos: validated_impact.clone().unwrap_or(ZERO_VEL),
+            has_hit: validated_impact.is_some(),
+            weapon: weapon_code,
+            source_vehicle: vehicle_id,
+            fired_at: ctx.timestamp,
+        });
+        return Ok(());
+    }
+
+    // Standard hitscan path (minigun)
     apply_hitscan_player_damage(
         ctx,
         sender,
@@ -332,20 +389,6 @@ pub fn vehicle_projectile_impact(
     }
 
     consume_projectile_shot(ctx, shot, &impact_pos);
-
-    // Bunker buster: drill down and detonate underground
-    if resolved_idx == constants::jet_weapon_slot0() {
-        crate::combat::bunker_buster::bunker_buster_drill_and_detonate(
-            ctx,
-            sender,
-            &impact_pos,
-            def.damage,
-            def.radius,
-            weapon_code,
-            source_vehicle_id,
-        );
-        return Ok(());
-    }
 
     // Standard projectile impact (rockets, carpet bomb, etc.)
     let hit_players = collect_all_player_ids(ctx);

@@ -82,13 +82,6 @@ export interface EngineState {
   vehicleWeaponSlots: { name: string; color: string }[];
   nearVehicle: boolean;
   nearVehicleName: string | null;
-  bunkerBusterActive: boolean;
-  bunkerBusterDepthData: {
-    blockTypes: number[];
-    bombY: number;
-    columnTopY: number;
-    columnBottomY: number;
-  } | null;
 }
 
 export class Engine {
@@ -634,17 +627,8 @@ export class Engine {
       this.mouseDown = true;
       if (this.mountedVehicleId !== 0) this.tryVehicleFire();
       else this.tryFire();
-    } else if (e.button === 2 && this.controls.locked) {
-      this.tryBunkerBusterDetonate();
     }
   };
-
-  private tryBunkerBusterDetonate(): void {
-    if (this.mountedVehicleId === 0) return;
-    const resolvedIdx = this.vehicleManager.getResolvedVehicleWeaponIndex();
-    if (resolvedIdx !== 2) return;
-    this.projectileManager.detonateActiveBunkerBuster();
-  }
 
   private onContextMenu = (e: Event): void => {
     e.preventDefault();
@@ -1274,7 +1258,7 @@ export class Engine {
     // Vehicle weapons (100+ namespace)
     else if (weaponIdx === 100) this.audio.playVehicleMinigun(spatial); // Minigun
     else if (weaponIdx === 101) this.audio.playVehicleRocket(spatial);  // Rockets
-    else if (weaponIdx === 102) this.audio.playBunkerBusterDrop(spatial); // Bunker Buster
+    else if (weaponIdx === 102) this.audio.playKineticPenetratorFire(spatial); // Kinetic Penetrator
     else if (weaponIdx === 103) this.audio.playCarpetBombDrop(spatial);   // Carpet Bomb
   }
 
@@ -2842,31 +2826,6 @@ export class Engine {
     const resolvedVehWepIdx = this.vehicleManager.getResolvedVehicleWeaponIndex();
     const curVehWep = VEHICLE_WEAPONS[resolvedVehWepIdx];
 
-    // ── Bunker buster depth data + X-ray ──
-    let bbActive = false;
-    let bbDepthData: EngineState['bunkerBusterDepthData'] = null;
-    const bbProj = this.projectileManager.getActiveBunkerBuster();
-    if (this.mountedVehicleId !== 0 && resolvedVehWepIdx === 2 && bbProj) {
-      bbActive = true;
-      const bx = Math.floor(bbProj.pos.x);
-      const bz = Math.floor(bbProj.pos.z);
-      const bombY = bbProj.pos.y;
-      const columnTopY = Math.floor(bombY) + 10;
-      const columnBottomY = Math.floor(bombY) - 30;
-      const blockTypes: number[] = [];
-      for (let y = columnTopY; y >= columnBottomY; y--) {
-        blockTypes.push(this.world.getBlock(bx, y, bz));
-      }
-      bbDepthData = { blockTypes, bombY, columnTopY, columnBottomY };
-    }
-
-    // Update chunk X-ray transparency around active bunker buster
-    if (bbProj) {
-      this.world.setBombXRay(true, bbProj.pos);
-    } else {
-      this.world.setBombXRay(false);
-    }
-
     this.onStateChange({
       weapon: this.weapons.currentWeapon,
       loadout: this.weapons.loadout,
@@ -2900,8 +2859,6 @@ export class Engine {
       ],
       nearVehicle,
       nearVehicleName,
-      bunkerBusterActive: bbActive,
-      bunkerBusterDepthData: bbDepthData,
     });
   }
 
