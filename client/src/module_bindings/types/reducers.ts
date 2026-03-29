@@ -6,6 +6,7 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
+import CollectAbilityReducer from "../collect_ability_reducer";
 import DestroyBlocksPhysicsReducer from "../destroy_blocks_physics_reducer";
 import FireVehicleWeaponReducer from "../fire_vehicle_weapon_reducer";
 import FireWeaponReducer from "../fire_weapon_reducer";
@@ -24,6 +25,7 @@ import UpdatePositionReducer from "../update_position_reducer";
 import UpdateVehicleInputReducer from "../update_vehicle_input_reducer";
 import VehicleProjectileImpactReducer from "../vehicle_projectile_impact_reducer";
 
+export type CollectAbilityParams = __Infer<typeof CollectAbilityReducer>;
 export type DestroyBlocksPhysicsParams = __Infer<typeof DestroyBlocksPhysicsReducer>;
 export type FireVehicleWeaponParams = __Infer<typeof FireVehicleWeaponReducer>;
 export type FireWeaponParams = __Infer<typeof FireWeaponReducer>;

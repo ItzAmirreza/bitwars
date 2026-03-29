@@ -2326,6 +2326,17 @@ export class Engine {
     }
   }
 
+  /** Check if the local player is near any ability pickups and collect instantly. */
+  private checkAbilityPickups(): void {
+    if (!this.conn || this.mountedVehicleId !== 0) return;
+    const pos = this.camera.position;
+    const nearby = this.abilityPickups.getPickupsInRange(pos.x, pos.y, pos.z);
+    for (const id of nearby) {
+      this.abilityPickups.markPendingCollect(id);
+      this.conn.reducers.collectAbility({ pickupId: id });
+    }
+  }
+
   /** Update local ammo from a single PlayerAmmo row */
   private syncAmmoRow(row: any): void {
     if (!this.conn) return;
@@ -2811,6 +2822,7 @@ export class Engine {
     // Physics (falling blocks)
     this.physics.update(delta);
     this.abilityPickups.update(delta);
+    this.checkAbilityPickups();
 
     // Dynamic lights
     this.updateDynamicLights(delta);

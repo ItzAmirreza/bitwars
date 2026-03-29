@@ -89,6 +89,38 @@ fn apply_buff(ctx: &ReducerContext, identity: Identity, ability_type: u8, durati
     });
 }
 
+/// Client-triggered instant pickup: validate proximity, then collect.
+#[reducer]
+pub fn collect_ability(ctx: &ReducerContext, pickup_id: u64) -> Result<(), String> {
+    let player = ctx
+        .db
+        .player()
+        .identity()
+        .find(ctx.sender())
+        .ok_or("Player not found")?;
+    if player.health <= 0 {
+        return Err("Dead players cannot collect pickups".to_string());
+    }
+    if player.mounted_vehicle_id != 0 {
+        return Err("Cannot collect while mounted".to_string());
+    }
+    let pickup = ctx
+        .db
+        .ability_pickup()
+        .id()
+        .find(&pickup_id)
+        .ok_or("Pickup not found")?;
+    if !pickup.active {
+        return Err("Pickup not active".to_string());
+    }
+    let radius_sq = ability_pickup_radius() * ability_pickup_radius();
+    if dist_sq(&pickup.pos, &player.pos) > radius_sq {
+        return Err("Too far from pickup".to_string());
+    }
+    collect_pickup(ctx, pickup, &player);
+    Ok(())
+}
+
 /// Collect an ability pickup: apply the buff/heal and emit event.
 fn collect_pickup(ctx: &ReducerContext, pickup: AbilityPickup, player: &Player) {
     let ability_type = pickup.ability_type;
@@ -176,38 +208,7 @@ pub fn tick_abilities(ctx: &ReducerContext, _job: AbilityTick) {
         }
     }
 
-    // 3. Proximity pickup check
-    let online_players: Vec<Player> = ctx
-        .db
-        .player()
-        .iter()
-        .filter(|p| p.online && p.health > 0 && p.mounted_vehicle_id == 0)
-        .collect();
-
-    let active_pickups: Vec<AbilityPickup> = ctx
-        .db
-        .ability_pickup()
-        .iter()
-        .filter(|p| p.active)
-        .collect();
-
-    let radius_sq = ability_pickup_radius() * ability_pickup_radius();
-
-    for pickup in &active_pickups {
-        for player in &online_players {
-            if dist_sq(&pickup.pos, &player.pos) <= radius_sq {
-                // Re-fetch to ensure pickup is still active (may have been collected this tick)
-                if let Some(current) = ctx.db.ability_pickup().id().find(&pickup.id) {
-                    if current.active {
-                        collect_pickup(ctx, current, player);
-                        break; // Only one player gets it
-                    }
-                }
-            }
-        }
-    }
-
-    // 4. Clean stale pickup events (> 3s)
+    // 3. Clean stale pickup events (> 3s)
     let stale_events: Vec<u64> = ctx
         .db
         .ability_pickup_event()

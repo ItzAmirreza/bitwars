@@ -34,6 +34,7 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
+import CollectAbilityReducer from "./collect_ability_reducer";
 import DestroyBlocksPhysicsReducer from "./destroy_blocks_physics_reducer";
 import FireVehicleWeaponReducer from "./fire_vehicle_weapon_reducer";
 import FireWeaponReducer from "./fire_weapon_reducer";
@@ -298,6 +299,7 @@ const tablesSchema = __schema({
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
+  __reducerSchema("collect_ability", CollectAbilityReducer),
   __reducerSchema("destroy_blocks_physics", DestroyBlocksPhysicsReducer),
   __reducerSchema("fire_vehicle_weapon", FireVehicleWeaponReducer),
   __reducerSchema("fire_weapon", FireWeaponReducer),
