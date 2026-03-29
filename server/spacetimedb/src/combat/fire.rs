@@ -135,13 +135,8 @@ pub fn fire_weapon(
             continue;
         }
 
-        let center_y_ofs = vehicle_hitbox_center_y(&entity);
         let max_half = vehicle_hitbox_max_half(&entity);
-        let center = Vec3 {
-            x: entity.pos.x,
-            y: entity.pos.y + center_y_ofs,
-            z: entity.pos.z,
-        };
+        let center = vehicle_hitbox_center(&entity);
         let max_vehicle_range = def.max_range + max_half + 3.0;
         if dist_sq(&origin, &center) > max_vehicle_range * max_vehicle_range {
             continue;
@@ -160,18 +155,20 @@ pub fn fire_weapon(
             continue;
         }
 
-        let (hb_min, hb_max) = vehicle_hitbox_bounds(&entity);
-        let Some(t) = ray_aabb_t(&origin, &normalized_dir, &hb_min, &hb_max) else {
+        let Some(t) = vehicle_hitbox_ray_t(&origin, &normalized_dir, &entity, max_vehicle_range)
+        else {
             continue;
         };
-        if t > max_vehicle_range {
-            continue;
-        }
+        let hit_pos = Vec3 {
+            x: origin.x + normalized_dir.x * t,
+            y: origin.y + normalized_dir.y * t,
+            z: origin.z + normalized_dir.z * t,
+        };
 
         if first_vehicle_hit_pos.is_none() {
-            first_vehicle_hit_pos = Some(center.clone());
+            first_vehicle_hit_pos = Some(hit_pos.clone());
         }
-        apply_vehicle_damage(ctx, sender, *vehicle_id, def.damage, weapon, center);
+        apply_vehicle_damage(ctx, sender, *vehicle_id, def.damage, weapon, hit_pos);
     }
 
     let actually_destroyed =
