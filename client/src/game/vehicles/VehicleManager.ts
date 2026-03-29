@@ -359,6 +359,7 @@ export default class VehicleManager {
     // vehicle's own forward axis.
     mesh.rotation.order = 'YXZ';
     mesh.userData.entityId = entityId;
+    mesh.userData.vehicleType = typeId;
     mesh.userData.clientSpinAngle = 0;
     mesh.userData.smoothBlurT = 0;
     mesh.userData.currentOpacity = 1.0;

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { VoxelWorld, BlockType } from './VoxelWorld';
 import { WEAPON_DEFINITIONS, NUM_WEAPONS } from './WeaponRegistry';
 import type { ProjectileConfig } from './WeaponRegistry';
+import { VEHICLE_TYPES } from '../shared-config';
 
 export type { ProjectileConfig };
 
@@ -49,10 +50,26 @@ export interface FireResult {
 // Player hitbox: axis-aligned bounding box (width 0.6, height 1.9, centered at feet+0.95)
 const PLAYER_HITBOX_HALF_W = 0.4;
 const PLAYER_HITBOX_HEIGHT = 1.9;
-const HELI_HITBOX_CENTER_Y = 2.5;
-const HELI_HITBOX_HALF_X = 6.4;
-const HELI_HITBOX_HALF_Y = 1.25;
-const HELI_HITBOX_HALF_Z = 4.9;
+
+// Broad-phase vehicle envelopes for candidate collection sent to the server.
+// Keep these a bit generous so we don't miss true hits; server remains authoritative.
+type VehicleBroadPhase = {
+  centerY: number;
+  halfX: number;
+  halfY: number;
+  halfZ: number;
+};
+
+const VEHICLE_BROADPHASE_BY_TYPE: Record<number, VehicleBroadPhase> = {
+  // Composite server hitboxes extend to ~9.2u on helicopter tail/rotor sweep.
+  [VEHICLE_TYPES.Helicopter]: { centerY: 2.45, halfX: 9.5, halfY: 2.3, halfZ: 9.5 },
+  // Jet envelope covers wing sweep and nose/tail extents across yaw.
+  [VEHICLE_TYPES.FighterJet]: { centerY: 2.2, halfX: 8.1, halfY: 2.5, halfZ: 8.1 },
+  // AA includes crossed barrel sweep and raised turret/radar volume.
+  [VEHICLE_TYPES.AntiAir]: { centerY: 2.2, halfX: 4.9, halfY: 2.8, halfZ: 4.9 },
+};
+
+const DEFAULT_VEHICLE_BROADPHASE: VehicleBroadPhase = { centerY: 2.4, halfX: 9.5, halfY: 2.8, halfZ: 9.5 };
 
 export class WeaponSystem {
   private equippedWeapons: [number, number, number] = [0, 1, 2];
@@ -339,12 +356,13 @@ export class WeaponSystem {
     const hitIds: number[] = [];
     for (const [entityId, vehicle] of this.vehicles) {
       const pos = vehicle.position;
-      const minX = pos.x - HELI_HITBOX_HALF_X;
-      const maxX = pos.x + HELI_HITBOX_HALF_X;
-      const minY = pos.y + HELI_HITBOX_CENTER_Y - HELI_HITBOX_HALF_Y;
-      const maxY = pos.y + HELI_HITBOX_CENTER_Y + HELI_HITBOX_HALF_Y;
-      const minZ = pos.z - HELI_HITBOX_HALF_Z;
-      const maxZ = pos.z + HELI_HITBOX_HALF_Z;
+      const hb = this.getVehicleBroadPhase(vehicle);
+      const minX = pos.x - hb.halfX;
+      const maxX = pos.x + hb.halfX;
+      const minY = pos.y + hb.centerY - hb.halfY;
+      const maxY = pos.y + hb.centerY + hb.halfY;
+      const minZ = pos.z - hb.halfZ;
+      const maxZ = pos.z + hb.halfZ;
       const t = this.rayAABB(origin, direction, minX, minY, minZ, maxX, maxY, maxZ);
       if (t !== null && t >= 0 && t <= maxRange) hitIds.push(entityId);
     }
@@ -356,12 +374,13 @@ export class WeaponSystem {
     const r2 = radius * radius;
     for (const [entityId, vehicle] of this.vehicles) {
       const pos = vehicle.position;
+      const hb = this.getVehicleBroadPhase(vehicle);
       const cx = center.x - pos.x;
-      const cy = center.y - (pos.y + HELI_HITBOX_CENTER_Y);
+      const cy = center.y - (pos.y + hb.centerY);
       const cz = center.z - pos.z;
-      const closestX = Math.max(-HELI_HITBOX_HALF_X, Math.min(HELI_HITBOX_HALF_X, cx));
-      const closestY = Math.max(-HELI_HITBOX_HALF_Y, Math.min(HELI_HITBOX_HALF_Y, cy));
-      const closestZ = Math.max(-HELI_HITBOX_HALF_Z, Math.min(HELI_HITBOX_HALF_Z, cz));
+      const closestX = Math.max(-hb.halfX, Math.min(hb.halfX, cx));
+      const closestY = Math.max(-hb.halfY, Math.min(hb.halfY, cy));
+      const closestZ = Math.max(-hb.halfZ, Math.min(hb.halfZ, cz));
       const dx = cx - closestX;
       const dy = cy - closestY;
       const dz = cz - closestZ;
@@ -369,6 +388,11 @@ export class WeaponSystem {
       if (d2 <= r2) hitIds.push(entityId);
     }
     return hitIds;
+  }
+
+  private getVehicleBroadPhase(vehicle: THREE.Group): VehicleBroadPhase {
+    const typeId = Number(vehicle.userData?.vehicleType ?? -1);
+    return VEHICLE_BROADPHASE_BY_TYPE[typeId] ?? DEFAULT_VEHICLE_BROADPHASE;
   }
 
   /** Ray-AABB intersection test, returns t (distance along ray) or null */
