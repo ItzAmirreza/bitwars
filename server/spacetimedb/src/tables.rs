@@ -103,6 +103,7 @@ pub struct Vehicle {
     pub weapon_type: u8,
     pub weapon_ammo_primary: i32,
     pub weapon_ammo_secondary: i32,
+    pub weapon_ammo_tertiary: i32,
     pub weapon_last_fire: Timestamp,
     pub created_at: Timestamp,
     pub last_input_at: Timestamp,

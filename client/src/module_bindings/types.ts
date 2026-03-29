@@ -264,6 +264,7 @@ export const Vehicle = __t.object("Vehicle", {
   weaponType: __t.u8(),
   weaponAmmoPrimary: __t.i32(),
   weaponAmmoSecondary: __t.i32(),
+  weaponAmmoTertiary: __t.i32(),
   weaponLastFire: __t.timestamp(),
   createdAt: __t.timestamp(),
   lastInputAt: __t.timestamp(),

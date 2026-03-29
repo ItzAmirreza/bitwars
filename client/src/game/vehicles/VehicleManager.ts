@@ -31,6 +31,7 @@ import type {
 } from './VehicleBase';
 import { HelicopterType } from './HelicopterType';
 import { FighterJetType } from './FighterJetType';
+import { AntiAirType } from './AntiAirType';
 import { VehiclePrediction } from './VehiclePhysics';
 import type { PhysicsInput } from './VehiclePhysics';
 
@@ -127,8 +128,8 @@ export default class VehicleManager {
   vehiclePilotPitch = 0;
   vehicleWeaponIndex = 0;
   lastVehicleFireAt = 0;
-  vehicleAmmo: [number, number] = [300, 16];
-  vehicleReloadingUntil: [number, number] = [0, 0];
+  vehicleAmmo: [number, number, number] = [300, 16, 0];
+  vehicleReloadingUntil: [number, number, number] = [0, 0, 0];
   vehicleCameraDistance = 14;
   jetThrottle = 0; // 0..1 persistent throttle level
 
@@ -149,6 +150,7 @@ export default class VehicleManager {
     // Register built-in vehicle types
     this.registerVehicleType(new HelicopterType());
     this.registerVehicleType(new FighterJetType());
+    this.registerVehicleType(new AntiAirType());
   }
 
   // ── Registry ──
@@ -200,8 +202,13 @@ export default class VehicleManager {
   getResolvedVehicleWeaponIndex(): number {
     const vt = this.getMountedVehicleType();
     if (vt && vt.typeId === VEHICLE_TYPES.FighterJet) {
-      // Jet slot 0 → weapon index 2 (Kinetic Penetrator), slot 1 → weapon index 3 (Carpet Bomb)
+      // Jet slot 0→2 (Kinetic Penetrator), 1→3 (Carpet Bomb), 2→6 (Air Missile)
+      if (this.vehicleWeaponIndex === 2) return 6;
       return this.vehicleWeaponIndex + 2;
+    }
+    if (vt && vt.typeId === VEHICLE_TYPES.AntiAir) {
+      // AA slot 0 → weapon index 4 (Autocannon), slot 1 → weapon index 5 (SAM Missile)
+      return this.vehicleWeaponIndex + 4;
     }
     return this.vehicleWeaponIndex;
   }
@@ -213,7 +220,11 @@ export default class VehicleManager {
   getResolvedWeaponIndexForSlot(slot: number): number {
     const vt = this.getMountedVehicleType();
     if (vt && vt.typeId === VEHICLE_TYPES.FighterJet) {
+      if (slot === 2) return 6; // Air Missile
       return slot + 2;
+    }
+    if (vt && vt.typeId === VEHICLE_TYPES.AntiAir) {
+      return slot + 4;
     }
     return slot;
   }
@@ -347,7 +358,7 @@ export default class VehicleManager {
     this.ensureLightRig(entityId, mesh);
     if (typeId === VEHICLE_TYPES.Helicopter) {
       this.engine.audio.startHelicopterSound(entityId);
-    } else if (typeId === VEHICLE_TYPES.FighterJet) {
+    } else if (typeId === VEHICLE_TYPES.FighterJet || typeId === VEHICLE_TYPES.AntiAir) {
       this.engine.audio.startJetEngineSound(entityId);
     }
     return mesh;
@@ -429,8 +440,8 @@ export default class VehicleManager {
     }
     this.removeLightRig(entityId);
     const inst = this.vehicleInstances.get(entityId);
-    const isJet = inst?.type === VEHICLE_TYPES.FighterJet;
-    if (isJet) {
+    const isJetOrAA = inst?.type === VEHICLE_TYPES.FighterJet || inst?.type === VEHICLE_TYPES.AntiAir;
+    if (isJetOrAA) {
       this.engine.audio.stopJetEngineSound(entityId, destroyed);
     } else {
       this.engine.audio.stopHelicopterSound(entityId, destroyed);

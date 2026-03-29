@@ -27,6 +27,10 @@ impl TerrainSampler {
         self.surface_height(ctx, x, z) + 1.0
     }
 
+    pub fn ground_surface_height(&mut self, ctx: &ReducerContext, x: f32, z: f32) -> f32 {
+        self.surface_height(ctx, x, z)
+    }
+
     fn surface_height(&mut self, ctx: &ReducerContext, x: f32, z: f32) -> f32 {
         let sx = x.floor() as i32;
         let sz = z.floor() as i32;

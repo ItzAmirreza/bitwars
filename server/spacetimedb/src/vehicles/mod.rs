@@ -5,6 +5,7 @@
 //   3. Add it to the tick_vehicles dispatcher
 //   4. Add a new VEHICLE_TYPE_* constant in constants.rs
 
+pub mod anti_air;
 pub mod fighter_jet;
 pub mod helicopter;
 pub mod interaction;
@@ -12,9 +13,11 @@ pub mod spawning;
 pub mod weapons;
 
 // Re-export for convenience
+pub use anti_air::tick_anti_air;
 pub use fighter_jet::tick_fighter_jet;
 pub use helicopter::tick_helicopter;
 pub use interaction::{interact_vehicle, update_vehicle_input};
+pub use spawning::spawn_anti_air;
 pub use spawning::spawn_fighter_jet;
 pub use spawning::spawn_helicopter;
 pub use spawning::spawn_jets_at_airstrips;
@@ -65,6 +68,8 @@ pub fn tick_vehicles(ctx: &ReducerContext, job: VehicleTick) {
             tick_helicopter(ctx, vehicle, entity, &mut mounted_updates, &mut terrain);
         } else if vehicle.vehicle_type == vehicle_type_fighter_jet() {
             tick_fighter_jet(ctx, vehicle, entity, &mut mounted_updates, &mut terrain);
+        } else if vehicle.vehicle_type == vehicle_type_anti_air() {
+            tick_anti_air(ctx, vehicle, entity, &mut mounted_updates, &mut terrain);
         }
     }
 

@@ -10,19 +10,55 @@ use crate::tables::*;
 use crate::types::*;
 use crate::weapons;
 
-/// Map a vehicle's weapon slot (0 or 1) to the actual vehicleWeapons index.
+/// Map a vehicle's weapon slot to the actual vehicleWeapons index.
 /// Helicopter: slot 0 → index 0 (MINIGUN), slot 1 → index 1 (ROCKETS)
-/// Fighter Jet: slot 0 → index 2 (KINETIC PENETRATOR), slot 1 → index 3 (CARPET BOMB)
+/// Fighter Jet: slot 0 → index 2 (KINETIC PENETRATOR), slot 1 → index 3 (CARPET BOMB), slot 2 → index 6 (AIR MISSILE)
 fn resolve_vehicle_weapon_index(vehicle_type: u8, slot: u8) -> u8 {
     if vehicle_type == constants::vehicle_type_fighter_jet() {
+        match slot {
+            0 => constants::jet_weapon_slot0(),
+            1 => constants::jet_weapon_slot1(),
+            _ => constants::jet_weapon_slot2(),
+        }
+    } else if vehicle_type == constants::vehicle_type_anti_air() {
         if slot == 0 {
-            constants::jet_weapon_slot0()
+            constants::aa_weapon_slot0()
         } else {
-            constants::jet_weapon_slot1()
+            constants::aa_weapon_slot1()
         }
     } else {
         // Helicopter: slot == index
         slot
+    }
+}
+
+/// Get ammo for a given weapon slot from the vehicle row.
+fn get_slot_ammo(vehicle: &Vehicle, slot: u8) -> i32 {
+    match slot {
+        0 => vehicle.weapon_ammo_primary,
+        1 => vehicle.weapon_ammo_secondary,
+        _ => vehicle.weapon_ammo_tertiary,
+    }
+}
+
+/// Return updated ammo tuple (primary, secondary, tertiary) after decrementing the given slot.
+fn deduct_slot_ammo(vehicle: &Vehicle, slot: u8) -> (i32, i32, i32) {
+    match slot {
+        0 => (
+            vehicle.weapon_ammo_primary - 1,
+            vehicle.weapon_ammo_secondary,
+            vehicle.weapon_ammo_tertiary,
+        ),
+        1 => (
+            vehicle.weapon_ammo_primary,
+            vehicle.weapon_ammo_secondary - 1,
+            vehicle.weapon_ammo_tertiary,
+        ),
+        _ => (
+            vehicle.weapon_ammo_primary,
+            vehicle.weapon_ammo_secondary,
+            vehicle.weapon_ammo_tertiary - 1,
+        ),
     }
 }
 
@@ -38,10 +74,6 @@ pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(
     if player.mounted_vehicle_id == 0 {
         return Err("Not in a vehicle".to_string());
     }
-    // weapon_index is a slot (0 or 1), not the global weapon index
-    if weapon_index > 1 {
-        return Err("Invalid vehicle weapon slot".to_string());
-    }
     let vehicle = ctx
         .db
         .vehicle()
@@ -50,6 +82,15 @@ pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(
         .ok_or("Vehicle not found")?;
     if vehicle.pilot_identity != Some(sender) {
         return Err("Not the pilot".to_string());
+    }
+    // Max slots: 2 for helicopter, 3 for jet
+    let max_slots: u8 = if vehicle.vehicle_type == constants::vehicle_type_fighter_jet() {
+        3
+    } else {
+        2
+    };
+    if weapon_index >= max_slots {
+        return Err("Invalid vehicle weapon slot".to_string());
     }
     ctx.db.vehicle().entity_id().update(Vehicle {
         weapon_type: weapon_index,
@@ -104,11 +145,7 @@ pub fn fire_vehicle_weapon(
     weapons::check_fire_rate(ctx, vehicle.weapon_last_fire, def.fire_rate)?;
 
     // Ammo check
-    let current_ammo = if slot == 0 {
-        vehicle.weapon_ammo_primary
-    } else {
-        vehicle.weapon_ammo_secondary
-    };
+    let current_ammo = get_slot_ammo(&vehicle, slot);
     if current_ammo <= 0 {
         return Err("No ammo".to_string());
     }
@@ -187,20 +224,13 @@ pub fn fire_vehicle_weapon(
     };
 
     // Deduct ammo
-    let new_ammo_primary = if slot == 0 {
-        vehicle.weapon_ammo_primary - 1
-    } else {
-        vehicle.weapon_ammo_primary
-    };
-    let new_ammo_secondary = if slot == 1 {
-        vehicle.weapon_ammo_secondary - 1
-    } else {
-        vehicle.weapon_ammo_secondary
-    };
+    let (new_ammo_primary, new_ammo_secondary, new_ammo_tertiary) =
+        deduct_slot_ammo(&vehicle, slot);
     let vehicle_id = vehicle.entity_id;
     ctx.db.vehicle().entity_id().update(Vehicle {
         weapon_ammo_primary: new_ammo_primary,
         weapon_ammo_secondary: new_ammo_secondary,
+        weapon_ammo_tertiary: new_ammo_tertiary,
         weapon_last_fire: ctx.timestamp,
         ..vehicle
     });
@@ -486,10 +516,16 @@ pub fn reload_vehicle_weapon(ctx: &ReducerContext) -> Result<(), String> {
     } else {
         vehicle.weapon_ammo_secondary
     };
+    let new_ammo_tertiary = if slot == 2 {
+        def.max_ammo
+    } else {
+        vehicle.weapon_ammo_tertiary
+    };
 
     ctx.db.vehicle().entity_id().update(Vehicle {
         weapon_ammo_primary: new_ammo_primary,
         weapon_ammo_secondary: new_ammo_secondary,
+        weapon_ammo_tertiary: new_ammo_tertiary,
         ..vehicle
     });
 

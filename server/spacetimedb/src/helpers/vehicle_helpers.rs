@@ -48,9 +48,31 @@ pub fn fighter_jet_hitbox_bounds(entity: &Entity) -> (Vec3, Vec3) {
     )
 }
 
+pub fn anti_air_hitbox_bounds(entity: &Entity) -> (Vec3, Vec3) {
+    let center = Vec3 {
+        x: entity.pos.x,
+        y: entity.pos.y + aa_hitbox_center_y(),
+        z: entity.pos.z,
+    };
+    (
+        Vec3 {
+            x: center.x - aa_hitbox_half_x(),
+            y: center.y - aa_hitbox_half_y(),
+            z: center.z - aa_hitbox_half_z(),
+        },
+        Vec3 {
+            x: center.x + aa_hitbox_half_x(),
+            y: center.y + aa_hitbox_half_y(),
+            z: center.z + aa_hitbox_half_z(),
+        },
+    )
+}
+
 pub fn vehicle_hitbox_bounds(entity: &Entity) -> (Vec3, Vec3) {
     if entity.subtype == vehicle_type_fighter_jet() {
         fighter_jet_hitbox_bounds(entity)
+    } else if entity.subtype == vehicle_type_anti_air() {
+        anti_air_hitbox_bounds(entity)
     } else {
         helicopter_hitbox_bounds(entity)
     }
@@ -59,6 +81,8 @@ pub fn vehicle_hitbox_bounds(entity: &Entity) -> (Vec3, Vec3) {
 pub fn vehicle_hitbox_center_y(entity: &Entity) -> f32 {
     if entity.subtype == vehicle_type_fighter_jet() {
         jet_hitbox_center_y()
+    } else if entity.subtype == vehicle_type_anti_air() {
+        aa_hitbox_center_y()
     } else {
         heli_hitbox_center_y()
     }
@@ -67,6 +91,8 @@ pub fn vehicle_hitbox_center_y(entity: &Entity) -> f32 {
 pub fn vehicle_hitbox_max_half(entity: &Entity) -> f32 {
     if entity.subtype == vehicle_type_fighter_jet() {
         jet_hitbox_half_x().max(jet_hitbox_half_z())
+    } else if entity.subtype == vehicle_type_anti_air() {
+        aa_hitbox_half_x().max(aa_hitbox_half_z())
     } else {
         heli_hitbox_half_x().max(heli_hitbox_half_z())
     }
