@@ -202,13 +202,6 @@ pub fn tick_helicopter(
     entity.sim_tick = next_sim_tick;
     entity.updated_at = ctx.timestamp;
 
-    // ── Block collision ──
-    let (_blocks_hit, destroyed) =
-        super::collision::check_vehicle_block_collision(ctx, &mut entity, &mut vehicle, terrain);
-    if destroyed {
-        return;
-    }
-
     // ── Rotor spin visual ──
     let spin_target = if has_pilot {
         10.0 + (forward_input.abs() + strafe_input.abs()) * 4.0 + lift_input.abs() * 2.0

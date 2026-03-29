@@ -31,5 +31,5 @@ export default {
   get hitBlocks() {
     return __t.array(Vec3);
   },
-  shotEventId: __t.u64().name("shot_event_id"),
+  shotEventId: __t.u64(),
 };
