@@ -30,6 +30,8 @@ export class WeaponModel {
   private switchTimer = 0;
   private switching = false;
   private switchTarget = 0;
+  private queuedSwitchTarget: number | null = null;
+  private switchSwapApplied = false;
 
   constructor(aspect: number) {
     // Dedicated scene + camera for weapon overlay
@@ -210,9 +212,19 @@ export class WeaponModel {
   }
 
   switchWeapon(index: number): void {
-    if (index === this.current || this.switching) return;
+    if (this.switching) {
+      if (!this.switchSwapApplied) {
+        this.switchTarget = index;
+      } else {
+        this.queuedSwitchTarget = index === this.current ? null : index;
+      }
+      return;
+    }
+    if (index === this.current) return;
     this.switching = true;
     this.switchTarget = index;
+    this.queuedSwitchTarget = null;
+    this.switchSwapApplied = false;
     this.switchTimer = 0;
   }
 
@@ -276,14 +288,23 @@ export class WeaponModel {
         switchOffsetY = -this.switchTimer * 0.3;
       } else if (this.switchTimer < 1.1) {
         // Swap model at bottom
-        this.showWeapon(this.switchTarget);
+        if (!this.switchSwapApplied) {
+          this.showWeapon(this.switchTarget);
+          this.switchSwapApplied = true;
+        }
         switchOffsetY = -0.3;
       } else if (this.switchTimer < 2) {
         // Rise back up
         switchOffsetY = -(2 - this.switchTimer) * 0.3;
       } else {
         this.switching = false;
+        this.switchSwapApplied = false;
         switchOffsetY = 0;
+        const queuedTarget = this.queuedSwitchTarget;
+        this.queuedSwitchTarget = null;
+        if (queuedTarget != null && queuedTarget !== this.current) {
+          this.switchWeapon(queuedTarget);
+        }
       }
     }
 

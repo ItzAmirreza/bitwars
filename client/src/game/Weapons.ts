@@ -82,24 +82,31 @@ export class WeaponSystem {
   private vehicles: Map<number, THREE.Group> = new Map();
   private pendingBlockDestructions: Map<string, number> = new Map();
   private ammoState: number[];
+  onLocalSwitch: ((weaponIndex: number) => void) | null = null;
+
+  private readonly handleWheel = (e: WheelEvent): void => {
+    if (!this.inputEnabled) return;
+    const previousWeapon = this.currentWeapon;
+    if (e.deltaY > 0) this.nextWeapon();
+    else if (e.deltaY < 0) this.prevWeapon();
+    this.emitLocalSwitch(previousWeapon);
+  };
+
+  private readonly handleKeyDown = (e: KeyboardEvent): void => {
+    if (!this.inputEnabled) return;
+    const previousWeapon = this.currentWeapon;
+    if (e.code === 'Digit1') this.switchToSlot(0);
+    if (e.code === 'Digit2') this.switchToSlot(1);
+    if (e.code === 'Digit3') this.switchToSlot(2);
+    this.emitLocalSwitch(previousWeapon);
+  };
 
   constructor(camera: THREE.PerspectiveCamera, world: VoxelWorld) {
     this.camera = camera;
     this.world = world;
     this.ammoState = WEAPONS.map((w) => w.maxAmmo);
-
-    document.addEventListener('wheel', (e) => {
-      if (!this.inputEnabled) return;
-      if (e.deltaY > 0) this.nextWeapon();
-      else this.prevWeapon();
-    });
-
-    document.addEventListener('keydown', (e) => {
-      if (!this.inputEnabled) return;
-      if (e.code === 'Digit1') this.switchToSlot(0);
-      if (e.code === 'Digit2') this.switchToSlot(1);
-      if (e.code === 'Digit3') this.switchToSlot(2);
-    });
+    document.addEventListener('wheel', this.handleWheel);
+    document.addEventListener('keydown', this.handleKeyDown);
   }
 
   setInputEnabled(enabled: boolean): void {
@@ -164,6 +171,11 @@ export class WeaponSystem {
   prevWeapon(): number {
     this.currentSlot = (this.currentSlot - 1 + this.equippedWeapons.length) % this.equippedWeapons.length;
     return this.currentWeapon;
+  }
+
+  dispose(): void {
+    document.removeEventListener('wheel', this.handleWheel);
+    document.removeEventListener('keydown', this.handleKeyDown);
   }
 
   /** Get current ammo for a weapon (or current weapon if no index given) */
@@ -393,6 +405,11 @@ export class WeaponSystem {
   private getVehicleBroadPhase(vehicle: THREE.Group): VehicleBroadPhase {
     const typeId = Number(vehicle.userData?.vehicleType ?? -1);
     return VEHICLE_BROADPHASE_BY_TYPE[typeId] ?? DEFAULT_VEHICLE_BROADPHASE;
+  }
+
+  private emitLocalSwitch(previousWeapon: number): void {
+    if (this.currentWeapon === previousWeapon) return;
+    this.onLocalSwitch?.(this.currentWeapon);
   }
 
   /** Ray-AABB intersection test, returns t (distance along ray) or null */
