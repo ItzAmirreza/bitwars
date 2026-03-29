@@ -172,6 +172,8 @@ export class Engine {
   private animationId = 0;
   private mouseDown = false;
   private autoFireHeld = false;
+  private active = false;
+  private animationRunning = false;
   private sandboxMotionEnabled = false;
   private sandboxMotionMode: HarnessMode = 'idle';
   private sandboxMotionTime = 0;
@@ -251,6 +253,7 @@ export class Engine {
     onStateChange: (state: EngineState) => void,
     localIdentity: string | null = null,
     username: string | null = null,
+    startActive = true,
   ) {
     this.container = container;
     this.conn = conn;
@@ -405,11 +408,57 @@ export class Engine {
     document.addEventListener('wheel', this.onVehicleWheel, { passive: true });
     window.addEventListener('resize', this.onResize);
 
-    this.animate();
+    this.setActive(startActive);
   }
 
   toggleChunkBoundaries(): void {
     this.chunkBoundaryViewer.toggle();
+  }
+
+  setPlayerContext(localIdentity: string | null, username: string | null): void {
+    const usernameChanged = this.username !== username;
+    this.localIdentity = localIdentity;
+    this.username = username;
+
+    // When username becomes available (or changes), re-check persisted loadout rows
+    // so preloaded engines created before login still pick up the correct loadout.
+    if (!usernameChanged || !this.conn) return;
+    const db = this.conn.db as any;
+    if (!db.player_loadout?.iter) return;
+    for (const row of db.player_loadout.iter()) {
+      this.applyLoadoutRow(row);
+    }
+  }
+
+  setActive(active: boolean): void {
+    if (this.active === active) return;
+    this.active = active;
+
+    if (!active) {
+      this.mouseDown = false;
+      this.autoFireHeld = false;
+      this.controls.releaseAllInput();
+      this.controls.resetVelocity();
+      this.controls.inputEnabled = false;
+      this.weapons.setInputEnabled(false);
+      if (this.controls.locked) this.controls.unlock();
+      this.audio.suspend();
+      if (this.animationRunning) {
+        cancelAnimationFrame(this.animationId);
+        this.animationRunning = false;
+      }
+      return;
+    }
+
+    this.audio.resume();
+    this.controls.inputEnabled = !(this.chatOpen || this.loadoutMenuOpen);
+    this.weapons.setInputEnabled(!(this.chatOpen || this.loadoutMenuOpen));
+    this.clock.update(performance.now());
+    this.onResize();
+    if (!this.animationRunning) {
+      this.animationRunning = true;
+      this.animationId = requestAnimationFrame(this.animate);
+    }
   }
 
   // ── SETTINGS ──
@@ -629,6 +678,7 @@ export class Engine {
   // ── INPUT ──
 
   private onMouseDown = (e: MouseEvent): void => {
+    if (!this.active) return;
     if (this.sandboxMotionEnabled) return;
     if (e.button === 0 && this.controls.locked) {
       this.mouseDown = true;
@@ -1052,9 +1102,11 @@ export class Engine {
     }
   }
   private onMouseUp = (e: MouseEvent): void => {
+    if (!this.active) return;
     if (e.button === 0) this.mouseDown = false;
   };
   private onKeyDown = (e: KeyboardEvent): void => {
+    if (!this.active) return;
     if (this.sandboxMotionEnabled) return;
     if (this.chatOpen || this.loadoutMenuOpen) return;
     if (e.code === 'KeyF') {
@@ -1099,6 +1151,7 @@ export class Engine {
   };
 
   private onVehicleMouseMove = (event: MouseEvent): void => {
+    if (!this.active) return;
     if (this.mountedVehicleId === 0 || !this.controls.locked) return;
     this.vehicleManager.vehiclePilotYaw -= event.movementX * this.controls.sensitivity;
     this.vehicleManager.vehiclePilotPitch -= event.movementY * this.controls.sensitivity;
@@ -1108,6 +1161,7 @@ export class Engine {
     if (this.vehicleManager.vehiclePilotYaw < -Math.PI) this.vehicleManager.vehiclePilotYaw += Math.PI * 2;
   };
   private onVehicleWheel = (e: WheelEvent): void => {
+    if (!this.active) return;
     if (this.mountedVehicleId === 0) return;
     const ZOOM_MIN = 6;
     const ZOOM_MAX = 30;
@@ -2396,7 +2450,12 @@ export class Engine {
   // ── ANIMATION LOOP ──
 
   private animate = (timestamp?: DOMHighResTimeStamp): void => {
+    if (!this.active) {
+      this.animationRunning = false;
+      return;
+    }
     this.animationId = requestAnimationFrame(this.animate);
+    this.animationRunning = true;
     const frameStartMs = performance.now();
     this.clock.update(timestamp);
     const delta = Math.min(this.clock.getDelta(), 0.1);
@@ -2910,6 +2969,7 @@ export class Engine {
   // ── DESTROY ──
 
   destroy(): void {
+    this.setActive(false);
     cancelAnimationFrame(this.animationId);
     this.clock.dispose();
     this.container.removeEventListener('mousedown', this.onMouseDown);

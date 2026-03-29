@@ -87,9 +87,9 @@ function App() {
 
     connect(
       (conn, identity, _token) => {
-        setConnected(true);
         setIdentity(identity);
         setConnection(conn);
+        setConnected(true);
       },
       (error) => {
         setError(error.message);
@@ -103,10 +103,20 @@ function App() {
   }
 
   return (
-    <div className="w-full h-full">
-      {screen === 'login' && <LoginScreen />}
-      {screen === 'lobby' && <LobbyScreen />}
-      {screen === 'game' && <GameScreen />}
+    <div className="w-full h-full relative">
+      <div className="absolute inset-0">
+        <GameScreen active={screen === 'game'} />
+      </div>
+      {screen === 'login' && (
+        <div className="absolute inset-0 z-10">
+          <LoginScreen />
+        </div>
+      )}
+      {screen === 'lobby' && (
+        <div className="absolute inset-0 z-10">
+          <LobbyScreen />
+        </div>
+      )}
     </div>
   );
 }

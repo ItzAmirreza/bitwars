@@ -17,10 +17,24 @@ import { DeathScreen } from './hud/DeathScreen';
 import { useKillTracking } from './hooks/useKillTracking';
 import { useChat } from './hooks/useChat';
 
-export function GameScreen() {
+interface GameScreenProps {
+  active: boolean;
+}
+
+export function GameScreen({ active }: GameScreenProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const { connection, setScreen, settings, showSettings, setShowSettings, identity, username } = useGameStore();
+  const activeConnection = active ? connection : null;
+  const activeRef = useRef(active);
+  const settingsRef = useRef(settings);
+  const identityRef = useRef(identity);
+  const usernameRef = useRef(username);
+
+  activeRef.current = active;
+  settingsRef.current = settings;
+  identityRef.current = identity;
+  usernameRef.current = username;
 
   const [state, setState] = useState<EngineState>({
     weapon: 0,
@@ -65,11 +79,11 @@ export function GameScreen() {
     state.kills,
     state.deaths,
     state.health,
-    connection,
+    activeConnection,
   );
 
   // ── Chat hook ──
-  const { chatMessages, chatDraft, setChatDraft, sendChatMessage, pushLocalSystemMessage } = useChat(connection, identity);
+  const { chatMessages, chatDraft, setChatDraft, sendChatMessage, pushLocalSystemMessage } = useChat(activeConnection, identity);
 
   // ── Chat state ──
   const [chatOpen, setChatOpen] = useState(false);
@@ -197,8 +211,9 @@ export function GameScreen() {
     let disposed = false;
     const engineInitFrame = requestAnimationFrame(() => {
       if (disposed || engineRef.current) return;
-      const engine = new Engine(container, connection, setState, identity, username || null);
-      engine.updateSettings(settings);
+      const engine = new Engine(container, connection, setState, null, null, activeRef.current);
+      engine.setPlayerContext(identityRef.current, usernameRef.current || null);
+      engine.updateSettings(settingsRef.current);
       engineRef.current = engine;
 
       const harness = new PerfHarness(buildPerfHooks(engine));
@@ -224,7 +239,19 @@ export function GameScreen() {
       }
       perfHarnessRef.current = null;
     };
-  }, [connection, username]);
+  }, [connection]);
+
+  useEffect(() => {
+    engineRef.current?.setPlayerContext(identity, username || null);
+  }, [identity, username]);
+
+  useEffect(() => {
+    engineRef.current?.setActive(active);
+    if (!active) {
+      engineRef.current?.setChatOpen(false);
+      engineRef.current?.setLoadoutMenuOpen(false);
+    }
+  }, [active]);
 
   const refreshPerfHistory = useCallback(async () => {
     const harness = perfHarnessRef.current;
@@ -345,6 +372,7 @@ export function GameScreen() {
   // Global key handler: Escape (menus), T (chat), E (loadout)
   const handleGlobalKey = useCallback(
     (e: KeyboardEvent) => {
+      if (!active) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) {
         return;
@@ -396,21 +424,31 @@ export function GameScreen() {
         openChat(e.code === 'Slash' ? '/' : '');
       }
     },
-    [chatOpen, loadoutOpen, showSettings, setShowSettings, state.locked, openChat, openLoadout, closeChat, closeLoadout],
+    [active, chatOpen, loadoutOpen, showSettings, setShowSettings, state.locked, state.mountedVehicleName, openChat, openLoadout, closeChat, closeLoadout],
   );
 
   useEffect(() => {
+    if (!active) return;
     document.addEventListener('keydown', handleGlobalKey);
     return () => document.removeEventListener('keydown', handleGlobalKey);
-  }, [handleGlobalKey]);
+  }, [active, handleGlobalKey]);
 
-  const handleLeave = () => setScreen('lobby');
+  const handleLeave = useCallback(() => {
+    closeChat();
+    closeLoadout();
+    setShowSettings(false);
+    setShowPerfPanel(false);
+    setScreen('lobby');
+  }, [closeChat, closeLoadout, setShowSettings, setScreen]);
   const isLowHealth = state.health > 0 && state.health <= 25;
   const isCriticalHealth = state.health > 0 && state.health <= 10;
   const loadingPercent = Math.max(0, Math.min(100, Math.round(state.worldLoadProgress * 100)));
 
   return (
-    <div className="flex flex-col h-full relative">
+    <div
+      className="flex flex-col h-full relative"
+      style={{ visibility: active ? 'visible' : 'hidden', pointerEvents: active ? 'auto' : 'none' }}
+    >
       {/* Game Canvas */}
       <div ref={canvasRef} className="absolute inset-0" />
 
