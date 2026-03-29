@@ -143,7 +143,10 @@ export function PixelArtBg() {
     }
 
     function animate() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const w = canvas?.width ?? 0;
+      const h = canvas?.height ?? 0;
+      if (!w || !h) return;
+      ctx.clearRect(0, 0, w, h);
 
       for (let i = icons.length - 1; i >= 0; i--) {
         const ic = icons[i];
@@ -158,7 +161,7 @@ export function PixelArtBg() {
 
         // Remove if off screen
         if (ic.y < -80) {
-          icons[i] = spawnIcon(canvas.width, canvas.height, false);
+          icons[i] = spawnIcon(w, h, false);
           continue;
         }
 

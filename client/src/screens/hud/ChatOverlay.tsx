@@ -148,6 +148,7 @@ export function ChatOverlay({
                 closeChat();
               }
             }}
+            dir="auto"
             style={{
               width: '100%',
               fontFamily: "'Vazirmatn', var(--font-pixel), sans-serif",
@@ -161,7 +162,6 @@ export function ChatOverlay({
               borderRadius: 0,
               caretColor: '#ff6b35',
               letterSpacing: '0.02em',
-              direction: 'ltr',
             }}
           />
         </div>
