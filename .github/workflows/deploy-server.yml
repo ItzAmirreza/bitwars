@@ -33,7 +33,9 @@ jobs:
         run: cargo build --target wasm32-unknown-unknown --release
 
       - name: Install SpacetimeDB CLI
-        run: curl -sSf https://install.spacetimedb.com | sh
+        run: |
+          curl -sSf https://install.spacetimedb.com | sh -s -- -y
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Authenticate
         run: spacetime login --token "${{ secrets.SPACETIMEDB_TOKEN }}"
