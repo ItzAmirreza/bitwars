@@ -459,16 +459,16 @@ export function GameScreen({ active }: GameScreenProps) {
         <div
           className="absolute top-3 right-3 z-30"
           style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '10px',
-            letterSpacing: '0.1em',
-            color: 'var(--c-cyan)',
-            border: '1px solid var(--c-border)',
-            background: 'rgba(6,8,16,0.65)',
-            padding: '6px 8px',
+            fontFamily: 'var(--font-pixel)',
+            fontSize: '7px',
+            letterSpacing: '0.08em',
+            color: '#00e5ff',
+            border: '2px solid #1a1e2e',
+            background: 'rgba(12,16,24,0.85)',
+            padding: '5px 8px',
           }}
         >
-          PERF TEST RUNNING {Math.round(perfProgress * 100)}%
+          PERF TEST {Math.round(perfProgress * 100)}%
         </div>
       )}
 
@@ -496,46 +496,43 @@ export function GameScreen({ active }: GameScreenProps) {
         <div
           className="absolute inset-0 z-30 flex items-center justify-center"
           style={{
-            background: 'radial-gradient(circle at center, rgba(10,16,24,0.86), rgba(2,4,8,0.985))',
-            backdropFilter: 'blur(6px)',
+            background: 'rgba(10,12,20,0.94)',
             pointerEvents: 'auto',
           }}
         >
           <div style={{ width: 'min(460px, calc(100vw - 40px))' }}>
             <div style={{
               fontFamily: 'var(--font-pixel)',
-              fontSize: '20px',
+              fontSize: '14px',
               letterSpacing: '0.08em',
-              color: 'var(--c-text)',
+              color: '#fff',
               textAlign: 'center',
-              textShadow: '0 0 14px rgba(255,255,255,0.2)',
+              textShadow: '3px 3px 0 #ff6b35',
               marginBottom: '10px',
             }}>
-              STABILIZING COMBAT ZONE
+              LOADING COMBAT ZONE
             </div>
             <div style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '10px',
-              letterSpacing: '0.18em',
-              textTransform: 'uppercase',
-              color: 'var(--c-muted)',
+              fontFamily: 'var(--font-pixel)',
+              fontSize: '7px',
+              letterSpacing: '0.15em',
+              color: '#6b7080',
               textAlign: 'center',
               marginBottom: '14px',
             }}>
-              Streaming nearby terrain first
+              STREAMING NEARBY TERRAIN
             </div>
             <div style={{
               height: '12px',
-              border: '1px solid rgba(255,255,255,0.28)',
-              background: 'rgba(255,255,255,0.08)',
-              boxShadow: 'inset 0 0 8px rgba(0,0,0,0.45)',
+              border: '2px solid #1a1e2e',
+              background: 'rgba(12,16,24,0.9)',
+              padding: '1px',
             }}>
               <div style={{
                 width: `${loadingPercent}%`,
                 height: '100%',
-                background: 'linear-gradient(90deg, #2f90ff, #60d6ff)',
-                boxShadow: '0 0 12px rgba(96,214,255,0.45)',
-                transition: 'width 160ms linear',
+                background: '#ff6b35',
+                transition: 'width 160ms steps(8)',
               }} />
             </div>
             <div style={{
@@ -543,21 +540,20 @@ export function GameScreen({ active }: GameScreenProps) {
               fontFamily: 'var(--font-mono)',
               fontSize: '11px',
               letterSpacing: '0.1em',
-              color: 'var(--c-blue)',
+              color: '#ff6b35',
               textAlign: 'center',
             }}>
               {loadingPercent}%
             </div>
             <div style={{
               marginTop: '8px',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '10px',
-              letterSpacing: '0.12em',
-              color: 'var(--c-muted)',
+              fontFamily: 'var(--font-pixel)',
+              fontSize: '6px',
+              letterSpacing: '0.1em',
+              color: '#4a4e5e',
               textAlign: 'center',
-              textTransform: 'uppercase',
             }}>
-              Movement locked until nearby chunks are ready
+              MOVEMENT LOCKED UNTIL READY
             </div>
           </div>
         </div>
@@ -633,22 +629,20 @@ export function GameScreen({ active }: GameScreenProps) {
 
       {/* Click to deploy overlay */}
 
-      {/* ═══ ENTER HELICOPTER PROMPT (near crosshair) ═══ */}
+      {/* ═══ ENTER VEHICLE PROMPT (near crosshair) ═══ */}
       {state.locked && !chatOpen && !loadoutOpen && !state.mountedVehicleName && state.nearVehicle && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           <div style={{
             marginTop: '80px',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '13px',
+            fontFamily: 'var(--font-pixel)',
+            fontSize: '8px',
             letterSpacing: '0.1em',
-            color: 'var(--c-text)',
-            textShadow: '0 0 8px rgba(0,0,0,0.8), 0 0 20px rgba(102,224,255,0.3)',
-            background: 'rgba(6,8,16,0.7)',
-            border: '1px solid rgba(102,224,255,0.3)',
-            padding: '6px 16px',
-            backdropFilter: 'blur(4px)',
+            color: '#e8e8f0',
+            background: 'rgba(12,16,24,0.85)',
+            border: '2px solid #00e5ff',
+            padding: '6px 14px',
           }}>
-            <span style={{ color: 'var(--c-cyan)', fontWeight: 'bold' }}>[F]</span> ENTER {(state.nearVehicleName ?? 'VEHICLE').toUpperCase()}
+            <span style={{ color: '#00e5ff' }}>[F]</span> ENTER {(state.nearVehicleName ?? 'VEHICLE').toUpperCase()}
           </div>
         </div>
       )}
@@ -656,57 +650,51 @@ export function GameScreen({ active }: GameScreenProps) {
       {/* ═══ EJECT PROMPT + CONTROL HINTS (bottom-center) ═══ */}
       {state.locked && !chatOpen && !loadoutOpen && state.mountedVehicleName && (
         <div className="absolute bottom-24 left-0 right-0 flex flex-col items-center pointer-events-none z-10" style={{ gap: '6px' }}>
-          {/* Control hints */}
           <div style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '9px',
-            letterSpacing: '0.14em',
-            color: 'var(--c-muted)',
-            textShadow: '0 0 6px rgba(0,0,0,0.8)',
-            background: 'rgba(6,8,16,0.55)',
-            border: '1px solid rgba(102,224,255,0.15)',
-            padding: '5px 12px',
-            backdropFilter: 'blur(4px)',
-            lineHeight: '1.8',
+            fontFamily: 'var(--font-pixel)',
+            fontSize: '6px',
+            letterSpacing: '0.1em',
+            color: '#6b7080',
+            background: 'rgba(12,16,24,0.85)',
+            border: '2px solid #1a1e2e',
+            padding: '6px 12px',
+            lineHeight: '2.2',
             textAlign: 'center',
           }}>
             {state.mountedVehicleName === 'Fighter Jet' ? (<>
               <div>
-                <span style={{ color: 'var(--c-text)' }}>W</span> THROTTLE UP
-                {' '}<span style={{ color: 'var(--c-text)' }}>S</span> THROTTLE DOWN
-                {' '}<span style={{ color: 'var(--c-text)' }}>A/D</span> YAW
+                <span style={{ color: '#e8e8f0' }}>W</span> THROTTLE UP
+                {' '}<span style={{ color: '#e8e8f0' }}>S</span> THROTTLE DOWN
+                {' '}<span style={{ color: '#e8e8f0' }}>A/D</span> YAW
               </div>
               <div>
-                <span style={{ color: 'var(--c-text)' }}>SPACE</span> PULL UP
-                {' '}<span style={{ color: 'var(--c-text)' }}>SHIFT</span> PUSH DOWN
-                {' '}<span style={{ color: 'var(--c-text)' }}>1/2</span> WEAPONS
+                <span style={{ color: '#e8e8f0' }}>SPACE</span> PULL UP
+                {' '}<span style={{ color: '#e8e8f0' }}>SHIFT</span> PUSH DOWN
+                {' '}<span style={{ color: '#e8e8f0' }}>1/2</span> WEAPONS
               </div>
             </>) : (<>
               <div>
-                <span style={{ color: 'var(--c-text)' }}>W/S</span> FWD/BACK
-                {' '}<span style={{ color: 'var(--c-text)' }}>A/D</span> YAW
-                {' '}<span style={{ color: 'var(--c-text)' }}>Q/E</span> STRAFE
+                <span style={{ color: '#e8e8f0' }}>W/S</span> FWD/BACK
+                {' '}<span style={{ color: '#e8e8f0' }}>A/D</span> YAW
+                {' '}<span style={{ color: '#e8e8f0' }}>Q/E</span> STRAFE
               </div>
               <div>
-                <span style={{ color: 'var(--c-text)' }}>SPACE</span> ASCEND
-                {' '}<span style={{ color: 'var(--c-text)' }}>SHIFT</span> DESCEND
-                {' '}<span style={{ color: 'var(--c-text)' }}>1/2</span> WEAPONS
+                <span style={{ color: '#e8e8f0' }}>SPACE</span> ASCEND
+                {' '}<span style={{ color: '#e8e8f0' }}>SHIFT</span> DESCEND
+                {' '}<span style={{ color: '#e8e8f0' }}>1/2</span> WEAPONS
               </div>
             </>)}
           </div>
-          {/* Eject button */}
           <div style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '12px',
-            letterSpacing: '0.12em',
-            color: 'var(--c-text)',
-            textShadow: '0 0 8px rgba(0,0,0,0.8)',
-            background: 'rgba(6,8,16,0.65)',
-            border: '1px solid rgba(102,224,255,0.25)',
+            fontFamily: 'var(--font-pixel)',
+            fontSize: '8px',
+            letterSpacing: '0.1em',
+            color: '#e8e8f0',
+            background: 'rgba(12,16,24,0.85)',
+            border: '2px solid #00e5ff',
             padding: '5px 14px',
-            backdropFilter: 'blur(4px)',
           }}>
-            <span style={{ color: 'var(--c-cyan)', fontWeight: 'bold' }}>[F]</span> EJECT
+            <span style={{ color: '#00e5ff' }}>[F]</span> EJECT
           </div>
         </div>
       )}
@@ -716,51 +704,59 @@ export function GameScreen({ active }: GameScreenProps) {
         <div
           className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer"
           onClick={() => canvasRef.current?.requestPointerLock()}
-          style={{ background: 'rgba(6,8,16,0.75)', backdropFilter: 'blur(4px)' }}
+          style={{ background: 'rgba(10,12,20,0.8)' }}
         >
           <div className="text-center pointer-events-none">
             <div
               className="anim-fade-up"
               style={{
                 fontFamily: 'var(--font-pixel)',
-                fontSize: '20px',
-                color: 'var(--c-green)',
-                letterSpacing: '0.05em',
-                marginBottom: '8px',
-                textShadow: '0 0 20px rgba(0,255,65,0.5)',
+                fontSize: '16px',
+                color: '#ff6b35',
+                letterSpacing: '0.08em',
+                marginBottom: '12px',
+                textShadow: '3px 3px 0 #000',
               }}
             >
               CLICK TO DEPLOY
             </div>
-            <div className="hr-tactical" style={{ width: '200px', margin: '16px auto' }} />
+            {/* Pixel divider */}
+            <div style={{
+              display: 'flex', gap: '3px', justifyContent: 'center',
+              margin: '14px auto',
+            }}>
+              {['#ff6b35', '#ffd600', '#76ff03', '#00e5ff', '#7c4dff'].map((c, i) => (
+                <div key={i} style={{ width: '12px', height: '3px', background: c, opacity: 0.5 }} />
+              ))}
+            </div>
             <div
               className="anim-fade-up"
               style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '10px',
-                color: 'var(--c-muted)',
-                letterSpacing: '0.15em',
-                lineHeight: '2.2',
+                fontFamily: 'var(--font-pixel)',
+                fontSize: '6px',
+                color: '#6b7080',
+                letterSpacing: '0.1em',
+                lineHeight: '2.6',
                 animationDelay: '0.2s',
               }}
             >
               <div className="flex justify-center gap-8">
-                <span><span style={{ color: 'var(--c-text)' }}>WASD</span> MOVE</span>
-                <span><span style={{ color: 'var(--c-text)' }}>MOUSE</span> AIM</span>
-                <span><span style={{ color: 'var(--c-text)' }}>LMB</span> FIRE</span>
+                <span><span style={{ color: '#e8e8f0' }}>WASD</span> MOVE</span>
+                <span><span style={{ color: '#e8e8f0' }}>MOUSE</span> AIM</span>
+                <span><span style={{ color: '#e8e8f0' }}>LMB</span> FIRE</span>
               </div>
               <div className="flex justify-center gap-8">
-                <span><span style={{ color: 'var(--c-text)' }}>SPACE</span> JUMP</span>
-                <span><span style={{ color: 'var(--c-text)' }}>R</span> RELOAD</span>
-                <span><span style={{ color: 'var(--c-text)' }}>1-3</span> WEAPONS</span>
+                <span><span style={{ color: '#e8e8f0' }}>SPACE</span> JUMP</span>
+                <span><span style={{ color: '#e8e8f0' }}>R</span> RELOAD</span>
+                <span><span style={{ color: '#e8e8f0' }}>1-3</span> WEAPONS</span>
               </div>
               <div className="flex justify-center gap-8">
-                <span><span style={{ color: 'var(--c-text)' }}>SHIFT</span> SPRINT</span>
-                <span><span style={{ color: 'var(--c-text)' }}>CTRL</span> CROUCH</span>
-                <span><span style={{ color: 'var(--c-text)' }}>F</span> VEHICLE</span>
-                <span><span style={{ color: 'var(--c-text)' }}>E</span> LOADOUT</span>
-                <span><span style={{ color: 'var(--c-text)' }}>T</span> CHAT</span>
-                <span><span style={{ color: 'var(--c-text)' }}>ESC</span> SETTINGS</span>
+                <span><span style={{ color: '#e8e8f0' }}>SHIFT</span> SPRINT</span>
+                <span><span style={{ color: '#e8e8f0' }}>CTRL</span> CROUCH</span>
+                <span><span style={{ color: '#e8e8f0' }}>F</span> VEHICLE</span>
+                <span><span style={{ color: '#e8e8f0' }}>E</span> LOADOUT</span>
+                <span><span style={{ color: '#e8e8f0' }}>T</span> CHAT</span>
+                <span><span style={{ color: '#e8e8f0' }}>ESC</span> SETTINGS</span>
               </div>
             </div>
           </div>

@@ -1,88 +1,85 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useGameStore } from '../store';
 import { menuAudio } from '../menuAudio';
 import { CHARACTER_PRESETS, colorHex } from '../characterPresets';
+import { PixelArtBg } from './PixelArtBg';
 
-function ParticleField() {
+// 5x7 pixel soldier template
+// H=head, V=visor, B=body, W=vest, G=gun, L=leg(darker body)
+const SOLDIER_TEMPLATE = [
+  '.HHH.',
+  'HHVHH',
+  '.BBB.',
+  'BWWWB',
+  'BWWWG',
+  '.BBB.',
+  '.B.B.',
+];
+
+function PixelSoldier({ headColor, visorColor, bodyColor, vestColor, gunColor, size = 6, selected }: {
+  headColor: string; visorColor: string; bodyColor: string; vestColor: string; gunColor: string;
+  size?: number; selected?: boolean;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const ctx = canvas.getContext('2d')!;
+    const w = 5, h = 7;
+    canvas.width = w * size;
+    canvas.height = h * size;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    let animId: number;
-    const particles: { x: number; y: number; vx: number; vy: number; size: number; opacity: number; life: number; maxLife: number }[] = [];
-
-    const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    resize();
-    window.addEventListener('resize', resize);
-
-    const spawn = () => {
-      if (particles.length > 35) return;
-      const maxLife = 300 + Math.random() * 400;
-      particles.push({
-        x: Math.random() * canvas.width,
-        y: canvas.height + 10,
-        vx: (Math.random() - 0.5) * 0.2,
-        vy: -(0.2 + Math.random() * 0.4),
-        size: 1 + Math.random() * 1.5,
-        opacity: 0,
-        life: 0,
-        maxLife,
-      });
+    const colorMap: Record<string, string> = {
+      H: headColor, V: visorColor, B: bodyColor, W: vestColor, G: gunColor,
     };
 
-    const draw = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i];
-        p.x += p.vx;
-        p.y += p.vy;
-        p.life++;
-
-        const progress = p.life / p.maxLife;
-        p.opacity = progress < 0.1 ? progress * 10 : progress > 0.8 ? (1 - progress) * 5 : 1;
-        p.opacity *= 0.2;
-
-        if (p.life > p.maxLife) {
-          particles.splice(i, 1);
-          continue;
-        }
-
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity})`;
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size * 3, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity * 0.08})`;
-        ctx.fill();
+    for (let row = 0; row < h; row++) {
+      for (let col = 0; col < w; col++) {
+        const ch = SOLDIER_TEMPLATE[row][col];
+        if (ch === '.') continue;
+        ctx.fillStyle = colorMap[ch] || bodyColor;
+        ctx.fillRect(col * size, row * size, size - 0.5, size - 0.5);
       }
+    }
+  }, [headColor, visorColor, bodyColor, vestColor, gunColor, size, selected]);
 
-      if (Math.random() < 0.08) spawn();
-      animId = requestAnimationFrame(draw);
-    };
+  return <canvas ref={canvasRef} style={{ imageRendering: 'pixelated' }} />;
+}
 
-    draw();
-    return () => {
-      cancelAnimationFrame(animId);
-      window.removeEventListener('resize', resize);
-    };
-  }, []);
+// Decorative pixel blocks flanking the title
+function TitleDecor({ side }: { side: 'left' | 'right' }) {
+  const colors = side === 'left'
+    ? ['#ff6b35', '#ff9f1c', '#ffbf69', '#00e5ff', '#76ff03']
+    : ['#7c4dff', '#ff2d78', '#ffd600', '#00e676', '#ff3d00'];
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="absolute inset-0 pointer-events-none"
-      style={{ opacity: 0.6 }}
-    />
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '3px',
+      opacity: 0.7,
+      transform: side === 'right' ? 'scaleX(-1)' : undefined,
+    }}>
+      {[0, 1, 2, 3, 4].map((row) => (
+        <div key={row} style={{ display: 'flex', gap: '3px' }}>
+          {[0, 1, 2].map((col) => {
+            const show = (row + col) % 2 === 0 || (row === 2 && col < 2);
+            return (
+              <div
+                key={col}
+                style={{
+                  width: '6px',
+                  height: '6px',
+                  background: show ? colors[(row + col) % colors.length] : 'transparent',
+                }}
+              />
+            );
+          })}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -92,45 +89,34 @@ export function LoginScreen() {
   const [mounted, setMounted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const {
-    connection,
-    setUsername,
-    setScreen,
-    setError,
-    selectedCharacterPreset,
-    setSelectedCharacterPreset,
+    connection, setUsername, setScreen, setError,
+    selectedCharacterPreset, setSelectedCharacterPreset,
   } = useGameStore();
   const error = useGameStore((s) => s.error);
   const settings = useGameStore((s) => s.settings);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     menuAudio.setMasterVolume(settings.masterVolume);
     menuAudio.startMenuAmbience();
     setMounted(true);
-    return () => {
-      menuAudio.stopMenuAmbience();
-    };
+    return () => { menuAudio.stopMenuAmbience(); };
   }, []);
 
-  useEffect(() => {
-    menuAudio.setMasterVolume(settings.masterVolume);
-  }, [settings.masterVolume]);
+  useEffect(() => { menuAudio.setMasterVolume(settings.masterVolume); }, [settings.masterVolume]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     const name = input.trim();
     if (!name || name.length > 20 || !connection || submitting) {
       if (!name) menuAudio.playUIError();
       return;
     }
-
     setSubmitting(true);
     setError(null);
     menuAudio.playUIDeploy();
     try {
-      await connection.reducers.setUsername({
-        username: name,
-        characterPreset: selectedCharacterPreset,
-      });
+      await connection.reducers.setUsername({ username: name, characterPreset: selectedCharacterPreset });
       setUsername(name);
       setScreen('lobby');
     } catch (error) {
@@ -139,233 +125,180 @@ export function LoginScreen() {
     } finally {
       setSubmitting(false);
     }
-  };
+  }, [input, connection, submitting, selectedCharacterPreset, setUsername, setScreen, setError]);
+
+  const pixelBorder = '3px solid';
+  const accentColor = '#ff6b35';
+  const accentCyan = '#00e5ff';
 
   return (
-    <div
-      className="flex items-center justify-center h-full relative overflow-hidden"
-      style={{ background: 'var(--c-bg)' }}
-    >
-      <ParticleField />
-
-      {/* Ambient glow */}
-      <div
-        className="absolute pointer-events-none"
-        style={{
-          width: '900px',
-          height: '900px',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(0,255,65,0.05) 0%, rgba(0,140,255,0.015) 40%, transparent 65%)',
-          top: '45%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          animation: 'breath 6s ease-in-out infinite',
-        }}
-      />
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      height: '100%', position: 'relative', overflow: 'hidden',
+      background: '#0a0c14',
+    }}>
+      <PixelArtBg />
 
       {/* Main content */}
-      <div
-        className="relative z-10 flex flex-col items-center"
-        style={{
-          opacity: mounted ? 1 : 0,
-          transition: 'opacity 0.6s ease',
-          maxWidth: '640px',
-          width: '100%',
-          padding: '0 24px',
-        }}
-      >
-        {/* Title */}
-        <div className="anim-fade-up" style={{ animationDelay: '0.1s' }}>
-          <h1
-            className="title-glow"
-            style={{
-              fontFamily: 'var(--font-pixel)',
-              fontSize: 'clamp(42px, 7.5vw, 76px)',
-              color: 'var(--c-green)',
-              letterSpacing: '0.14em',
-              textAlign: 'center',
-            }}
-          >
+      <div style={{
+        position: 'relative', zIndex: 10,
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        opacity: mounted ? 1 : 0,
+        transition: 'opacity 0.5s ease',
+        maxWidth: '600px', width: '100%', padding: '0 20px',
+      }}>
+        {/* Title section */}
+        <div className="anim-fade-up" style={{ animationDelay: '0.1s', display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <TitleDecor side="left" />
+          <h1 style={{
+            fontFamily: 'var(--font-pixel)',
+            fontSize: 'clamp(38px, 7vw, 72px)',
+            color: '#fff',
+            letterSpacing: '0.12em',
+            textAlign: 'center',
+            textShadow: '4px 4px 0 #ff6b35, -2px -2px 0 #00e5ff',
+          }}>
             BITWARS
           </h1>
+          <TitleDecor side="right" />
         </div>
 
-        <div className="anim-fade-up" style={{ animationDelay: '0.2s' }}>
-          <p
-            style={{
-              fontFamily: 'var(--font-ui)',
-              fontSize: 'clamp(14px, 1.8vw, 18px)',
-              color: '#8888a0',
-              letterSpacing: '0.3em',
-              textTransform: 'uppercase',
-              marginTop: '16px',
-              textAlign: 'center',
-              fontWeight: 600,
-            }}
-          >
-            VOXEL FPS &nbsp;&bull;&nbsp; MULTIPLAYER
+        {/* Subtitle */}
+        <div className="anim-fade-up" style={{ animationDelay: '0.18s' }}>
+          <p style={{
+            fontFamily: 'var(--font-pixel)',
+            fontSize: 'clamp(8px, 1.4vw, 11px)',
+            color: '#6b7080',
+            letterSpacing: '0.35em',
+            marginTop: '12px',
+            textAlign: 'center',
+          }}>
+            BLOCK &nbsp;&bull;&nbsp; SHOOT &nbsp;&bull;&nbsp; DESTROY
           </p>
         </div>
 
-        {/* Divider */}
-        <div
-          className="anim-fade-in"
-          style={{
-            animationDelay: '0.35s',
-            width: '100%',
-            maxWidth: '400px',
-            margin: '40px auto 36px',
-          }}
-        >
-          <div
-            style={{
-              height: '2px',
-              background: 'linear-gradient(90deg, transparent, var(--c-green-dim) 30%, var(--c-green-dim) 70%, transparent)',
-              opacity: 0.35,
-            }}
-          />
+        {/* Pixel divider */}
+        <div className="anim-fade-in" style={{
+          animationDelay: '0.28s',
+          display: 'flex', gap: '4px', margin: '28px 0 24px',
+          justifyContent: 'center',
+        }}>
+          {['#ff6b35', '#ff9f1c', '#ffd600', '#76ff03', '#00e5ff', '#7c4dff', '#ff2d78'].map((c, i) => (
+            <div key={i} style={{ width: '18px', height: '4px', background: c, opacity: 0.6 }} />
+          ))}
         </div>
 
         {/* Login form */}
-        <form onSubmit={handleSubmit} className="flex flex-col items-center w-full" style={{ gap: '28px' }}>
+        <form onSubmit={handleSubmit} style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          width: '100%', gap: '24px',
+        }}>
           {/* Name input */}
-          <div className="anim-fade-up w-full" style={{ animationDelay: '0.35s', maxWidth: '400px' }}>
-            <label
-              style={{
-                fontFamily: 'var(--font-ui)',
-                fontSize: '14px',
-                fontWeight: 700,
-                color: '#eaeaf0',
-                letterSpacing: '0.15em',
-                textTransform: 'uppercase',
-                display: 'block',
-                marginBottom: '12px',
-              }}
-            >
-              YOUR NAME
+          <div className="anim-fade-up" style={{ animationDelay: '0.32s', maxWidth: '380px', width: '100%' }}>
+            <label style={{
+              fontFamily: 'var(--font-pixel)',
+              fontSize: '10px',
+              color: accentCyan,
+              letterSpacing: '0.15em',
+              display: 'block',
+              marginBottom: '10px',
+            }}>
+              CALL SIGN
             </label>
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                menuAudio.playUIType();
-              }}
-              onFocus={() => {
-                setFocused(true);
-                menuAudio.playUIClick();
-              }}
-              onBlur={() => setFocused(false)}
-              placeholder="Enter name..."
-              maxLength={20}
-              autoFocus
-              style={{
-                width: '100%',
-                background: 'var(--c-surface)',
-                border: `2px solid ${focused ? 'var(--c-green)' : 'var(--c-border-bright)'}`,
-                color: '#eaeaf0',
-                fontFamily: 'var(--font-ui)',
-                fontWeight: 600,
-                padding: '16px 20px',
-                fontSize: '20px',
-                letterSpacing: '0.05em',
-                outline: 'none',
-                transition: 'border-color 0.2s, box-shadow 0.2s',
-                boxShadow: focused ? '0 0 20px rgba(0,255,65,0.12)' : 'none',
-              }}
-            />
-            <div
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '12px',
-                color: '#555570',
-                textAlign: 'right',
-                marginTop: '8px',
-              }}
-            >
-              {input.length}/20
+            <div style={{ position: 'relative' }}>
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(e) => { setInput(e.target.value); menuAudio.playUIType(); }}
+                onFocus={() => { setFocused(true); menuAudio.playUIClick(); }}
+                onBlur={() => setFocused(false)}
+                placeholder="ENTER NAME..."
+                maxLength={20}
+                autoFocus
+                style={{
+                  width: '100%',
+                  background: '#12161e',
+                  border: `${pixelBorder} ${focused ? accentColor : '#2a2e3e'}`,
+                  color: '#e8e8f0',
+                  fontFamily: 'var(--font-pixel)',
+                  fontWeight: 400,
+                  padding: '14px 16px',
+                  fontSize: '14px',
+                  letterSpacing: '0.06em',
+                  outline: 'none',
+                  transition: 'border-color 0.15s',
+                  boxShadow: focused ? `4px 4px 0 ${accentColor}44` : '4px 4px 0 #0005',
+                  imageRendering: 'pixelated',
+                }}
+              />
+              <span style={{
+                position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)',
+                fontFamily: 'var(--font-pixel)', fontSize: '8px', color: '#4a4e5e',
+              }}>
+                {input.length}/20
+              </span>
             </div>
           </div>
 
           {/* Character presets */}
-          <div className="anim-fade-up w-full" style={{ animationDelay: '0.42s' }}>
-            <label
-              style={{
-                fontFamily: 'var(--font-ui)',
-                fontSize: '14px',
-                fontWeight: 700,
-                color: '#eaeaf0',
-                letterSpacing: '0.15em',
-                textTransform: 'uppercase',
-                display: 'block',
-                marginBottom: '14px',
-                textAlign: 'center',
-              }}
-            >
-              CHOOSE YOUR LOOK
+          <div className="anim-fade-up" style={{ animationDelay: '0.4s', width: '100%' }}>
+            <label style={{
+              fontFamily: 'var(--font-pixel)',
+              fontSize: '10px',
+              color: accentCyan,
+              letterSpacing: '0.15em',
+              display: 'block',
+              marginBottom: '12px',
+              textAlign: 'center',
+            }}>
+              CHOOSE YOUR SOLDIER
             </label>
-            <div className="flex flex-wrap justify-center" style={{ gap: '10px' }}>
+            <div style={{
+              display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '10px',
+            }}>
               {CHARACTER_PRESETS.map((preset) => {
-                const selected = preset.id === selectedCharacterPreset;
+                const sel = preset.id === selectedCharacterPreset;
+                const borderColor = sel ? colorHex(preset.visorColor) : '#2a2e3e';
                 return (
                   <button
                     key={preset.id}
                     type="button"
-                    onClick={() => {
-                      menuAudio.playUIClick();
-                      setSelectedCharacterPreset(preset.id);
-                    }}
+                    onClick={() => { menuAudio.playUIClick(); setSelectedCharacterPreset(preset.id); }}
+                    onMouseEnter={() => menuAudio.playUIHover()}
                     style={{
-                      border: `2px solid ${selected ? 'var(--c-green)' : 'var(--c-border-bright)'}`,
-                      background: selected ? 'rgba(0,255,65,0.1)' : 'var(--c-surface)',
-                      color: selected ? 'var(--c-green)' : '#eaeaf0',
-                      minWidth: '110px',
-                      padding: '16px 14px 12px',
+                      border: `3px solid ${borderColor}`,
+                      background: sel ? `${colorHex(preset.visorColor)}15` : '#12161e',
+                      color: sel ? '#fff' : '#a0a4b0',
+                      minWidth: '100px',
+                      padding: '14px 12px 10px',
                       cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                      boxShadow: selected ? '0 0 20px rgba(0,255,65,0.15)' : 'none',
+                      transition: 'all 0.1s',
+                      boxShadow: sel
+                        ? `4px 4px 0 ${colorHex(preset.visorColor)}44`
+                        : '3px 3px 0 #0005',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '8px',
                     }}
                   >
-                    {/* Color preview blocks */}
-                    <div className="flex justify-center mb-3" style={{ gap: '3px' }}>
-                      <span style={{ width: '14px', height: '20px', borderRadius: '2px', background: colorHex(preset.headColor), display: 'inline-block' }} />
-                      <span style={{ width: '22px', height: '20px', borderRadius: '2px', background: colorHex(preset.bodyColor), display: 'inline-block' }} />
-                      <span style={{ width: '16px', height: '20px', borderRadius: '2px', background: colorHex(preset.gunColor), display: 'inline-block' }} />
-                    </div>
-                    {/* Visor color indicator */}
-                    <div
-                      style={{
-                        width: '30px',
-                        height: '4px',
-                        background: colorHex(preset.visorColor),
-                        margin: '0 auto 10px',
-                        borderRadius: '2px',
-                        boxShadow: `0 0 8px ${colorHex(preset.visorColor)}66`,
-                      }}
+                    <PixelSoldier
+                      headColor={colorHex(preset.headColor)}
+                      visorColor={colorHex(preset.visorColor)}
+                      bodyColor={colorHex(preset.bodyColor)}
+                      vestColor={colorHex(preset.vestColor)}
+                      gunColor={colorHex(preset.gunColor)}
+                      size={sel ? 7 : 6}
+                      selected={sel}
                     />
-                    <div
-                      style={{
-                        fontFamily: 'var(--font-ui)',
-                        fontSize: '13px',
-                        fontWeight: 700,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        marginBottom: '4px',
-                      }}
-                    >
-                      {preset.name}
-                    </div>
-                    <div
-                      style={{
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: '11px',
-                        color: selected ? 'var(--c-green-dim)' : '#8888a0',
-                        letterSpacing: '0.05em',
-                        textTransform: 'uppercase',
-                      }}
-                    >
-                      {preset.role}
-                    </div>
+                    <span style={{
+                      fontFamily: 'var(--font-pixel)',
+                      fontSize: '8px',
+                      letterSpacing: '0.05em',
+                    }}>
+                      {preset.name.toUpperCase()}
+                    </span>
                   </button>
                 );
               })}
@@ -373,35 +306,47 @@ export function LoginScreen() {
           </div>
 
           {/* Play button */}
-          <div className="anim-fade-up" style={{ animationDelay: '0.5s', width: '100%', maxWidth: '400px' }}>
+          <div className="anim-fade-up" style={{ animationDelay: '0.48s', width: '100%', maxWidth: '380px' }}>
             <button
               type="submit"
               disabled={submitting}
               onMouseEnter={() => menuAudio.playUIHover()}
               style={{
                 width: '100%',
-                background: submitting ? 'var(--c-green-dim)' : 'var(--c-green)',
-                border: 'none',
+                background: submitting ? '#cc5528' : accentColor,
+                border: '4px solid #000',
                 color: '#000',
-                fontFamily: 'var(--font-ui)',
-                fontWeight: 700,
-                fontSize: '22px',
+                fontFamily: 'var(--font-pixel)',
+                fontWeight: 400,
+                fontSize: '18px',
                 letterSpacing: '0.2em',
-                textTransform: 'uppercase',
-                padding: '20px 40px',
+                padding: '18px 32px',
                 cursor: submitting ? 'not-allowed' : 'pointer',
-                transition: 'all 0.15s ease',
-                boxShadow: '0 0 30px rgba(0,255,65,0.2)',
+                transition: 'all 0.1s',
+                boxShadow: '6px 6px 0 #00000066',
+                position: 'relative',
               }}
               onMouseOver={(e) => {
                 if (!submitting) {
-                  e.currentTarget.style.boxShadow = '0 0 40px rgba(0,255,65,0.4)';
-                  e.currentTarget.style.transform = 'scale(1.02)';
+                  e.currentTarget.style.transform = 'translate(-2px, -2px)';
+                  e.currentTarget.style.boxShadow = '8px 8px 0 #00000066';
                 }
               }}
               onMouseOut={(e) => {
-                e.currentTarget.style.boxShadow = '0 0 30px rgba(0,255,65,0.2)';
-                e.currentTarget.style.transform = 'scale(1)';
+                e.currentTarget.style.transform = 'translate(0, 0)';
+                e.currentTarget.style.boxShadow = '6px 6px 0 #00000066';
+              }}
+              onMouseDown={(e) => {
+                if (!submitting) {
+                  e.currentTarget.style.transform = 'translate(3px, 3px)';
+                  e.currentTarget.style.boxShadow = '2px 2px 0 #00000066';
+                }
+              }}
+              onMouseUp={(e) => {
+                if (!submitting) {
+                  e.currentTarget.style.transform = 'translate(-2px, -2px)';
+                  e.currentTarget.style.boxShadow = '8px 8px 0 #00000066';
+                }
               }}
             >
               {submitting ? 'CONNECTING...' : 'PLAY'}
@@ -410,62 +355,61 @@ export function LoginScreen() {
 
           {/* Error */}
           {error && (
-            <p
-              className="anim-fade-up"
-              style={{
-                fontFamily: 'var(--font-ui)',
-                fontSize: '15px',
-                fontWeight: 600,
-                color: 'var(--c-red)',
-                padding: '12px 20px',
-                background: 'rgba(255, 0, 51, 0.08)',
-                border: '1px solid rgba(255, 0, 51, 0.25)',
-                textAlign: 'center',
-                width: '100%',
-                maxWidth: '400px',
-              }}
-            >
+            <div className="anim-fade-up" style={{
+              fontFamily: 'var(--font-pixel)',
+              fontSize: '9px',
+              color: '#ff2d78',
+              padding: '10px 16px',
+              background: '#ff2d7812',
+              border: '2px solid #ff2d78',
+              textAlign: 'center',
+              width: '100%',
+              maxWidth: '380px',
+              lineHeight: 1.6,
+            }}>
               {error}
-            </p>
+            </div>
           )}
         </form>
 
         {/* Feature tags */}
-        <div
-          className="anim-fade-in flex flex-wrap justify-center mt-10"
-          style={{ animationDelay: '0.65s', gap: '12px' }}
-        >
-          {['DESTROY EVERYTHING', '5 WEAPONS', 'REAL-TIME PVP'].map((text, i) => (
+        <div className="anim-fade-in" style={{
+          animationDelay: '0.6s',
+          display: 'flex', flexWrap: 'wrap', justifyContent: 'center',
+          gap: '8px', marginTop: '28px',
+        }}>
+          {[
+            { text: 'DESTROY EVERYTHING', color: '#ff3d00' },
+            { text: '5 WEAPONS', color: '#ffd600' },
+            { text: 'REAL-TIME PVP', color: '#00e5ff' },
+          ].map((tag, i) => (
             <div
-              key={text}
+              key={tag.text}
               className="anim-fade-up"
               style={{
-                animationDelay: `${0.65 + i * 0.08}s`,
-                fontFamily: 'var(--font-ui)',
-                fontSize: '13px',
-                fontWeight: 600,
-                color: '#8888a0',
-                letterSpacing: '0.12em',
-                padding: '8px 20px',
-                border: '1px solid var(--c-border-bright)',
-                textTransform: 'uppercase',
+                animationDelay: `${0.6 + i * 0.06}s`,
+                fontFamily: 'var(--font-pixel)',
+                fontSize: '7px',
+                color: tag.color,
+                letterSpacing: '0.1em',
+                padding: '6px 14px',
+                border: `2px solid ${tag.color}55`,
+                background: `${tag.color}08`,
               }}
             >
-              {text}
+              {tag.text}
             </div>
           ))}
         </div>
 
         {/* Version */}
-        <div className="anim-fade-in" style={{ animationDelay: '0.9s', marginTop: '28px' }}>
-          <p
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '12px',
-              color: '#555570',
-              letterSpacing: '0.12em',
-            }}
-          >
+        <div className="anim-fade-in" style={{ animationDelay: '0.8s', marginTop: '20px' }}>
+          <p style={{
+            fontFamily: 'var(--font-pixel)',
+            fontSize: '7px',
+            color: '#3a3e4e',
+            letterSpacing: '0.1em',
+          }}>
             v0.1.0 ALPHA
           </p>
         </div>

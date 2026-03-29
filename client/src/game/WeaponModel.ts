@@ -56,232 +56,147 @@ export class WeaponModel {
     this.showWeapon(0);
   }
 
-  private createMaterial(
-    color: number,
-    roughness: number,
-    metalness: number,
-    emissive = 0x000000,
-    emissiveIntensity = 0,
-  ): THREE.MeshStandardMaterial {
-    return new THREE.MeshStandardMaterial({
+  private mat(color: number, emissive?: number): THREE.MeshLambertMaterial {
+    return new THREE.MeshLambertMaterial({
       color,
-      roughness,
-      metalness,
-      emissive,
-      emissiveIntensity,
+      ...(emissive != null ? { emissive, emissiveIntensity: 0.4 } : {}),
     });
   }
 
-  // ── Rifle: Sleek angular design ──
+  // ── Rifle: Blocky assault rifle ──
   private buildRifle(): THREE.Group {
     const g = new THREE.Group();
-    const dark = this.createMaterial(0x1a1a22, 0.42, 0.78);
-    const accent = this.createMaterial(0x2244aa, 0.32, 0.55, 0x112244, 0.45);
-    const metal = this.createMaterial(0x3a3a44, 0.28, 0.84);
+    const dark = this.mat(0x1a1a22);
+    const metal = this.mat(0x3a3a44);
+    const accent = this.mat(0x2244aa, 0x112244);
 
-    // Barrel
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.55), dark);
-    barrel.position.set(0, 0, -0.25);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.3), metal);
+    body.position.set(0, 0, 0);
+    g.add(body);
+
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.35), dark);
+    barrel.position.set(0, 0, -0.3);
     g.add(barrel);
 
-    // Upper receiver
-    const upper = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.06, 0.22), metal);
-    upper.position.set(0, 0.01, 0.02);
-    g.add(upper);
-
-    // Magazine
-    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.12, 0.06), dark);
-    mag.position.set(0, -0.06, 0.04);
-    mag.rotation.x = -0.15;
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, 0.05), dark);
+    mag.position.set(0, -0.08, 0.02);
     g.add(mag);
 
-    // Stock
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.07, 0.15), metal);
-    stock.position.set(0, -0.01, 0.18);
-    g.add(stock);
-
-    // Blue accent stripe
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.008, 0.12), accent);
-    stripe.position.set(0, 0.04, -0.06);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.015, 0.15), accent);
+    stripe.position.set(0, 0.04, -0.08);
     g.add(stripe);
 
-    // Sight
-    const sight = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.025, 0.015), accent);
-    sight.position.set(0, 0.055, -0.1);
-    g.add(sight);
-
     g.position.set(0.28, -0.26, -0.45);
-    g.rotation.set(0, 0, 0);
     return g;
   }
 
-  // ── Shotgun: Chunky double barrel ──
+  // ── Shotgun: Chunky double block ──
   private buildShotgun(): THREE.Group {
     const g = new THREE.Group();
-    const wood = this.createMaterial(0x5a3a1a, 0.86, 0.12);
-    const dark = this.createMaterial(0x1a1a1a, 0.36, 0.72);
-    const accent = this.createMaterial(0xcc6600, 0.38, 0.35, 0x552200, 0.35);
+    const wood = this.mat(0x5a3a1a);
+    const dark = this.mat(0x1a1a1a);
+    const accent = this.mat(0xcc6600, 0x552200);
 
-    // Double barrel
-    const b1 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.5), dark);
-    b1.position.set(-0.02, 0, -0.2);
-    g.add(b1);
-    const b2 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.5), dark);
-    b2.position.set(0.02, 0, -0.2);
-    g.add(b2);
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.07, 0.4), dark);
+    barrel.position.set(0, 0, -0.18);
+    g.add(barrel);
 
-    // Barrel band
-    const band = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.06, 0.02), accent);
-    band.position.set(0, 0, -0.15);
-    g.add(band);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.07, 0.2), wood);
+    body.position.set(0, 0, 0.08);
+    g.add(body);
 
-    // Pump grip
-    const pump = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.1), wood);
-    pump.position.set(0, -0.01, -0.02);
-    g.add(pump);
-
-    // Stock
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.2), wood);
-    stock.position.set(0, -0.01, 0.18);
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.18), wood);
+    stock.position.set(0, -0.01, 0.24);
     g.add(stock);
 
-    // Orange accent
-    const line = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.006, 0.08), accent);
-    line.position.set(0, 0.035, 0.05);
-    g.add(line);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.015, 0.06), accent);
+    stripe.position.set(0, 0.04, -0.1);
+    g.add(stripe);
 
     g.position.set(0.3, -0.28, -0.42);
     return g;
   }
 
-  // ── RPG: Tube launcher ──
+  // ── RPG: Big square tube ──
   private buildRPG(): THREE.Group {
     const g = new THREE.Group();
-    const olive = this.createMaterial(0x3a4a2a, 0.74, 0.22);
-    const dark = this.createMaterial(0x1a1a1a, 0.35, 0.76);
-    const red = this.createMaterial(0xcc2200, 0.34, 0.28, 0x551100, 0.4);
+    const olive = this.mat(0x3a4a2a);
+    const dark = this.mat(0x1a1a1a);
+    const red = this.mat(0xcc2200, 0x551100);
 
-    // Main tube
-    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.6, 8), olive);
-    tube.rotation.x = Math.PI / 2;
+    const tube = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.5), olive);
     tube.position.set(0, 0, -0.1);
     g.add(tube);
 
-    // Front flare
-    const flare = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.04, 0.08, 8), dark);
-    flare.rotation.x = Math.PI / 2;
-    flare.position.set(0, 0, -0.42);
+    const flare = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.11, 0.06), dark);
+    flare.position.set(0, 0, -0.38);
     g.add(flare);
 
-    // Rear guard
-    const rear = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.06, 8), dark);
-    rear.rotation.x = Math.PI / 2;
-    rear.position.set(0, 0, 0.22);
-    g.add(rear);
-
-    // Grip
     const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, 0.04), dark);
     grip.position.set(0, -0.08, 0.05);
-    grip.rotation.x = -0.2;
     g.add(grip);
 
-    // Sight
-    const sight = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.04, 0.01), red);
-    sight.position.set(0, 0.06, -0.15);
-    g.add(sight);
-
-    // Red stripe
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.044, 0.03), red);
-    stripe.rotation.x = Math.PI / 2;
-    stripe.position.set(0, 0, -0.3);
-    g.add(stripe);
-
-    // Warhead tip (visible in tube)
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.06, 6), red);
-    tip.rotation.x = -Math.PI / 2;
-    tip.position.set(0, 0, -0.45);
+    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), red);
+    tip.position.set(0, 0, -0.44);
     g.add(tip);
 
     g.position.set(0.32, -0.3, -0.38);
     return g;
   }
 
-  // ── Machine Gun: Belt-fed bruiser ──
+  // ── Machine Gun: Boxy belt-fed ──
   private buildMachineGun(): THREE.Group {
     const g = new THREE.Group();
-    const body = this.createMaterial(0x1a222c, 0.34, 0.82);
-    const steel = this.createMaterial(0x3b4658, 0.28, 0.9);
-    const cyan = this.createMaterial(0x2a8fa8, 0.36, 0.45, 0x115566, 0.5);
+    const body = this.mat(0x1a222c);
+    const steel = this.mat(0x3b4658);
+    const cyan = this.mat(0x2a8fa8, 0x115566);
 
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.58), steel);
-    barrel.position.set(0, 0.01, -0.24);
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.45), steel);
+    barrel.position.set(0, 0.01, -0.2);
     g.add(barrel);
 
-    const shroud = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.08, 0.28), body);
-    shroud.position.set(0, 0.015, -0.02);
+    const shroud = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.08, 0.22), body);
+    shroud.position.set(0, 0.01, 0.04);
     g.add(shroud);
 
-    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.09, 0.18), steel);
-    receiver.position.set(0, 0.01, 0.16);
-    g.add(receiver);
-
-    const boxMag = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.09), body);
-    boxMag.position.set(-0.02, -0.07, 0.1);
+    const boxMag = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.08), body);
+    boxMag.position.set(-0.02, -0.06, 0.08);
     g.add(boxMag);
 
-    const carry = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.01, 0.17), cyan);
-    carry.position.set(0, 0.065, 0.08);
-    g.add(carry);
-
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.16), steel);
-    stock.position.set(0, -0.005, 0.3);
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.14), steel);
+    stock.position.set(0, -0.005, 0.24);
     g.add(stock);
 
-    const muzzle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.03), cyan);
-    muzzle.position.set(0, 0.01, -0.53);
-    g.add(muzzle);
+    const accent = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.015, 0.14), cyan);
+    accent.position.set(0, 0.06, 0.04);
+    g.add(accent);
 
     g.position.set(0.3, -0.26, -0.46);
     return g;
   }
 
-  // ── Grenade Launcher: Heavy drum-fed arc cannon ──
+  // ── Grenade Launcher: Square tube with drum cube ──
   private buildGrenadeLauncher(): THREE.Group {
     const g = new THREE.Group();
-    const dark = this.createMaterial(0x1c1f22, 0.42, 0.72);
-    const olive = this.createMaterial(0x3a4d2a, 0.68, 0.28);
-    const green = this.createMaterial(0x52b82f, 0.3, 0.22, 0x17480f, 0.45);
+    const dark = this.mat(0x1c1f22);
+    const olive = this.mat(0x3a4d2a);
+    const green = this.mat(0x52b82f, 0x17480f);
 
-    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.52, 10), olive);
-    tube.rotation.x = Math.PI / 2;
-    tube.position.set(0, 0.01, -0.18);
+    const tube = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.4), olive);
+    tube.position.set(0, 0.01, -0.12);
     g.add(tube);
 
-    const breech = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.1, 0.15), dark);
-    breech.position.set(0, 0.01, 0.12);
+    const breech = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.1, 0.12), dark);
+    breech.position.set(0, 0.01, 0.14);
     g.add(breech);
 
-    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.07, 8), dark);
-    drum.rotation.z = Math.PI / 2;
-    drum.position.set(0, -0.07, 0.06);
-    g.add(drum);
-
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, 0.04), dark);
-    grip.position.set(0, -0.08, 0.2);
-    grip.rotation.x = -0.22;
-    g.add(grip);
-
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.17), olive);
-    stock.position.set(0, -0.005, 0.33);
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.15), olive);
+    stock.position.set(0, -0.005, 0.28);
     g.add(stock);
 
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.006, 6, 10), green);
-    ring.position.set(0, 0.01, -0.43);
-    g.add(ring);
-
-    const sight = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.03, 0.012), green);
-    sight.position.set(0, 0.065, -0.08);
-    g.add(sight);
+    const drum = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), green);
+    drum.position.set(0, -0.08, 0.06);
+    g.add(drum);
 
     g.position.set(0.31, -0.29, -0.4);
     return g;

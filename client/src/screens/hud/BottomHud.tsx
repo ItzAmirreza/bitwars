@@ -146,12 +146,7 @@ export function BottomHud({
 
   return (
     <div className="absolute bottom-0 left-0 right-0 z-10 pointer-events-none">
-      <div
-        className="px-5 pb-4 pt-16"
-        style={{
-          background: 'linear-gradient(0deg, rgba(6,8,16,0.7) 0%, rgba(6,8,16,0.2) 60%, transparent 100%)',
-        }}
-      >
+      <div className="px-5 pb-4 pt-2">
         <div className="flex items-end justify-between">
 
           {/* ── LEFT PANEL: Health + Weapon silhouette + Ammo ── */}
@@ -159,9 +154,8 @@ export function BottomHud({
 
             {/* Health panel — CS:GO style with large number + health cross */}
             <div style={{
-              background: 'rgba(6,8,16,0.85)',
-              border: `1px solid ${isLowHealth ? healthRawColor : 'var(--c-border)'}`,
-              backdropFilter: 'blur(8px)',
+              background: 'rgba(12,16,24,0.88)',
+              border: `2px solid ${isLowHealth ? healthRawColor : '#1a1e2e'}`,
               padding: '10px 14px',
               minWidth: '260px',
               transition: 'border-color 0.3s',
@@ -181,7 +175,7 @@ export function BottomHud({
                   color: healthColor,
                   fontWeight: 'bold',
                   lineHeight: '1',
-                  textShadow: `0 0 16px ${healthRawColor}`,
+                  textShadow: `2px 2px 0 rgba(0,0,0,0.5)`,
                   animation: isCriticalHealth ? 'hud-critical-flash 0.6s ease-in-out infinite' : 'none',
                   minWidth: '80px',
                 }}>
@@ -223,7 +217,7 @@ export function BottomHud({
                         : partial
                           ? `${healthRawColor}80`
                           : 'rgba(255,255,255,0.06)',
-                      boxShadow: filled ? `0 0 4px ${healthRawColor}40` : 'none',
+                      boxShadow: 'none',
                       transition: 'all 0.3s ease',
                     }} />
                   );
@@ -234,9 +228,8 @@ export function BottomHud({
             {/* Weapon + Ammo combined panel with silhouette (infantry only) */}
             {!mountedVehicleName && (
             <div style={{
-              background: 'rgba(6,8,16,0.85)',
-              border: '1px solid var(--c-border)',
-              backdropFilter: 'blur(8px)',
+              background: 'rgba(12,16,24,0.88)',
+              border: '2px solid #1a1e2e',
               padding: '8px 14px',
               borderLeft: `3px solid ${WEAPON_DATA[weapon].rawColor}`,
               minWidth: '260px',
@@ -256,8 +249,8 @@ export function BottomHud({
                 {/* Reloading indicator */}
                 {isReloading && (
                   <span style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '9px',
+                    fontFamily: 'var(--font-pixel)',
+                    fontSize: '7px',
                     color: 'var(--c-amber)',
                     letterSpacing: '0.15em',
                     animation: 'hud-ammo-warn 0.8s ease-in-out infinite',
@@ -276,20 +269,20 @@ export function BottomHud({
                 {/* Weapon name */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
                   <span style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '8px',
+                    fontFamily: 'var(--font-pixel)',
+                    fontSize: '6px',
                     color: 'var(--c-muted)',
                     letterSpacing: '0.15em',
                   }}>
                     WEAPON
                   </span>
                   <span style={{
-                    fontFamily: 'var(--font-ui)',
-                    fontSize: '14px',
-                    fontWeight: 700,
+                    fontFamily: 'var(--font-pixel)',
+                    fontSize: '9px',
+                    fontWeight: 400,
                     color: WEAPON_DATA[weapon].color,
                     letterSpacing: '0.1em',
-                    textShadow: `0 0 8px ${WEAPON_DATA[weapon].rawColor}60`,
+                    textShadow: `2px 2px 0 rgba(0,0,0,0.5)`,
                     lineHeight: '1',
                   }}>
                     {WEAPON_DATA[weapon].name}
@@ -301,8 +294,8 @@ export function BottomHud({
                 {/* Ammo display — CS:GO "current | reserve" style */}
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
                   <span style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '8px',
+                    fontFamily: 'var(--font-pixel)',
+                    fontSize: '6px',
                     color: 'var(--c-muted)',
                     letterSpacing: '0.15em',
                   }}>
@@ -349,7 +342,7 @@ export function BottomHud({
                   width: `${ammoPercent}%`,
                   background: ammo === 0 ? 'var(--c-red)' : isLowAmmo ? 'var(--c-amber)' : WEAPON_DATA[weapon].rawColor,
                   transition: 'width 0.15s ease, background 0.3s',
-                  boxShadow: `0 0 4px ${ammo === 0 ? 'var(--c-red)' : isLowAmmo ? 'var(--c-amber)' : WEAPON_DATA[weapon].rawColor}`,
+                  boxShadow: 'none',
                 }} />
               </div>
             </div>
@@ -361,9 +354,8 @@ export function BottomHud({
 
             {/* K/D Panel */}
             <div style={{
-              background: 'rgba(6,8,16,0.85)',
-              border: '1px solid var(--c-border)',
-              backdropFilter: 'blur(8px)',
+              background: 'rgba(12,16,24,0.88)',
+              border: '2px solid #1a1e2e',
               padding: '8px 14px',
               display: 'flex',
               alignItems: 'center',
@@ -372,8 +364,8 @@ export function BottomHud({
             }}>
               <div style={{ textAlign: 'center' }}>
                 <div style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '9px',
+                  fontFamily: 'var(--font-pixel)',
+                  fontSize: '6px',
                   color: 'var(--c-muted)',
                   letterSpacing: '0.15em',
                   marginBottom: '2px',
@@ -384,7 +376,6 @@ export function BottomHud({
                   color: 'var(--c-green)',
                   fontWeight: 'bold',
                   lineHeight: '1',
-                  textShadow: '0 0 8px rgba(0,255,65,0.3)',
                 }}>{kills}</div>
               </div>
 
@@ -396,8 +387,8 @@ export function BottomHud({
 
               <div style={{ textAlign: 'center' }}>
                 <div style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '9px',
+                  fontFamily: 'var(--font-pixel)',
+                  fontSize: '6px',
                   color: 'var(--c-muted)',
                   letterSpacing: '0.15em',
                   marginBottom: '2px',
@@ -419,8 +410,8 @@ export function BottomHud({
 
               <div style={{ textAlign: 'center' }}>
                 <div style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '9px',
+                  fontFamily: 'var(--font-pixel)',
+                  fontSize: '6px',
                   color: 'var(--c-muted)',
                   letterSpacing: '0.15em',
                   marginBottom: '2px',
@@ -456,7 +447,7 @@ export function BottomHud({
                 {/* Left: Throttle */}
                 <div style={{ ...barStyle, left: 'calc(50% - 140px)' }}>
                   <span style={{
-                    fontFamily: 'var(--font-mono)', fontSize: '8px', letterSpacing: '0.12em',
+                    fontFamily: 'var(--font-pixel)', fontSize: '6px', letterSpacing: '0.12em',
                     color: '#ff9800', opacity: 0.8,
                   }}>THR</span>
                   <div style={{
@@ -482,7 +473,7 @@ export function BottomHud({
                 {/* Right: Airspeed */}
                 <div style={{ ...barStyle, left: 'auto', right: 'calc(50% - 140px)' }}>
                   <span style={{
-                    fontFamily: 'var(--font-mono)', fontSize: '8px', letterSpacing: '0.12em',
+                    fontFamily: 'var(--font-pixel)', fontSize: '6px', letterSpacing: '0.12em',
                     color: '#66e0ff', opacity: 0.8,
                   }}>SPD</span>
                   <div style={{
@@ -520,10 +511,9 @@ export function BottomHud({
 
                   {/* Vehicle Health Bar */}
                   <div style={{
-                    background: 'rgba(8,18,26,0.88)',
-                    border: `1px solid ${vHealthPct <= 25 ? 'rgba(255,0,51,0.4)' : 'rgba(102,224,255,0.25)'}`,
+                    background: 'rgba(12,16,24,0.88)',
+                    border: `2px solid ${vHealthPct <= 25 ? 'rgba(255,0,51,0.4)' : '#1a1e2e'}`,
                     borderRight: `3px solid ${vHealthColor}`,
-                    backdropFilter: 'blur(8px)',
                     padding: '8px 14px',
                     minWidth: '240px',
                   }}>
@@ -541,14 +531,13 @@ export function BottomHud({
                           </svg>
                         )}
                         <span style={{
-                          fontFamily: 'var(--font-mono)', fontSize: '9px',
+                          fontFamily: 'var(--font-pixel)', fontSize: '6px',
                           color: 'var(--c-muted)', letterSpacing: '0.14em',
                         }}>VEHICLE</span>
                       </div>
                       <span style={{
                         fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 'bold',
                         color: vHealthColor, lineHeight: '1',
-                        textShadow: `0 0 8px ${vHealthColor}80`,
                         animation: vHealthPct <= 25 ? 'hud-critical-flash 0.8s ease-in-out infinite' : 'none',
                       }}>
                         {Math.round(vehicleHealth)}
@@ -574,10 +563,9 @@ export function BottomHud({
 
                   {/* Vehicle Weapon + Ammo Panel */}
                   <div style={{
-                    background: 'rgba(8,18,26,0.88)',
-                    border: '1px solid rgba(102,224,255,0.2)',
+                    background: 'rgba(12,16,24,0.88)',
+                    border: '2px solid #1a1e2e',
                     borderRight: `3px solid ${vwColor}`,
-                    backdropFilter: 'blur(8px)',
                     padding: '8px 14px',
                     minWidth: '240px',
                   }}>
@@ -590,7 +578,7 @@ export function BottomHud({
                             flex: 1,
                             padding: '3px 6px',
                             background: active ? `${slot.color}20` : 'rgba(255,255,255,0.03)',
-                            border: active ? `1px solid ${slot.color}` : '1px solid rgba(255,255,255,0.08)',
+                            border: active ? `2px solid ${slot.color}` : '2px solid #1a1e2e',
                             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
                             transition: 'all 0.15s ease',
                             position: 'relative',
@@ -601,10 +589,10 @@ export function BottomHud({
                               background: slot.color, boxShadow: `0 0 6px ${slot.color}`,
                             }}/>}
                             <span style={{
-                              fontFamily: 'var(--font-mono)', fontSize: '8px', fontWeight: 'bold',
+                              fontFamily: 'var(--font-pixel)', fontSize: '6px', fontWeight: 400,
                               color: active ? slot.color : 'var(--c-muted2)',
                               background: active ? `${slot.color}30` : 'rgba(255,255,255,0.05)',
-                              padding: '0 3px', borderRadius: '2px', lineHeight: '1.4',
+                              padding: '0 3px', lineHeight: '1.4',
                             }}>{idx + 1}</span>
                             <span style={{
                               fontFamily: 'var(--font-mono)', fontSize: '9px',
@@ -619,7 +607,7 @@ export function BottomHud({
                     {/* Ammo display */}
                     <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
                       <span style={{
-                        fontFamily: 'var(--font-mono)', fontSize: '8px',
+                        fontFamily: 'var(--font-pixel)', fontSize: '6px',
                         color: vehicleReloading ? 'var(--c-amber)' : 'var(--c-muted)', letterSpacing: '0.15em',
                         animation: vehicleReloading ? 'hud-ammo-warn 0.8s ease-in-out infinite' : 'none',
                       }}>{vehicleReloading ? 'RELOADING' : 'AMMO'}</span>
@@ -651,16 +639,15 @@ export function BottomHud({
 
                   {/* Telemetry: Altitude + Speed */}
                   <div style={{
-                    background: 'rgba(8,18,26,0.88)',
-                    border: '1px solid rgba(102,224,255,0.15)',
+                    background: 'rgba(12,16,24,0.88)',
+                    border: '2px solid #1a1e2e',
                     borderRight: '3px solid rgba(102,224,255,0.4)',
-                    backdropFilter: 'blur(8px)',
                     padding: '6px 14px',
                     minWidth: '240px',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'var(--c-muted)', letterSpacing: '0.12em' }}>ALT</span>
+                      <span style={{ fontFamily: 'var(--font-pixel)', fontSize: '6px', color: 'var(--c-muted)', letterSpacing: '0.12em' }}>ALT</span>
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 'bold', color: 'var(--c-text)', lineHeight: '1' }}>
                         {Math.round(vehicleAltitude)}
                       </span>
@@ -668,7 +655,7 @@ export function BottomHud({
                     </div>
                     <div style={{ width: '1px', height: '16px', background: 'var(--c-border)' }}/>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'var(--c-muted)', letterSpacing: '0.12em' }}>SPD</span>
+                      <span style={{ fontFamily: 'var(--font-pixel)', fontSize: '6px', color: 'var(--c-muted)', letterSpacing: '0.12em' }}>SPD</span>
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 'bold', color: 'var(--c-text)', lineHeight: '1' }}>
                         {Math.round(vehicleSpeed)}
                       </span>
@@ -676,7 +663,7 @@ export function BottomHud({
                     </div>
                     <div style={{ width: '1px', height: '16px', background: 'var(--c-border)' }}/>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'var(--c-muted)', letterSpacing: '0.12em' }}>HDG</span>
+                      <span style={{ fontFamily: 'var(--font-pixel)', fontSize: '6px', color: 'var(--c-muted)', letterSpacing: '0.12em' }}>HDG</span>
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', fontWeight: 'bold', color: 'var(--c-cyan)', lineHeight: '1' }}>
                         {String(Math.round(((heading % 360) + 360) % 360)).padStart(3, '0')}
                       </span>
@@ -696,13 +683,12 @@ export function BottomHud({
                   <div
                     key={`${w.name}-${slotIndex}`}
                     style={{
-                      background: active ? `${w.rawColor}15` : 'rgba(6,8,16,0.85)',
-                      border: active ? `1px solid ${w.rawColor}` : '1px solid var(--c-border)',
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '9px',
+                      background: active ? `${w.rawColor}15` : 'rgba(12,16,24,0.88)',
+                      border: active ? `2px solid ${w.rawColor}` : '2px solid #1a1e2e',
+                      fontFamily: 'var(--font-pixel)',
+                      fontSize: '7px',
                       letterSpacing: '0.05em',
-                      transition: 'all 0.15s ease',
-                      backdropFilter: 'blur(4px)',
+                      transition: 'all 0.1s',
                       padding: '5px 8px 4px',
                       display: 'flex',
                       flexDirection: 'column',
@@ -711,7 +697,7 @@ export function BottomHud({
                       minWidth: '60px',
                       position: 'relative',
                       overflow: 'hidden',
-                      boxShadow: active ? `0 0 12px ${w.rawColor}30, inset 0 0 12px ${w.rawColor}10` : 'none',
+                      boxShadow: active ? `3px 3px 0 rgba(0,0,0,0.3)` : 'none',
                     }}
                   >
                     {active && (
@@ -732,14 +718,13 @@ export function BottomHud({
                         color: active ? 'var(--c-text)' : 'var(--c-muted2)',
                         background: active ? `${w.rawColor}30` : 'rgba(255,255,255,0.05)',
                         padding: '1px 3px',
-                        borderRadius: '2px',
                         lineHeight: '1.2',
                       }}>{slotIndex + 1}</span>
                       <span style={{
                         color: active ? w.color : 'var(--c-muted)',
                         fontWeight: active ? 'bold' : 'normal',
-                        textShadow: active ? `0 0 6px ${w.rawColor}40` : 'none',
-                        fontSize: '9px',
+                        textShadow: 'none',
+                        fontSize: '7px',
                       }}>{w.name}</span>
                     </div>
                   </div>

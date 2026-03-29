@@ -7,6 +7,7 @@ import { GameScreen } from './screens/GameScreen';
 
 function LoadingScreen() {
   const [dots, setDots] = useState('');
+  const [barWidth, setBarWidth] = useState(0);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -15,63 +16,65 @@ function LoadingScreen() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    // Stepped pixel loading bar
+    const steps = [8, 20, 35, 50, 65, 78, 88, 95, 100];
+    let i = 0;
+    const timer = setInterval(() => {
+      if (i < steps.length) {
+        setBarWidth(steps[i]);
+        i++;
+      } else {
+        clearInterval(timer);
+      }
+    }, 350);
+    return () => clearInterval(timer);
+  }, []);
+
   return (
     <div
-      className="flex items-center justify-center h-full relative overflow-hidden"
-      style={{ background: 'var(--c-bg)' }}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        height: '100%', position: 'relative', overflow: 'hidden',
+        background: '#0a0c14',
+      }}
     >
-      {/* Ambient glow */}
-      <div
-        className="absolute pointer-events-none"
-        style={{
-          width: '600px',
-          height: '600px',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(0,255,65,0.05) 0%, transparent 65%)',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          animation: 'breath 6s ease-in-out infinite',
-        }}
-      />
-
-      <div className="text-center anim-fade-up relative z-10">
-        <h1
-          className="title-glow"
-          style={{
-            fontFamily: 'var(--font-pixel)',
-            fontSize: 'clamp(36px, 6vw, 56px)',
-            color: 'var(--c-green)',
-            letterSpacing: '0.12em',
-            marginBottom: '36px',
-          }}
-        >
+      <div style={{ textAlign: 'center' }} className="anim-fade-up relative z-10">
+        <h1 style={{
+          fontFamily: 'var(--font-pixel)',
+          fontSize: 'clamp(32px, 6vw, 52px)',
+          color: '#fff',
+          letterSpacing: '0.12em',
+          marginBottom: '32px',
+          textShadow: '4px 4px 0 #ff6b35, -2px -2px 0 #00e5ff',
+        }}>
           BITWARS
         </h1>
 
-        {/* Loading bar */}
-        <div
-          style={{
-            width: '280px',
-            height: '3px',
-            background: 'var(--c-border)',
-            margin: '0 auto 24px',
-            overflow: 'hidden',
-            borderRadius: '1px',
-          }}
-        >
-          <div className="loading-bar" />
+        {/* Pixel loading bar */}
+        <div style={{
+          width: '240px', height: '10px',
+          background: '#12161e',
+          border: '2px solid #2a2e3e',
+          margin: '0 auto 20px',
+          overflow: 'hidden',
+          padding: '1px',
+        }}>
+          <div style={{
+            width: `${barWidth}%`,
+            height: '100%',
+            background: '#ff6b35',
+            transition: 'width 0.15s steps(4)',
+            imageRendering: 'pixelated',
+          }} />
         </div>
 
-        <span
-          style={{
-            fontFamily: 'var(--font-ui)',
-            fontSize: '15px',
-            fontWeight: 600,
-            color: '#8888a0',
-            letterSpacing: '0.15em',
-          }}
-        >
+        <span style={{
+          fontFamily: 'var(--font-pixel)',
+          fontSize: '9px',
+          color: '#6b7080',
+          letterSpacing: '0.15em',
+        }}>
           CONNECTING{dots}
         </span>
       </div>

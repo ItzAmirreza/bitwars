@@ -97,7 +97,7 @@ interface ActiveProjectile {
 }
 
 // Shared geometry/material for all projectile meshes
-const _sphereGeo = new THREE.SphereGeometry(1, 8, 6);
+const _boxGeo = new THREE.BoxGeometry(1, 1, 1);
 
 export class ProjectileManager {
   private projectiles: ActiveProjectile[] = [];
@@ -294,7 +294,7 @@ export class ProjectileManager {
       transparent: true,
       opacity: 0.9,
     });
-    const mesh = new THREE.Mesh(_sphereGeo, mat);
+    const mesh = new THREE.Mesh(_boxGeo, mat);
     mesh.scale.setScalar(cfg.size);
     mesh.position.copy(origin);
     this.scene.add(mesh);

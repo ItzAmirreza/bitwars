@@ -28,9 +28,9 @@ function CompassBar({ heading }: { heading: number }) {
       height: '20px',
       position: 'relative',
       overflow: 'hidden',
-      borderBottom: '1px solid rgba(255,255,255,0.1)',
+      borderBottom: '2px solid #1a1e2e',
     }}>
-      {/* Center marker */}
+      {/* Center marker - square pixel */}
       <div style={{
         position: 'absolute',
         left: '50%',
@@ -38,8 +38,7 @@ function CompassBar({ heading }: { heading: number }) {
         bottom: 0,
         width: '2px',
         transform: 'translateX(-50%)',
-        background: 'var(--c-green)',
-        boxShadow: '0 0 6px var(--c-green)',
+        background: '#ff6b35',
         zIndex: 2,
       }} />
       {ticks.map((tick, i) => (
@@ -54,19 +53,18 @@ function CompassBar({ heading }: { heading: number }) {
         }}>
           {tick.label && (
             <span style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: tick.label.length === 1 ? '10px' : '8px',
-              color: tick.label === 'N' ? 'var(--c-red)' : tick.label.length === 1 ? 'var(--c-text)' : 'var(--c-muted)',
-              fontWeight: tick.label.length === 1 ? 'bold' : 'normal',
+              fontFamily: 'var(--font-pixel)',
+              fontSize: tick.label.length === 1 ? '7px' : '6px',
+              color: tick.label === 'N' ? '#ff2d78' : tick.label.length === 1 ? '#e8e8f0' : '#4a4e5e',
+              fontWeight: 'normal',
               letterSpacing: '0.05em',
               lineHeight: '1',
-              textShadow: tick.label === 'N' ? '0 0 6px var(--c-red)' : 'none',
             }}>
               {tick.label}
             </span>
           )}
           <div style={{
-            width: '1px',
+            width: tick.major ? '2px' : '1px',
             height: tick.major ? '6px' : '4px',
             background: tick.major ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.15)',
           }} />
@@ -92,145 +90,93 @@ export interface TopHudBarProps {
   openLoadout: () => void;
 }
 
+const hudBtnBase: React.CSSProperties = {
+  fontFamily: 'var(--font-pixel)',
+  fontSize: '7px',
+  background: 'rgba(12,16,24,0.85)',
+  border: '2px solid #1a1e2e',
+  letterSpacing: '0.08em',
+  cursor: 'pointer',
+  padding: '4px 8px',
+  transition: 'all 0.1s',
+};
+
 export function TopHudBar({
-  showSettings,
-  setShowSettings,
-  loadoutOpen,
-  chatOpen,
-  username,
-  roundTimer,
-  playerCount,
-  fps,
-  serverTps,
-  heading,
-  locked,
-  handleLeave,
-  openLoadout,
+  showSettings, setShowSettings, loadoutOpen, chatOpen, username,
+  roundTimer, playerCount, fps, serverTps, heading, locked, handleLeave, openLoadout,
 }: TopHudBarProps) {
   return (
     <div className="absolute top-0 left-0 right-0 z-10 pointer-events-none">
       <div style={{
-        background: 'linear-gradient(180deg, rgba(6,8,16,0.8) 0%, rgba(6,8,16,0.3) 70%, transparent 100%)',
-        paddingBottom: '8px',
+        background: 'rgba(10,12,20,0.85)',
+        borderBottom: '2px solid #1a1e2e',
+        paddingBottom: '4px',
       }}>
-        {/* Top row: buttons + round timer + info */}
+        {/* Top row */}
         <div className="flex items-center justify-between px-4 py-2">
           {/* Left: buttons + player name */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={handleLeave}
-              className="pointer-events-auto cursor-pointer px-3 py-1 hud-btn"
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '10px',
-                color: 'var(--c-muted)',
-                background: 'rgba(6,8,16,0.6)',
-                border: '1px solid var(--c-border)',
-                letterSpacing: '0.1em',
-                transition: 'all 0.2s',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'var(--c-red)';
-                e.currentTarget.style.color = 'var(--c-red)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'var(--c-border)';
-                e.currentTarget.style.color = 'var(--c-muted)';
-              }}
+              className="pointer-events-auto"
+              style={{ ...hudBtnBase, color: '#6b7080' }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#ff2d78'; e.currentTarget.style.color = '#ff2d78'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#1a1e2e'; e.currentTarget.style.color = '#6b7080'; }}
             >
               [ESC] EXIT
             </button>
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="pointer-events-auto cursor-pointer px-3 py-1 hud-btn"
+              className="pointer-events-auto"
               style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '10px',
-                color: showSettings ? 'var(--c-green)' : 'var(--c-muted)',
-                background: 'rgba(6,8,16,0.6)',
-                border: `1px solid ${showSettings ? 'var(--c-green)' : 'var(--c-border)'}`,
-                letterSpacing: '0.1em',
-                transition: 'all 0.2s',
+                ...hudBtnBase,
+                color: showSettings ? '#ff6b35' : '#6b7080',
+                borderColor: showSettings ? '#ff6b35' : '#1a1e2e',
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'var(--c-green)';
-                e.currentTarget.style.color = 'var(--c-green)';
-              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#ff6b35'; e.currentTarget.style.color = '#ff6b35'; }}
               onMouseLeave={(e) => {
-                if (!showSettings) {
-                  e.currentTarget.style.borderColor = 'var(--c-border)';
-                  e.currentTarget.style.color = 'var(--c-muted)';
-                }
+                if (!showSettings) { e.currentTarget.style.borderColor = '#1a1e2e'; e.currentTarget.style.color = '#6b7080'; }
               }}
             >
               SETTINGS
             </button>
             <button
-              className="pointer-events-auto cursor-pointer px-3 py-1 hud-btn"
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '10px',
-                color: 'var(--c-muted)',
-                background: 'rgba(6,8,16,0.6)',
-                border: '1px solid var(--c-border)',
-                letterSpacing: '0.1em',
-              }}
+              className="pointer-events-auto"
+              style={{ ...hudBtnBase, color: '#6b7080' }}
               title="Press F8 in-game"
             >
               [F8] TEST
             </button>
             <button
               onClick={openLoadout}
-              className="pointer-events-auto cursor-pointer px-3 py-1 hud-btn"
+              className="pointer-events-auto"
               style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '10px',
-                color: loadoutOpen ? 'var(--c-cyan)' : 'var(--c-muted)',
-                background: 'rgba(6,8,16,0.6)',
-                border: `1px solid ${loadoutOpen ? 'var(--c-cyan)' : 'var(--c-border)'}`,
-                letterSpacing: '0.1em',
-                transition: 'all 0.2s',
+                ...hudBtnBase,
+                color: loadoutOpen ? '#00e5ff' : '#6b7080',
+                borderColor: loadoutOpen ? '#00e5ff' : '#1a1e2e',
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'var(--c-cyan)';
-                e.currentTarget.style.color = 'var(--c-cyan)';
-              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#00e5ff'; e.currentTarget.style.color = '#00e5ff'; }}
               onMouseLeave={(e) => {
-                if (!loadoutOpen) {
-                  e.currentTarget.style.borderColor = 'var(--c-border)';
-                  e.currentTarget.style.color = 'var(--c-muted)';
-                }
+                if (!loadoutOpen) { e.currentTarget.style.borderColor = '#1a1e2e'; e.currentTarget.style.color = '#6b7080'; }
               }}
             >
               [E] LOADOUT
             </button>
 
-            {/* Player name display */}
             {username && (
               <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                marginLeft: '8px',
-                padding: '3px 10px',
-                background: 'rgba(6,8,16,0.5)',
-                border: '1px solid rgba(0,255,65,0.15)',
-                borderLeft: '2px solid var(--c-green)',
+                display: 'flex', alignItems: 'center', gap: '6px',
+                marginLeft: '6px', padding: '3px 8px',
+                background: 'rgba(12,16,24,0.85)',
+                border: '2px solid #1a1e2e',
+                borderLeft: '3px solid #76ff03',
               }}>
-                <div style={{
-                  width: '6px',
-                  height: '6px',
-                  borderRadius: '50%',
-                  background: 'var(--c-green)',
-                  boxShadow: '0 0 6px var(--c-green)',
-                }} />
+                <div style={{ width: '6px', height: '6px', background: '#76ff03' }} />
                 <span style={{
-                  fontFamily: 'var(--font-ui)',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  color: 'var(--c-green)',
-                  letterSpacing: '0.08em',
-                  textShadow: '0 0 8px rgba(0,255,65,0.3)',
+                  fontFamily: 'var(--font-pixel)',
+                  fontSize: '7px',
+                  color: '#76ff03',
+                  letterSpacing: '0.06em',
                 }}>
                   {username}
                 </span>
@@ -238,23 +184,15 @@ export function TopHudBar({
             )}
           </div>
 
-          {/* Center: round timer (Valorant style) */}
+          {/* Center: round timer */}
           {roundTimer && (
             <div style={{
-              position: 'absolute',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '2px',
+              position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px',
             }}>
               <span style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '8px',
-                color: 'var(--c-muted)',
-                letterSpacing: '0.2em',
-                textTransform: 'uppercase',
+                fontFamily: 'var(--font-pixel)', fontSize: '6px',
+                color: '#4a4e5e', letterSpacing: '0.2em',
               }}>
                 ROUND
               </span>
@@ -262,14 +200,12 @@ export function TopHudBar({
                 fontFamily: 'var(--font-mono)',
                 fontSize: '22px',
                 fontWeight: 'bold',
-                color: roundTimer.startsWith('0:') ? 'var(--c-red)' : 'var(--c-text)',
+                color: roundTimer.startsWith('0:') ? '#ff2d78' : '#e8e8f0',
                 letterSpacing: '0.08em',
-                textShadow: roundTimer.startsWith('0:') ? '0 0 12px var(--c-red)' : '0 0 6px rgba(255,255,255,0.15)',
                 lineHeight: '1',
-                padding: '4px 16px',
-                background: 'rgba(6,8,16,0.7)',
-                border: `1px solid ${roundTimer.startsWith('0:') ? 'rgba(255,0,51,0.4)' : 'var(--c-border)'}`,
-                borderRadius: '2px',
+                padding: '4px 14px',
+                background: 'rgba(12,16,24,0.9)',
+                border: `2px solid ${roundTimer.startsWith('0:') ? '#ff2d78' : '#1a1e2e'}`,
                 animation: roundTimer.startsWith('0:') ? 'hud-critical-flash 1s ease-in-out infinite' : 'none',
               }}>
                 {roundTimer}
@@ -277,21 +213,17 @@ export function TopHudBar({
             </div>
           )}
 
-          {/* Right: alive counter + player count + FPS */}
+          {/* Right: alive + FPS */}
           <div className="flex items-center gap-4">
             <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '3px 10px',
-              background: 'rgba(6,8,16,0.5)',
-              border: '1px solid var(--c-border)',
+              display: 'flex', alignItems: 'center', gap: '6px',
+              padding: '3px 8px',
+              background: 'rgba(12,16,24,0.85)',
+              border: '2px solid #1a1e2e',
             }}>
               <span style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '9px',
-                color: 'var(--c-muted)',
-                letterSpacing: '0.12em',
+                fontFamily: 'var(--font-pixel)', fontSize: '6px',
+                color: '#4a4e5e', letterSpacing: '0.12em',
               }}>
                 ALIVE
               </span>
@@ -299,24 +231,21 @@ export function TopHudBar({
                 fontFamily: 'var(--font-mono)',
                 fontSize: '14px',
                 fontWeight: 'bold',
-                color: 'var(--c-green)',
-                textShadow: '0 0 6px rgba(0,255,65,0.3)',
+                color: '#76ff03',
                 lineHeight: '1',
               }}>
                 {playerCount}
               </span>
             </div>
             <span style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '10px',
-              color: 'var(--c-muted2)',
+              fontFamily: 'var(--font-pixel)', fontSize: '6px', color: '#4a4e5e',
             }}>
               {fps} FPS / {serverTps} TPS
             </span>
           </div>
         </div>
 
-        {/* Compass bar (centered) */}
+        {/* Compass */}
         {locked && !chatOpen && !loadoutOpen && (
           <div className="flex justify-center">
             <CompassBar heading={heading} />

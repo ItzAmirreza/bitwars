@@ -41,18 +41,14 @@ varying vec3 vColor;
 varying float vAlpha;
 
 void main() {
-    float dist = length(gl_PointCoord - vec2(0.5));
-    if (dist > 0.5) discard;
+    vec2 uv = gl_PointCoord;
 
-    // Soft core + outer glow
-    float core = 1.0 - smoothstep(0.0, 0.2, dist);
-    float glow = 1.0 - smoothstep(0.1, 0.5, dist);
-    float alpha = (core * 0.9 + glow * 0.5) * vAlpha;
+    // Hard-edged square with slight inner brightness
+    float inner = step(0.2, uv.x) * step(0.2, uv.y)
+                * step(0.2, 1.0 - uv.x) * step(0.2, 1.0 - uv.y);
 
-    // Brighten core for bloom-like effect
-    vec3 color = vColor + vColor * core * 0.4;
-
-    gl_FragColor = vec4(color, alpha);
+    vec3 color = vColor + vColor * inner * 0.3;
+    gl_FragColor = vec4(color, vAlpha);
 }
 `;
 
