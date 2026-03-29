@@ -21,11 +21,8 @@ fn resolve_vehicle_weapon_index(vehicle_type: u8, slot: u8) -> u8 {
             _ => constants::jet_weapon_slot2(),
         }
     } else if vehicle_type == constants::vehicle_type_anti_air() {
-        if slot == 0 {
-            constants::aa_weapon_slot0()
-        } else {
-            constants::aa_weapon_slot1()
-        }
+        // AA has only 1 weapon slot (CRAM)
+        constants::aa_weapon_slot0()
     } else {
         // Helicopter: slot == index
         slot
@@ -83,9 +80,11 @@ pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(
     if vehicle.pilot_identity != Some(sender) {
         return Err("Not the pilot".to_string());
     }
-    // Max slots: 2 for helicopter, 3 for jet
+    // Max slots: 1 for AA, 2 for helicopter, 3 for jet
     let max_slots: u8 = if vehicle.vehicle_type == constants::vehicle_type_fighter_jet() {
         3
+    } else if vehicle.vehicle_type == constants::vehicle_type_anti_air() {
+        1
     } else {
         2
     };
@@ -134,7 +133,12 @@ pub fn fire_vehicle_weapon(
         return Err("Vehicle is destroyed".to_string());
     }
 
-    let slot = vehicle.weapon_type;
+    // Clamp slot to 0 for AA (self-heal legacy rows stuck on old SAM slot)
+    let slot = if vehicle.vehicle_type == constants::vehicle_type_anti_air() {
+        0
+    } else {
+        vehicle.weapon_type
+    };
     let resolved_idx = resolve_vehicle_weapon_index(vehicle.vehicle_type, slot);
     if resolved_idx >= weapons::num_vehicle_weapons() {
         return Err("Invalid vehicle weapon".to_string());
@@ -214,14 +218,6 @@ pub fn fire_vehicle_weapon(
             z: fwd_z * speed * 0.3,
         };
         (bomb_origin, bomb_dir)
-    } else if vehicle.vehicle_type == constants::vehicle_type_anti_air() && slot == 1 {
-        // SAM missile: larger offset to clear AA hitbox
-        let origin = Vec3 {
-            x: muzzle_base.x + normalized_dir.x * 6.0,
-            y: muzzle_base.y + 2.0,
-            z: muzzle_base.z + normalized_dir.z * 6.0,
-        };
-        (origin, direction.clone())
     } else {
         let origin = Vec3 {
             x: muzzle_base.x + normalized_dir.x * 3.5,
@@ -280,6 +276,7 @@ pub fn fire_vehicle_weapon(
                     sender,
                     impact,
                     def.damage,
+                    def.player_damage(),
                     def.radius,
                     weapon_code,
                     vehicle_id,
@@ -310,6 +307,7 @@ pub fn fire_vehicle_weapon(
     }
 
     // Standard hitscan path (minigun)
+    // Use scaled damage for infantry targets, full damage for vehicles
     apply_hitscan_player_damage(
         ctx,
         sender,
@@ -317,7 +315,7 @@ pub fn fire_vehicle_weapon(
         &shot_direction,
         dir_len,
         &hit_players,
-        def.damage,
+        def.player_damage(),
         def.max_range,
         weapon_code,
     );
@@ -463,6 +461,7 @@ pub fn vehicle_projectile_impact(
     consume_projectile_shot(ctx, shot, &impact_pos);
 
     // Standard projectile impact (rockets, carpet bomb, etc.)
+    // Use scaled damage for infantry targets, full damage for vehicles
     let hit_players = collect_all_player_ids(ctx);
     let hit_vehicles = collect_all_vehicle_ids(ctx);
     apply_splash_player_damage(
@@ -470,7 +469,7 @@ pub fn vehicle_projectile_impact(
         sender,
         &impact_pos,
         &hit_players,
-        def.damage,
+        def.player_damage(),
         def.radius,
         weapon_code,
     );
@@ -525,7 +524,12 @@ pub fn reload_vehicle_weapon(ctx: &ReducerContext) -> Result<(), String> {
         return Err("Not the pilot".to_string());
     }
 
-    let slot = vehicle.weapon_type;
+    // Clamp slot to 0 for AA (self-heal legacy rows stuck on old SAM slot)
+    let slot = if vehicle.vehicle_type == constants::vehicle_type_anti_air() {
+        0
+    } else {
+        vehicle.weapon_type
+    };
     let resolved_idx = resolve_vehicle_weapon_index(vehicle.vehicle_type, slot);
     if resolved_idx >= weapons::num_vehicle_weapons() {
         return Err("Invalid vehicle weapon".to_string());

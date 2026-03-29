@@ -62,6 +62,11 @@ pub fn tick_anti_air(
         }
     }
 
+    // ── Normalize weapon slot (self-heal legacy rows stuck on old SAM slot 1) ──
+    if vehicle.weapon_type != 0 {
+        vehicle.weapon_type = 0;
+    }
+
     // ── Stationary emplacement — no movement, only turret aim via pilot look ──
     // Zero out velocity (emplacement doesn't move)
     entity.vel.x = 0.0;

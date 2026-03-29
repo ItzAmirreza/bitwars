@@ -116,8 +116,7 @@ pub fn spawn_anti_air(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
         updated_at: ctx.timestamp,
     });
 
-    let autocannon = weapons::get_vehicle_weapon(aa_weapon_slot0());
-    let sam = weapons::get_vehicle_weapon(aa_weapon_slot1());
+    let cram = weapons::get_vehicle_weapon(aa_weapon_slot0());
 
     ctx.db.vehicle().insert(Vehicle {
         entity_id: entity.id,
@@ -136,8 +135,8 @@ pub fn spawn_anti_air(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
         rotor_spin: 0.0,
         health: aa_health_max(),
         weapon_type: 0,
-        weapon_ammo_primary: autocannon.max_ammo,
-        weapon_ammo_secondary: sam.max_ammo,
+        weapon_ammo_primary: cram.max_ammo,
+        weapon_ammo_secondary: 0,
         weapon_ammo_tertiary: 0,
         weapon_last_fire: ctx.timestamp,
         created_at: ctx.timestamp,

@@ -104,7 +104,7 @@ const CLIENT_PROJECTILE_CONFIGS: Record<number, ProjectileConfig> = {
 
 const WEAPON_DESCRIPTIONS: Record<number, string> = {
   0: 'Versatile assault rifle. Reliable at any range.',
-  1: '7-pellet burst. Devastating up close.',
+  1: '7-pellet spread. Devastating up close, weak at range.',
   2: 'Explosive rocket. Destroys terrain and players.',
   3: 'Rapid fire suppression. Best sustained DPS.',
   4: 'Arcing grenades. Largest blast radius.',
@@ -147,7 +147,7 @@ function buildVehicleWeaponDefinition(cfg: VehicleWeaponConfig): VehicleWeaponDe
     1: { x: 0, y: 0 },          // Rockets
     2: { x: 0, y: 0 },          // Kinetic Penetrator
     3: { x: 0, y: 0 },          // Carpet Bomb
-    4: { x: 0.025, y: 0.015 },  // Autocannon
+    4: { x: 0.03, y: 0.02 },   // CRAM
     5: { x: 0, y: 0 },          // SAM Missile
     6: { x: 0, y: 0 },          // Air Missile
   };

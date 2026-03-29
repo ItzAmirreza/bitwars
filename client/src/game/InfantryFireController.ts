@@ -117,6 +117,15 @@ export class InfantryFireController {
       ctx.vfx.emitTracer(from, result.tracerEnd, isMachineGun ? 0x99eeff : 0x88bbff);
     }
 
+    // Shotgun pellet tracers
+    if (isShotgun && result.pelletEnds) {
+      const from = ctx.camera.position.clone()
+        .add(new THREE.Vector3(0, 0, -1).applyQuaternion(ctx.camera.quaternion));
+      for (const pelletEnd of result.pelletEnds) {
+        ctx.vfx.emitTracer(from, pelletEnd, 0xffaa44);
+      }
+    }
+
     // Block hit
     if (result.hitPos) {
       const hitAudioPos = { x: result.hitPos.x + 0.5, y: result.hitPos.y + 0.5, z: result.hitPos.z + 0.5 };

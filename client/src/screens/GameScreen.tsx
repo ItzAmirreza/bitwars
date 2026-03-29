@@ -71,6 +71,7 @@ export function GameScreen({ active }: GameScreenProps) {
     vehicleThrottle: 0,
     vehicleReloading: false,
     vehicleWeaponSlots: [{ name: 'MINIGUN', color: '#ffaa00' }, { name: 'ROCKETS', color: '#ff4400' }],
+    aaTargets: [],
     nearVehicle: false,
     nearVehicleName: null,
     activeBuffs: [],
@@ -630,6 +631,54 @@ export function GameScreen({ active }: GameScreenProps) {
           vehicleWeapon={state.vehicleWeapon}
           vehicleWeaponColor={state.vehicleWeaponSlots[state.vehicleWeapon]?.color}
         />
+      )}
+
+      {/* ═══ AA CRAM TARGET TRACKING HUD ═══ */}
+      {state.locked && !chatOpen && !loadoutOpen && state.aaTargets.length > 0 && (
+        <div className="absolute inset-0 pointer-events-none z-10">
+          {state.aaTargets.map((t, i) => (
+            <div key={i} style={{
+              position: 'absolute',
+              left: `${t.screenX * 100}%`,
+              top: `${t.screenY * 100}%`,
+              transform: 'translate(-50%, -50%)',
+            }}>
+              {/* Diamond bracket marker */}
+              <svg width="40" height="40" viewBox="0 0 40 40" style={{ display: 'block' }}>
+                <rect
+                  x="6" y="6" width="28" height="28"
+                  rx="1"
+                  transform="rotate(45 20 20)"
+                  fill="none"
+                  stroke="#ff3333"
+                  strokeWidth="2"
+                  opacity={0.85}
+                />
+                {/* Corner ticks */}
+                <line x1="20" y1="2" x2="20" y2="7" stroke="#ff3333" strokeWidth="1.5" opacity="0.7" />
+                <line x1="20" y1="33" x2="20" y2="38" stroke="#ff3333" strokeWidth="1.5" opacity="0.7" />
+                <line x1="2" y1="20" x2="7" y2="20" stroke="#ff3333" strokeWidth="1.5" opacity="0.7" />
+                <line x1="33" y1="20" x2="38" y2="20" stroke="#ff3333" strokeWidth="1.5" opacity="0.7" />
+              </svg>
+              {/* Distance label */}
+              <div style={{
+                position: 'absolute',
+                top: '42px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                whiteSpace: 'nowrap',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '8px',
+                fontWeight: 'bold',
+                color: '#ff3333',
+                textShadow: '0 0 4px rgba(255,50,50,0.6)',
+                letterSpacing: '0.05em',
+              }}>
+                {Math.round(t.distance)}m
+              </div>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* Click to deploy overlay */}
