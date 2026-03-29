@@ -163,6 +163,7 @@ export function connect(
             `SELECT * FROM entity WHERE kind = ${ENTITY_KINDS.Vehicle}`,
             `SELECT * FROM vehicle WHERE vehicle_type = ${VEHICLE_TYPES.Helicopter}`,
             `SELECT * FROM vehicle WHERE vehicle_type = ${VEHICLE_TYPES.FighterJet}`,
+            `SELECT * FROM vehicle WHERE vehicle_type = ${VEHICLE_TYPES.AntiAir}`,
           ]) as { unsubscribe: () => void; isEnded: () => boolean };
 
         setWorldChunkSubscription(DEFAULT_WORLD_CHUNK_CX, DEFAULT_WORLD_CHUNK_CZ, WORLD_CHUNK_AOI_DEFAULT_RADIUS, true);

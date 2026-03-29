@@ -153,6 +153,41 @@ export class VehicleFireController {
 
     const isHitscan = wep.projectileSpeed === 0;
 
+    // ── KINETIC PENETRATOR PATH (hitscan, weapon index 2) ──
+    if (resolvedIdx === 2) {
+      // Fire straight down from jet position
+      const downDir = new THREE.Vector3(0, -1, 0);
+      const fireOrigin = new THREE.Vector3(pose.x, pose.y - 1.0, pose.z);
+
+      // Raycast downward to find ground hit
+      const kpHit = ctx.weapons.raycastVoxels(fireOrigin, downDir, wep.maxRange);
+
+      const hitBlocks: { x: number; y: number; z: number }[] = [];
+      if (kpHit) {
+        hitBlocks.push({ x: kpHit.x, y: kpHit.y, z: kpHit.z });
+
+        // Client prediction: drill 3x3 column + base explosion
+        this.predictKineticPenetratorStrike(kpHit.x, kpHit.y, kpHit.z, wep.radius);
+      }
+
+      // VFX: beam from jet to ground + explosion
+      if (kpHit) {
+        const hitCenter = new THREE.Vector3(kpHit.x + 0.5, kpHit.y + 0.5, kpHit.z + 0.5);
+        ctx.vfx.emitKineticBeam(fireOrigin, hitCenter);
+        ctx.vfx.emitExplosion(kpHit.x, kpHit.y, kpHit.z, 4);
+      }
+
+      ctx.audio.playKineticPenetratorFire(ctx.localAudioSource(-0.1));
+      ctx.vfx.shake(1.0);
+
+      // Sync to server
+      this.syncVehicleFireToServer(downDir, [], [], hitBlocks);
+
+      // Rebuild chunks
+      ctx.world.rebuildDirtyChunks(ctx.scene, this.impactChunkApplyBudget);
+      return;
+    }
+
     if (!isHitscan) {
       // ── CARPET BOMB PATH (weapon index 3) ──
       if (resolvedIdx === 3) {
@@ -185,8 +220,8 @@ export class VehicleFireController {
         return;
       }
 
-      // ── AIR MISSILE PATH (weapon index 4) ──
-      if (resolvedIdx === 4) {
+      // ── AIR MISSILE PATH (weapon index 6) ──
+      if (resolvedIdx === 6) {
         // Forward-firing air missile from jet nose
         const missileOrigin = new THREE.Vector3(
           pose.x + dir.x * 5.0,
@@ -204,7 +239,7 @@ export class VehicleFireController {
         return;
       }
 
-      // ── PROJECTILE PATH (Rockets / Bunker Buster) ──
+      // ── PROJECTILE PATH (Rockets / SAM) ──
       ctx.projectileManager.spawnLocalVehicle(
         2, origin, dir,
         resolvedIdx, ctx.mountedVehicleId,
@@ -213,17 +248,9 @@ export class VehicleFireController {
       // Sync to server
       this.syncVehicleFireToServer(dir, [], [], []);
 
-      // Audio + VFX
-      if (resolvedIdx === 2) {
-        // Bunker buster: heavier launch sound
-        ctx.audio.playBunkerBusterDrop(ctx.localAudioSource(-0.1));
-        ctx.vfx.emitMuzzleFlashAt(origin, dir, 0xff2200);
-        ctx.vfx.shake(0.8);
-      } else {
-        ctx.audio.playVehicleRocket(ctx.localAudioSource(-0.1));
-        ctx.vfx.emitMuzzleFlashAt(origin, dir, 0xff4400);
-        ctx.vfx.shake(0.6);
-      }
+      ctx.audio.playVehicleRocket(ctx.localAudioSource(-0.1));
+      ctx.vfx.emitMuzzleFlashAt(origin, dir, 0xff4400);
+      ctx.vfx.shake(0.6);
       return;
     }
 
@@ -310,6 +337,56 @@ export class VehicleFireController {
 
     // Rebuild affected chunks (capped to avoid frame spikes from large backlogs)
     ctx.world.rebuildDirtyChunks(ctx.scene, this.impactChunkApplyBudget);
+  }
+
+  // ── KINETIC PENETRATOR CLIENT PREDICTION ──
+
+  /** Predict kinetic penetrator destruction: 3x3 column down + sphere at base */
+  private predictKineticPenetratorStrike(hitX: number, hitY: number, hitZ: number, radius: number): void {
+    const ctx = this.ctx;
+    const maxDrill = 30;
+    let finalY = hitY;
+
+    // Phase 1: Drill 3x3 column downward
+    for (let dy = 0; dy < maxDrill; dy++) {
+      const y = hitY - dy;
+      if (y < 0) break;
+      let hitBedrock = false;
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const bt = ctx.world.getBlock(hitX + dx, y, hitZ + dz);
+          if (bt === BlockType.Bedrock) { hitBedrock = true; continue; }
+          if (bt !== 0) {
+            ctx.weapons.trackPendingDestruction(hitX + dx, y, hitZ + dz, bt);
+            ctx.world.setBlock(hitX + dx, y, hitZ + dz, 0);
+          }
+        }
+      }
+      if (hitBedrock) { finalY = y + 1; break; }
+      finalY = y;
+    }
+
+    // Phase 2: Foundation explosion (sphere at bottom of shaft)
+    const r = radius;
+    const r2 = r * r;
+    for (let bx = Math.floor(hitX - r); bx <= Math.ceil(hitX + r); bx++) {
+      for (let by = Math.floor(finalY - r); by <= Math.ceil(finalY + r); by++) {
+        for (let bz = Math.floor(hitZ - r); bz <= Math.ceil(hitZ + r); bz++) {
+          const ddx = bx - hitX, ddy = by - finalY, ddz = bz - hitZ;
+          if (ddx * ddx + ddy * ddy + ddz * ddz <= r2) {
+            const bt = ctx.world.getBlock(bx, by, bz);
+            if (bt !== 0 && bt !== BlockType.Bedrock) {
+              ctx.weapons.trackPendingDestruction(bx, by, bz, bt);
+              ctx.world.setBlock(bx, by, bz, 0);
+            }
+          }
+        }
+      }
+    }
+
+    // Underground explosion VFX
+    ctx.vfx.emitExplosion(hitX, finalY, hitZ, 8);
+    ctx.audio.playKineticPenetratorDetonation({ position: { x: hitX, y: finalY, z: hitZ } });
   }
 
   // ── SERVER SYNC ──

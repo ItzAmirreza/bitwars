@@ -191,12 +191,12 @@ pub fn vehicle_type_fighter_jet() -> u8 {
     shared_config::config().vehicle_types.fighter_jet
 }
 
-/// Bunker Buster weapon index (jet slot 0).
+/// Kinetic Penetrator weapon index (jet slot 0).
 pub fn jet_weapon_slot0() -> u8 { 2 }
 /// Carpet Bomb weapon index (jet slot 1).
 pub fn jet_weapon_slot1() -> u8 { 3 }
 /// Air Missile weapon index (jet slot 2).
-pub fn jet_weapon_slot2() -> u8 { 4 }
+pub fn jet_weapon_slot2() -> u8 { 6 }
 
 /// Not in shared JSON — server-only spawn config.
 pub const SANDBOX_JET_COUNT: usize = 1;
@@ -276,6 +276,70 @@ pub fn jet_drag_unpiloted() -> f32 {
 }
 pub fn jet_velocity_blend() -> f32 {
     shared_config::config().fighter_jet.velocity_blend
+}
+
+// ── Anti-Air Vehicle ──
+// Sourced from shared/game-constants.json → antiAir + vehicleTypes
+
+pub fn vehicle_type_anti_air() -> u8 {
+    shared_config::config().vehicle_types.anti_air
+}
+
+/// Anti-Air weapon slot 0 → vehicleWeapons index 4 (AUTOCANNON)
+pub fn aa_weapon_slot0() -> u8 { 4 }
+/// Anti-Air weapon slot 1 → vehicleWeapons index 5 (SAM MISSILE)
+pub fn aa_weapon_slot1() -> u8 { 5 }
+
+/// Not in shared JSON — server-only spawn config.
+pub const SANDBOX_AA_COUNT: usize = 1;
+
+pub fn aa_scale() -> f32 {
+    shared_config::config().anti_air.scale
+}
+pub fn aa_mount_range() -> f32 {
+    shared_config::config().anti_air.mount_range
+}
+pub fn aa_min_altitude() -> f32 {
+    shared_config::config().anti_air.min_altitude
+}
+pub fn aa_max_altitude() -> f32 {
+    shared_config::config().anti_air.max_altitude
+}
+pub fn aa_cruise_speed() -> f32 {
+    shared_config::config().anti_air.cruise_speed
+}
+pub fn aa_strafe_speed() -> f32 {
+    shared_config::config().anti_air.strafe_speed
+}
+pub fn aa_max_yaw_rate() -> f32 {
+    shared_config::config().anti_air.max_yaw_rate
+}
+pub fn aa_pilot_seat_height() -> f32 {
+    shared_config::config().anti_air.pilot_seat_height
+}
+pub fn aa_health_max() -> i32 {
+    shared_config::config().anti_air.health_max
+}
+pub fn aa_hitbox_center_y() -> f32 {
+    shared_config::config().anti_air.hitbox.center_y
+}
+pub fn aa_hitbox_half_x() -> f32 {
+    shared_config::config().anti_air.hitbox.half_x
+}
+pub fn aa_hitbox_half_y() -> f32 {
+    shared_config::config().anti_air.hitbox.half_y
+}
+pub fn aa_hitbox_half_z() -> f32 {
+    shared_config::config().anti_air.hitbox.half_z
+}
+pub fn aa_drag_piloted() -> f32 {
+    shared_config::config().anti_air.drag_piloted
+}
+pub fn aa_drag_unpiloted() -> f32 {
+    shared_config::config().anti_air.drag_unpiloted
+}
+pub fn aa_horiz_blend() -> f32 {
+    shared_config::config().anti_air.horiz_blend
 }
 
 // ── Combat Validation ──

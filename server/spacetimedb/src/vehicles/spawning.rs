@@ -100,6 +100,53 @@ pub fn spawn_sandbox_helicopters(ctx: &ReducerContext) {
     log::info!("Spawned {} sandbox helicopters", spawned);
 }
 
+/// Spawn a single anti-air vehicle entity + vehicle row.
+pub fn spawn_anti_air(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
+    let entity = ctx.db.entity().insert(Entity {
+        id: 0,
+        kind: entity_kind_vehicle(),
+        subtype: vehicle_type_anti_air(),
+        pos,
+        vel: ZERO_VEL,
+        rot: Rotation { yaw, pitch: 0.0 },
+        scale: aa_scale(),
+        active: true,
+        sim_tick: 0,
+        created_at: ctx.timestamp,
+        updated_at: ctx.timestamp,
+    });
+
+    let autocannon = weapons::get_vehicle_weapon(aa_weapon_slot0());
+    let sam = weapons::get_vehicle_weapon(aa_weapon_slot1());
+
+    ctx.db.vehicle().insert(Vehicle {
+        entity_id: entity.id,
+        vehicle_type: vehicle_type_anti_air(),
+        pilot_identity: None,
+        seat_count: 1,
+        input_forward: 0.0,
+        input_strafe: 0.0,
+        input_lift: 0.0,
+        input_yaw: 0.0,
+        boosting: false,
+        input_seq: 0,
+        acked_input_seq: 0,
+        sim_tick: 0,
+        sim_updated_at: ctx.timestamp,
+        rotor_spin: 0.0,
+        health: aa_health_max(),
+        weapon_type: 0,
+        weapon_ammo_primary: autocannon.max_ammo,
+        weapon_ammo_secondary: sam.max_ammo,
+        weapon_ammo_tertiary: 0,
+        weapon_last_fire: ctx.timestamp,
+        created_at: ctx.timestamp,
+        last_input_at: ctx.timestamp,
+    });
+
+    entity.id
+}
+
 /// Spawn a single fighter jet entity + vehicle row.
 pub fn spawn_fighter_jet(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
     let entity = ctx.db.entity().insert(Entity {

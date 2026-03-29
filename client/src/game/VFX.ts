@@ -270,54 +270,57 @@ export class VFX {
     }
   }
 
-  // ── Bunker buster drill effect ──
-  emitBunkerBusterDrill(x: number, y: number, z: number, depth: number): void {
-    // Brown/grey debris shooting upward through the drill column
-    const debrisCount = Math.min(40, Math.floor(depth * 3));
-    for (let i = 0; i < debrisCount && this.particles.length < MAX_PARTICLES; i++) {
+  // ── Kinetic penetrator beam effect ──
+  emitKineticBeam(from: THREE.Vector3, to: THREE.Vector3): void {
+    // Bright cyan/white beam particles along the strike path
+    const dist = from.distanceTo(to);
+    const count = Math.min(50, Math.floor(dist * 1.5));
+    for (let i = 0; i < count && this.particles.length < MAX_PARTICLES; i++) {
       const t = Math.random();
-      const isBrown = Math.random() > 0.4;
+      // Cyan/white color variation
+      const isCyan = Math.random() > 0.3;
       let r: number, g: number, b: number;
-      if (isBrown) {
-        r = 0.45 + Math.random() * 0.2;
-        g = 0.3 + Math.random() * 0.15;
-        b = 0.15 + Math.random() * 0.1;
+      if (isCyan) {
+        r = 0.0 + Math.random() * 0.15;
+        g = 0.7 + Math.random() * 0.3;
+        b = 0.9 + Math.random() * 0.1;
       } else {
-        const v = 0.3 + Math.random() * 0.25;
-        r = v; g = v; b = v;
+        r = 0.85 + Math.random() * 0.15;
+        g = 0.9 + Math.random() * 0.1;
+        b = 1.0;
       }
+      const px = from.x + (to.x - from.x) * t + (Math.random() - 0.5) * 0.8;
+      const py = from.y + (to.y - from.y) * t + (Math.random() - 0.5) * 0.8;
+      const pz = from.z + (to.z - from.z) * t + (Math.random() - 0.5) * 0.8;
       this.particles.push({
-        x: x + 0.5 + (Math.random() - 0.5) * 1.5,
-        y: y + 0.5 - depth * t,
-        z: z + 0.5 + (Math.random() - 0.5) * 1.5,
-        vx: (Math.random() - 0.5) * 3,
-        vy: 8 + Math.random() * 14 + depth * 0.5,
-        vz: (Math.random() - 0.5) * 3,
+        x: px, y: py, z: pz,
+        vx: (Math.random() - 0.5) * 2,
+        vy: -2 + Math.random() * 4,
+        vz: (Math.random() - 0.5) * 2,
         r, g, b,
         life: 0,
-        maxLife: 0.6 + Math.random() * 0.8,
-        size: 10 + Math.random() * 8,
-        gravity: true,
+        maxLife: 0.3 + Math.random() * 0.4,
+        size: 8 + Math.random() * 10,
+        gravity: false,
       });
     }
 
-    // Orange/red underground detonation glow shooting upward through drill hole
-    const glowCount = Math.min(30, Math.floor(depth * 2));
-    for (let i = 0; i < glowCount && this.particles.length < MAX_PARTICLES; i++) {
-      const hue = 0.02 + Math.random() * 0.08;
-      const col = new THREE.Color().setHSL(hue, 1, 0.5 + Math.random() * 0.3);
+    // Impact burst at the bottom
+    for (let i = 0; i < 20 && this.particles.length < MAX_PARTICLES; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 4 + Math.random() * 8;
       this.particles.push({
-        x: x + 0.5 + (Math.random() - 0.5) * 1.0,
-        y: y + 0.5 - depth + Math.random() * depth * 0.3,
-        z: z + 0.5 + (Math.random() - 0.5) * 1.0,
-        vx: (Math.random() - 0.5) * 2,
-        vy: 12 + Math.random() * 18,
-        vz: (Math.random() - 0.5) * 2,
-        r: col.r, g: col.g, b: col.b,
+        x: to.x + (Math.random() - 0.5) * 1.5,
+        y: to.y + Math.random() * 0.5,
+        z: to.z + (Math.random() - 0.5) * 1.5,
+        vx: Math.cos(angle) * speed,
+        vy: 3 + Math.random() * 6,
+        vz: Math.sin(angle) * speed,
+        r: 0.1, g: 0.8, b: 1.0,
         life: 0,
-        maxLife: 0.4 + Math.random() * 0.6,
-        size: 14 + Math.random() * 10,
-        gravity: false,
+        maxLife: 0.4 + Math.random() * 0.5,
+        size: 12 + Math.random() * 8,
+        gravity: true,
       });
     }
   }

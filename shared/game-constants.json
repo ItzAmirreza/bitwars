@@ -32,7 +32,8 @@
 
   "vehicleTypes": {
     "Helicopter": 0,
-    "FighterJet": 1
+    "FighterJet": 1,
+    "AntiAir": 2
   },
 
   "vehicleTickIntervalMs": 33,
@@ -151,17 +152,17 @@
     },
     {
       "index": 2,
-      "name": "BUNKER BUSTER",
-      "damage": 150,
-      "radius": 10.0,
-      "fireRate": 0.4,
-      "maxAmmo": 4,
-      "maxRange": 200.0,
-      "projectileSpeed": 60.0,
-      "gravity": 25.0,
-      "delivery": "projectile",
-      "color": "#ff2200",
-      "reloadTime": 8.0
+      "name": "KINETIC PENETRATOR",
+      "damage": 120,
+      "radius": 8.0,
+      "fireRate": 0.35,
+      "maxAmmo": 3,
+      "maxRange": 300.0,
+      "projectileSpeed": 0,
+      "gravity": 0,
+      "delivery": "hitscan",
+      "color": "#00ccff",
+      "reloadTime": 10.0
     },
     {
       "index": 3,
@@ -179,6 +180,34 @@
     },
     {
       "index": 4,
+      "name": "AUTOCANNON",
+      "damage": 7,
+      "radius": 0,
+      "fireRate": 18.0,
+      "maxAmmo": 400,
+      "maxRange": 110.0,
+      "projectileSpeed": 0,
+      "gravity": 0,
+      "delivery": "hitscan",
+      "color": "#ffdd33",
+      "reloadTime": 3.5
+    },
+    {
+      "index": 5,
+      "name": "SAM MISSILE",
+      "damage": 55,
+      "radius": 5.0,
+      "fireRate": 1.8,
+      "maxAmmo": 8,
+      "maxRange": 150.0,
+      "projectileSpeed": 90.0,
+      "gravity": 2.0,
+      "delivery": "projectile",
+      "color": "#ff3333",
+      "reloadTime": 5.0
+    },
+    {
+      "index": 6,
       "name": "AIR MISSILE",
       "damage": 70,
       "radius": 4.0,
@@ -255,6 +284,37 @@
       "height": 6.0,
       "pitchMin": -1.2,
       "pitchMax": 0.52
+    }
+  },
+
+  "antiAir": {
+    "healthMax": 1100,
+    "scale": 2.0,
+    "mountRange": 7.0,
+    "minAltitude": 0.0,
+    "maxAltitude": 40.0,
+    "cruiseSpeed": 12.0,
+    "strafeSpeed": 8.0,
+    "liftSpeed": 0.0,
+    "maxYawRate": 3.5,
+    "maxPitchRate": 3.0,
+    "turretYawRate": 6.0,
+    "turretPitchRate": 4.0,
+    "pilotSeatHeight": 2.8,
+    "dragPiloted": 0.970,
+    "dragUnpiloted": 0.940,
+    "horizBlend": 0.18,
+    "hitbox": {
+      "centerY": 2.0,
+      "halfX": 4.5,
+      "halfY": 1.5,
+      "halfZ": 3.5
+    },
+    "camera": {
+      "distance": 16,
+      "height": 6.5,
+      "pitchMin": -0.8,
+      "pitchMax": 0.6
     }
   },
 
