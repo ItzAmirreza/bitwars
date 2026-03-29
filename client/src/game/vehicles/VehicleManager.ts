@@ -127,8 +127,8 @@ export default class VehicleManager {
   vehiclePilotPitch = 0;
   vehicleWeaponIndex = 0;
   lastVehicleFireAt = 0;
-  vehicleAmmo: [number, number] = [300, 16];
-  vehicleReloadingUntil: [number, number] = [0, 0];
+  vehicleAmmo: [number, number, number] = [300, 16, 0];
+  vehicleReloadingUntil: [number, number, number] = [0, 0, 0];
   vehicleCameraDistance = 14;
   jetThrottle = 0; // 0..1 persistent throttle level
 
@@ -200,7 +200,7 @@ export default class VehicleManager {
   getResolvedVehicleWeaponIndex(): number {
     const vt = this.getMountedVehicleType();
     if (vt && vt.typeId === VEHICLE_TYPES.FighterJet) {
-      // Jet slot 0 → weapon index 2 (Bunker Buster), slot 1 → weapon index 3 (Carpet Bomb)
+      // Jet slot 0→2 (Bunker Buster), 1→3 (Carpet Bomb), 2→4 (Air Missile)
       return this.vehicleWeaponIndex + 2;
     }
     return this.vehicleWeaponIndex;

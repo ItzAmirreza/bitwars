@@ -77,8 +77,8 @@ export class VehicleFireController {
   tickVehicleReload(): void {
     const ctx = this.ctx;
     const now = performance.now();
-    // Only iterate over the 2 weapon slots (ammo array has 2 entries)
-    for (let slot = 0; slot < 2; slot++) {
+    // Iterate over all weapon slots (up to 3 for jets)
+    for (let slot = 0; slot < 3; slot++) {
       if (ctx.vehicleManager.vehicleReloadingUntil[slot] > 0 && now >= ctx.vehicleManager.vehicleReloadingUntil[slot]) {
         // Resolve the actual weapon index for this slot to get correct maxAmmo
         const savedSlot = ctx.vehicleManager.vehicleWeaponIndex;
@@ -182,6 +182,25 @@ export class VehicleFireController {
         ctx.audio.playCarpetBombDrop(ctx.localAudioSource(-0.1));
         ctx.vfx.emitMuzzleFlashAt(bombOrigin, bombDir, 0xff6600);
         ctx.vfx.shake(0.3);
+        return;
+      }
+
+      // ── AIR MISSILE PATH (weapon index 4) ──
+      if (resolvedIdx === 4) {
+        // Forward-firing air missile from jet nose
+        const missileOrigin = new THREE.Vector3(
+          pose.x + dir.x * 5.0,
+          pose.y + 0.5,
+          pose.z + dir.z * 5.0,
+        );
+        ctx.projectileManager.spawnLocalVehicle(
+          2, missileOrigin, dir,
+          resolvedIdx, ctx.mountedVehicleId,
+        );
+        this.syncVehicleFireToServer(dir, [], [], []);
+        ctx.audio.playVehicleRocket(ctx.localAudioSource(-0.1));
+        ctx.vfx.emitMuzzleFlashAt(missileOrigin, dir, 0x00ccff);
+        ctx.vfx.shake(0.4);
         return;
       }
 

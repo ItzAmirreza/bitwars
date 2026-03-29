@@ -471,6 +471,12 @@ body {
   100% { transform: scale(1); opacity: 0.9; }
 }
 
+/* Air missile targeting scan rotation */
+@keyframes air-missile-scan {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 /* Death screen fade in */
 @keyframes death-fade-in {
   from { opacity: 0; }

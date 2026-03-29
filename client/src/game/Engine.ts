@@ -1085,9 +1085,10 @@ export class Engine {
     }
     if (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3') {
       if (this.mountedVehicleId !== 0) {
-        // Vehicle weapon switching: 1=Minigun, 2=Rockets
+        // Vehicle weapon switching: 1/2/3
         const slot = parseInt(e.code.charAt(5), 10) - 1;
-        if (slot >= 0 && slot < 2 && slot !== this.vehicleManager.vehicleWeaponIndex) {
+        const maxSlots = this.vehicleManager.getMountedVehicleType()?.typeId === 1 ? 3 : 2; // jet=3, heli=2
+        if (slot >= 0 && slot < maxSlots && slot !== this.vehicleManager.vehicleWeaponIndex) {
           this.vehicleManager.vehicleWeaponIndex = slot;
           this.audio.playSwitch(this.localAudioSource(-0.1));
           // Sync to server
@@ -1276,6 +1277,7 @@ export class Engine {
     else if (weaponIdx === 101) this.audio.playVehicleRocket(spatial);  // Rockets
     else if (weaponIdx === 102) this.audio.playBunkerBusterDrop(spatial); // Bunker Buster
     else if (weaponIdx === 103) this.audio.playCarpetBombDrop(spatial);   // Carpet Bomb
+    else if (weaponIdx === 104) this.audio.playVehicleRocket(spatial);    // Air Missile
   }
 
   private localAudioSource(heightOffset = 0): {
@@ -1617,19 +1619,24 @@ export class Engine {
             this.vehicleManager.lastVehicleFireAt = 0;
             this.vehicleManager.vehicleReloadingUntil[0] = 0;
             this.vehicleManager.vehicleReloadingUntil[1] = 0;
+            this.vehicleManager.vehicleReloadingUntil[2] = 0;
             this.vehicleManager.vehicleCameraDistance = this.vehicleManager.CAMERA_DISTANCE;
             const vRow = this.vehicleManager.getVehicleRow(this.mountedVehicleId);
             // Resolve weapon indices based on vehicle type for correct maxAmmo
             const wep0Idx = this.vehicleManager.getResolvedWeaponIndexForSlot(0);
             const wep1Idx = this.vehicleManager.getResolvedWeaponIndexForSlot(1);
+            const wep2Idx = this.vehicleManager.getResolvedWeaponIndexForSlot(2);
             const maxAmmo0 = VEHICLE_WEAPONS[wep0Idx]?.maxAmmo ?? VEHICLE_WEAPONS[0].maxAmmo;
             const maxAmmo1 = VEHICLE_WEAPONS[wep1Idx]?.maxAmmo ?? VEHICLE_WEAPONS[1].maxAmmo;
+            const maxAmmo2 = VEHICLE_WEAPONS[wep2Idx]?.maxAmmo ?? 0;
             if (vRow) {
               this.vehicleManager.vehicleAmmo[0] = Number(vRow.weaponAmmoPrimary ?? maxAmmo0);
               this.vehicleManager.vehicleAmmo[1] = Number(vRow.weaponAmmoSecondary ?? maxAmmo1);
+              this.vehicleManager.vehicleAmmo[2] = Number(vRow.weaponAmmoTertiary ?? maxAmmo2);
             } else {
               this.vehicleManager.vehicleAmmo[0] = maxAmmo0;
               this.vehicleManager.vehicleAmmo[1] = maxAmmo1;
+              this.vehicleManager.vehicleAmmo[2] = maxAmmo2;
             }
           } else {
             // Dismounting — snap camera to server player position so infantry
@@ -1742,7 +1749,7 @@ export class Engine {
           const firedAtPerf = performance.now() - approxAgeMs;
           this.projectileManager.spawnRemoteVehicle(2, origin, dir, firedAtPerf, shooterId, vehWeaponIdx, 0);
           // Muzzle flash at launch point (color varies by weapon)
-          const flashColor = vehWeaponIdx === 2 ? 0xff2200 : vehWeaponIdx === 3 ? 0xff6600 : 0xff4400;
+          const flashColor = vehWeaponIdx === 4 ? 0x00ccff : vehWeaponIdx === 2 ? 0xff2200 : vehWeaponIdx === 3 ? 0xff6600 : 0xff4400;
           this.vfx.emitMuzzleFlashAt(origin, dir, flashColor);
         } else {
           // Hitscan (minigun): tracer + muzzle flash + impact
@@ -1977,8 +1984,10 @@ export class Engine {
           this.vehicleManager.lastVehicleFireAt = 0;
           this.vehicleManager.vehicleAmmo[0] = VEHICLE_WEAPONS[0].maxAmmo;
           this.vehicleManager.vehicleAmmo[1] = VEHICLE_WEAPONS[1].maxAmmo;
+          this.vehicleManager.vehicleAmmo[2] = 0;
           this.vehicleManager.vehicleReloadingUntil[0] = 0;
           this.vehicleManager.vehicleReloadingUntil[1] = 0;
+          this.vehicleManager.vehicleReloadingUntil[2] = 0;
           this.vehicleManager.vehicleCameraDistance = this.vehicleManager.CAMERA_DISTANCE;
           this.vehicleManager.jetThrottle = 0;
           this.vehicleManager.carpetBombSide = 1;
@@ -2817,11 +2826,13 @@ export class Engine {
         const now = performance.now();
         const serverAmmoPrimary = Number(vRow.weaponAmmoPrimary ?? 0);
         const serverAmmoSecondary = Number(vRow.weaponAmmoSecondary ?? 0);
+        const serverAmmoTertiary = Number(vRow.weaponAmmoTertiary ?? 0);
         if (Number.isFinite(serverAmmoPrimary) && this.vehicleManager.vehicleReloadingUntil[0] <= now) this.vehicleManager.vehicleAmmo[0] = serverAmmoPrimary;
         if (Number.isFinite(serverAmmoSecondary) && this.vehicleManager.vehicleReloadingUntil[1] <= now) this.vehicleManager.vehicleAmmo[1] = serverAmmoSecondary;
+        if (Number.isFinite(serverAmmoTertiary) && this.vehicleManager.vehicleReloadingUntil[2] <= now) this.vehicleManager.vehicleAmmo[2] = serverAmmoTertiary;
         // Sync weapon type from server
         const serverWeaponType = Number(vRow.weaponType ?? 0);
-        if (Number.isFinite(serverWeaponType) && serverWeaponType < 2) {
+        if (Number.isFinite(serverWeaponType) && serverWeaponType < 3) {
           this.vehicleManager.vehicleWeaponIndex = serverWeaponType;
         }
       }
@@ -2894,10 +2905,18 @@ export class Engine {
       vehicleSpeed,
       vehicleThrottle: this.vehicleManager.jetThrottle,
       vehicleReloading: this.mountedVehicleId !== 0 && this.vehicleManager.vehicleReloadingUntil[this.vehicleManager.vehicleWeaponIndex] > performance.now(),
-      vehicleWeaponSlots: [
-        { name: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.name ?? '', color: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.color ?? '#fff' },
-        { name: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(1)]?.name ?? '', color: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(1)]?.color ?? '#fff' },
-      ],
+      vehicleWeaponSlots: (() => {
+        const slots = [
+          { name: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.name ?? '', color: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.color ?? '#fff' },
+          { name: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(1)]?.name ?? '', color: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(1)]?.color ?? '#fff' },
+        ];
+        const isJet = this.vehicleManager.getMountedVehicleType()?.name === 'Fighter Jet';
+        if (isJet) {
+          const wep2 = VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(2)];
+          if (wep2) slots.push({ name: wep2.name, color: wep2.color });
+        }
+        return slots;
+      })(),
       nearVehicle,
       nearVehicleName,
       bunkerBusterActive: bbActive,

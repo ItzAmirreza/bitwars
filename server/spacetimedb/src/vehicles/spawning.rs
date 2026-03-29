@@ -52,6 +52,7 @@ pub fn spawn_helicopter(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
         weapon_type: 0,
         weapon_ammo_primary: minigun.max_ammo,
         weapon_ammo_secondary: rockets.max_ammo,
+        weapon_ammo_tertiary: 0,
         weapon_last_fire: ctx.timestamp,
         created_at: ctx.timestamp,
         last_input_at: ctx.timestamp,
@@ -117,6 +118,7 @@ pub fn spawn_fighter_jet(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
 
     let bb = weapons::get_vehicle_weapon(jet_weapon_slot0());
     let cb = weapons::get_vehicle_weapon(jet_weapon_slot1());
+    let am = weapons::get_vehicle_weapon(jet_weapon_slot2());
 
     ctx.db.vehicle().insert(Vehicle {
         entity_id: entity.id,
@@ -137,6 +139,7 @@ pub fn spawn_fighter_jet(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
         weapon_type: 0,
         weapon_ammo_primary: bb.max_ammo,
         weapon_ammo_secondary: cb.max_ammo,
+        weapon_ammo_tertiary: am.max_ammo,
         weapon_last_fire: ctx.timestamp,
         created_at: ctx.timestamp,
         last_input_at: ctx.timestamp,
