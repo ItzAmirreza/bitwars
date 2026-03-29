@@ -363,6 +363,18 @@ pub fn vehicle_collision_speed_retain() -> f32 {
 pub fn vehicle_collision_min_speed() -> f32 {
     shared_config::config().vehicle_block_collision.min_speed_to_collide
 }
+/// Speed at which block-destruction capacity reaches its maximum.
+pub fn vehicle_collision_speed_destroy_reference() -> f32 {
+    shared_config::config()
+        .vehicle_block_collision
+        .speed_destroy_reference
+}
+/// Minimum fraction of the block-destruction budget available at low speed.
+pub fn vehicle_collision_min_destroy_fraction() -> f32 {
+    shared_config::config()
+        .vehicle_block_collision
+        .min_destroy_fraction
+}
 /// Max blocks destroyed per physics tick.
 pub fn vehicle_collision_max_blocks() -> usize {
     shared_config::config().vehicle_block_collision.max_blocks_per_tick

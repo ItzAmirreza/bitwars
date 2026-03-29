@@ -107,6 +107,10 @@ pub struct WeaponConfig {
     pub delivery: String,
     pub color: String,
     pub recoil: f32,
+    #[serde(default)]
+    pub pellets: u8,
+    #[serde(default)]
+    pub spread: f32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -115,6 +119,8 @@ pub struct VehicleWeaponConfig {
     pub index: u8,
     pub name: String,
     pub damage: i32,
+    #[serde(default = "default_damage_scale")]
+    pub player_damage_scale: f32,
     pub radius: f32,
     pub fire_rate: f32,
     pub max_ammo: i32,
@@ -124,6 +130,10 @@ pub struct VehicleWeaponConfig {
     pub delivery: String,
     pub color: String,
     pub reload_time: f32,
+}
+
+fn default_damage_scale() -> f32 {
+    1.0
 }
 
 #[derive(Deserialize, Debug)]
@@ -273,6 +283,8 @@ pub struct VehicleBlockCollisionConfig {
     pub damage_per_block: i32,
     pub speed_retain_per_block: f32,
     pub min_speed_to_collide: f32,
+    pub speed_destroy_reference: f32,
+    pub min_destroy_fraction: f32,
     pub max_blocks_per_tick: usize,
     pub collision_hitbox_scale: f32,
 }

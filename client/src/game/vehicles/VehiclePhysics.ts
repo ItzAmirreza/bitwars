@@ -60,8 +60,8 @@ export interface PhysicsInput {
   yaw: number;       // [-1, 1]
 }
 
-/** Returns ground surface Y (block top) at the given XZ. */
-export type GroundHeightFn = (x: number, z: number) => number;
+/** Returns ground surface Y (block top) at the given XZ, optionally capped below `maxY`. */
+export type GroundHeightFn = (x: number, z: number, maxY?: number) => number;
 
 /** Returns block type at integer coords (0 = air). */
 export type BlockQueryFn = (x: number, y: number, z: number) => number;
@@ -152,7 +152,7 @@ export function tickHelicopter(
   }
 
   // ── Ground collision ──
-  const ground = gnd(nx, nz);
+  const ground = gnd(nx, nz, ny);
   const minAlt = ground + HELICOPTER.minAltitude;
   if (ny < minAlt) {
     ny = minAlt;
@@ -161,25 +161,6 @@ export function tickHelicopter(
   if (ny > HELICOPTER.maxAltitude) {
     ny = HELICOPTER.maxAltitude;
     if (vy > 0) vy *= 0.15;
-  }
-
-  // ── Block collision ──
-  if (blockQuery) {
-    const col = checkBlockCollision(
-      nx, ny, nz,
-      HELICOPTER.hitbox.halfX, HELICOPTER.hitbox.halfY, HELICOPTER.hitbox.halfZ,
-      HELICOPTER.hitbox.centerY,
-      vx, vy, vz,
-      blockQuery,
-    );
-    if (col.count > 0) {
-      const f = Math.pow(VEHICLE_BLOCK_COLLISION.speedRetainPerBlock, col.count);
-      vx *= f; vy *= f; vz *= f;
-      if (collisionOut) {
-        collisionOut.count += col.count;
-        collisionOut.cx = col.cx; collisionOut.cy = col.cy; collisionOut.cz = col.cz;
-      }
-    }
   }
 
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch };
@@ -228,7 +209,7 @@ export function tickFighterJet(
     ? Math.max(0, currentSpeed / FIGHTER_JET.stallSpeed)
     : 1.0;
 
-  const ground = gnd(px, pz);
+  const ground = gnd(px, pz, py);
   const onGround = py < ground + FIGHTER_JET.minAltitude + 1.0;
   let pitchTarget: number;
   if (true /* has_pilot */) {
@@ -302,7 +283,7 @@ export function tickFighterJet(
   }
 
   // ── Ground collision ──
-  const gndHeight = gnd(nx, nz);
+  const gndHeight = gnd(nx, nz, ny);
   const minAlt = gndHeight + FIGHTER_JET.minAltitude;
   if (ny < minAlt) {
     ny = minAlt;
@@ -314,25 +295,6 @@ export function tickFighterJet(
   if (ny > FIGHTER_JET.maxAltitude) {
     ny = FIGHTER_JET.maxAltitude;
     if (vy > 0) vy *= 0.1;
-  }
-
-  // ── Block collision ──
-  if (blockQuery) {
-    const col = checkBlockCollision(
-      nx, ny, nz,
-      FIGHTER_JET.hitbox.halfX, FIGHTER_JET.hitbox.halfY, FIGHTER_JET.hitbox.halfZ,
-      FIGHTER_JET.hitbox.centerY,
-      vx, vy, vz,
-      blockQuery,
-    );
-    if (col.count > 0) {
-      const f = Math.pow(VEHICLE_BLOCK_COLLISION.speedRetainPerBlock, col.count);
-      vx *= f; vy *= f; vz *= f;
-      if (collisionOut) {
-        collisionOut.count += col.count;
-        collisionOut.cx = col.cx; collisionOut.cy = col.cy; collisionOut.cz = col.cz;
-      }
-    }
   }
 
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch };
@@ -634,6 +596,7 @@ function checkBlockCollision(
   const speedSq = vx * vx + vy * vy + vz * vz;
   const minSpeed = VEHICLE_BLOCK_COLLISION.minSpeedToCollide;
   if (speedSq < minSpeed * minSpeed) return { count: 0, cx: 0, cy: 0, cz: 0 };
+  const speed = Math.sqrt(speedSq);
 
   const scale = VEHICLE_BLOCK_COLLISION.collisionHitboxScale;
   const hx = halfX * scale;
@@ -650,7 +613,7 @@ function checkBlockCollision(
 
   let count = 0;
   let sumX = 0, sumY = 0, sumZ = 0;
-  const maxBlocks = VEHICLE_BLOCK_COLLISION.maxBlocksPerTick;
+  const maxBlocks = getEffectiveMaxDestroyedBlocks(speed);
 
   for (let bx = minX; bx <= maxX; bx++) {
     for (let by = minY; by <= maxY; by++) {
@@ -668,6 +631,18 @@ function checkBlockCollision(
 
   if (count === 0) return { count: 0, cx: 0, cy: 0, cz: 0 };
   return { count, cx: sumX / count + 0.5, cy: sumY / count + 0.5, cz: sumZ / count + 0.5 };
+}
+
+function getEffectiveMaxDestroyedBlocks(speed: number): number {
+  const maxBlocks = VEHICLE_BLOCK_COLLISION.maxBlocksPerTick;
+  if (maxBlocks <= 1) return maxBlocks;
+
+  const minSpeed = VEHICLE_BLOCK_COLLISION.minSpeedToCollide;
+  const referenceSpeed = Math.max(VEHICLE_BLOCK_COLLISION.speedDestroyReference, minSpeed + 0.001);
+  const minFraction = clamp(VEHICLE_BLOCK_COLLISION.minDestroyFraction, 0, 1);
+  const t = clamp((speed - minSpeed) / (referenceSpeed - minSpeed), 0, 1);
+  const fraction = minFraction + (1 - minFraction) * t;
+  return Math.max(1, Math.round(maxBlocks * fraction));
 }
 
 function lerpState(a: PhysicsState, b: PhysicsState, t: number): PhysicsState {

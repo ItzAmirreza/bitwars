@@ -28,6 +28,7 @@ pub fn check_vehicle_block_collision(
     if speed_sq < min_speed * min_speed {
         return (0, false);
     }
+    let speed = speed_sq.sqrt();
 
     // Get collision AABB (scaled-down combat hitbox)
     let scale = vehicle_collision_hitbox_scale();
@@ -42,7 +43,7 @@ pub fn check_vehicle_block_collision(
     let min_z = (entity.pos.z - half_z).floor() as i32;
     let max_z = (entity.pos.z + half_z).ceil() as i32;
 
-    let max_blocks = vehicle_collision_max_blocks();
+    let max_blocks = effective_max_destroyed_blocks(speed);
     let mut blocks_to_destroy: Vec<(i32, i32, i32)> = Vec::new();
 
     for bx in min_x..=max_x {
@@ -91,9 +92,11 @@ pub fn check_vehicle_block_collision(
     entity.vel.z *= speed_factor;
 
     log::info!(
-        "[VEHICLE_COLLISION] entity_id={} blocks={} damage={} health={} speed_factor={:.3}",
+        "[VEHICLE_COLLISION] entity_id={} blocks={} max_blocks={} speed={:.2} damage={} health={} speed_factor={:.3}",
         vehicle.entity_id,
         actually_destroyed,
+        max_blocks,
+        speed,
         damage,
         vehicle.health,
         speed_factor,
@@ -188,4 +191,18 @@ fn collision_half_extents(entity: &Entity, scale: f32) -> (f32, f32, f32, f32) {
             heli_hitbox_center_y(),
         )
     }
+}
+
+fn effective_max_destroyed_blocks(speed: f32) -> usize {
+    let max_blocks = vehicle_collision_max_blocks();
+    if max_blocks <= 1 {
+        return max_blocks;
+    }
+
+    let min_speed = vehicle_collision_min_speed();
+    let reference_speed = vehicle_collision_speed_destroy_reference().max(min_speed + 0.001);
+    let min_fraction = vehicle_collision_min_destroy_fraction().clamp(0.0, 1.0);
+    let t = ((speed - min_speed) / (reference_speed - min_speed)).clamp(0.0, 1.0);
+    let fraction = min_fraction + (1.0 - min_fraction) * t;
+    ((max_blocks as f32) * fraction).round().max(1.0) as usize
 }

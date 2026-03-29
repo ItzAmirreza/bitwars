@@ -28,6 +28,7 @@ pub fn kinetic_penetrator_strike(
     sender: Identity,
     impact_pos: &Vec3,
     damage: i32,
+    player_damage: i32,
     radius: f32,
     weapon_code: u8,
     source_vehicle_id: u64,
@@ -96,7 +97,7 @@ pub fn kinetic_penetrator_strike(
         sender,
         &detonation_pos,
         &hit_players,
-        damage,
+        player_damage,
         radius,
         weapon_code,
     );

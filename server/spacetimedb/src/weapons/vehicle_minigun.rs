@@ -7,6 +7,7 @@ pub const DEF: VehicleWeaponDef = VehicleWeaponDef {
     name: "Minigun",
     index: 0,
     damage: 8,
+    player_damage_scale: 0.5,
     radius: 0.0,
     fire_rate: 15.0,
     max_ammo: 300,

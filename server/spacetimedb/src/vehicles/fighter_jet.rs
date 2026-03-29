@@ -138,7 +138,7 @@ pub fn tick_fighter_jet(
 
     // Pitch: Space = pull up (positive pitch_input), Shift = push down
     let on_ground = entity.pos.y
-        < terrain.fighter_jet_ground_height(ctx, entity.pos.x, entity.pos.z)
+        < terrain.fighter_jet_ground_height_below(ctx, entity.pos.x, entity.pos.z, entity.pos.y)
             + jet_min_altitude()
             + 1.0;
     let pitch_target = if has_pilot {
@@ -234,7 +234,8 @@ pub fn tick_fighter_jet(
     // ── Ground collision ──
     // After block collision: terrain cache is invalidated, so ground height
     // now reflects the hole the vehicle punched through.
-    let ground = terrain.fighter_jet_ground_height(ctx, entity.pos.x, entity.pos.z);
+    let ground =
+        terrain.fighter_jet_ground_height_below(ctx, entity.pos.x, entity.pos.z, entity.pos.y);
     let min_alt = ground + jet_min_altitude();
     if entity.pos.y < min_alt {
         entity.pos.y = min_alt;
