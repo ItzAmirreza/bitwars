@@ -112,6 +112,9 @@ export default class VehicleManager {
   private currentInput: PhysicsInput = { forward: 0, strafe: 0, lift: 0, yaw: 0 };
   /** Local tick-aligned input packets queued for server send. */
   private pendingInputPackets: Array<{ seq: number; input: PhysicsInput }> = [];
+  /** Blocks the local prediction already collided with — treated as air until
+   *  the authoritative chunk update arrives confirming their destruction. */
+  private collisionPendingBlocks = new Set<string>();
   // Legacy fields kept for mount-transition seeding in Engine.ts
   localLastServerPos = new THREE.Vector3();
   localLastServerVel = new THREE.Vector3();
@@ -676,6 +679,19 @@ export default class VehicleManager {
     return top >= 0 ? top + 1 : 0;
   }
 
+  /** Block query for collision prediction. Returns 0 (air) for blocks already
+   *  collided with locally, preventing repeated slowdown before the chunk update. */
+  private getCollisionBlock(x: number, y: number, z: number): number {
+    const key = `${x},${y},${z}`;
+    if (this.collisionPendingBlocks.has(key)) return 0;
+    const bt = this.engine.world.getBlock(x, y, z);
+    // Mark non-air, non-bedrock blocks as pending once detected
+    if (bt !== 0 && bt !== 15) {
+      this.collisionPendingBlocks.add(key);
+    }
+    return bt;
+  }
+
   private getPredictionGroundHeight(typeId: number, x: number, z: number): number {
     const top = this.engine.world.getHighestBlock(x, z);
     // Match server TerrainSampler fallback when no surface sample is available.
@@ -924,6 +940,7 @@ export default class VehicleManager {
     this.lastReconciledSimTick = 0;
     this.pendingInputPackets = [];
     this.localLastServerTime = 0;
+    this.collisionPendingBlocks.clear();
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -980,7 +997,8 @@ export default class VehicleManager {
             vz: this.localLastServerVel.z,
             yaw: this.localLastServerYaw,
             pitch: this.localLastServerPitch,
-          }, (x, z) => this.getPredictionGroundHeight(typeId, x, z));
+          }, (x, z) => this.getPredictionGroundHeight(typeId, x, z),
+             (x, y, z) => this.getCollisionBlock(x, y, z));
         }
 
         if (this.prediction) {
@@ -992,6 +1010,16 @@ export default class VehicleManager {
           });
           mesh.position.set(predicted.px, predicted.py, predicted.pz);
           mesh.rotation.set(predicted.pitch, predicted.yaw, 0);
+
+          // Vehicle block collision VFX
+          const col = this.prediction.lastCollision;
+          if (col.count > 0) {
+            this.engine.vfx.emitVehicleCollision(
+              col.cx, col.cy, col.cz, col.count,
+              predicted.vx, predicted.vy, predicted.vz,
+            );
+            this.engine.vfx.shake(Math.min(col.count * 0.3, 3.0));
+          }
         } else {
           // No server data yet — use raw entity table position
           const entity = this.findEntityRow(id);

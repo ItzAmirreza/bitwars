@@ -6,6 +6,7 @@
 //   4. Add a new VEHICLE_TYPE_* constant in constants.rs
 
 pub mod anti_air;
+pub mod collision;
 pub mod fighter_jet;
 pub mod helicopter;
 pub mod interaction;

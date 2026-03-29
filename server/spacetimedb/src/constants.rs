@@ -352,6 +352,30 @@ pub fn aa_horiz_blend() -> f32 {
     shared_config::config().anti_air.horiz_blend
 }
 
+// ── Vehicle Block Collision ──
+// Sourced from shared/game-constants.json → vehicleBlockCollision
+
+/// Damage dealt to vehicle per block collided with.
+pub fn vehicle_collision_damage_per_block() -> i32 {
+    shared_config::config().vehicle_block_collision.damage_per_block
+}
+/// Speed multiplier per block (0.92 = 8% speed loss per block).
+pub fn vehicle_collision_speed_retain() -> f32 {
+    shared_config::config().vehicle_block_collision.speed_retain_per_block
+}
+/// Minimum speed (blocks/sec) to trigger block collision.
+pub fn vehicle_collision_min_speed() -> f32 {
+    shared_config::config().vehicle_block_collision.min_speed_to_collide
+}
+/// Max blocks destroyed per physics tick.
+pub fn vehicle_collision_max_blocks() -> usize {
+    shared_config::config().vehicle_block_collision.max_blocks_per_tick
+}
+/// Scale factor applied to combat hitbox for collision volume.
+pub fn vehicle_collision_hitbox_scale() -> f32 {
+    shared_config::config().vehicle_block_collision.collision_hitbox_scale
+}
+
 // ── Combat Validation ──
 // Sourced from shared/game-constants.json → combat + player.godModeHealth
 
