@@ -435,10 +435,8 @@ export class Engine {
   }
 
   setActive(active: boolean): void {
-    if (this.active === active) return;
-    this.active = active;
-
     if (!active) {
+      this.active = false;
       this.mouseDown = false;
       this.autoFireHeld = false;
       this.controls.releaseAllInput();
@@ -454,6 +452,8 @@ export class Engine {
       return;
     }
 
+    if (this.active === active) return;
+    this.active = active;
     this.audio.resume();
     this.controls.inputEnabled = !(this.chatOpen || this.loadoutMenuOpen);
     this.weapons.setInputEnabled(!(this.chatOpen || this.loadoutMenuOpen));
