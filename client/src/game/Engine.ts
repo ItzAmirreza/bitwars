@@ -22,7 +22,7 @@ import { VehicleFireController } from './VehicleFireController';
 import type { VehicleFireContext } from './VehicleFireController';
 import { ENTITY_KINDS, VEHICLE_TYPES, ANTI_AIR, ABILITIES } from '../shared-config';
 import { GRENADE } from '../shared-config';
-import { AbilityPickupManager, ABILITY_NAMES } from './AbilityPickupManager';
+import { AbilityPickupManager } from './AbilityPickupManager';
 import type { ActiveBuff } from '../screens/hud/BuffIndicators';
 import type { DbConnection } from '../module_bindings';
 import type { GameSettings } from '../store';
