@@ -637,6 +637,16 @@ export class AudioCore {
     }
   }
 
+  suspend(): void {
+    if (!this.ctx) return;
+    if (this.ctx.state === 'running') void this.ctx.suspend();
+  }
+
+  resume(): void {
+    if (!this.ctx) return;
+    if (this.ctx.state === 'suspended') void this.ctx.resume();
+  }
+
   dispose(): void {
     this.voices.dispose();
     this.noisePool.dispose();
