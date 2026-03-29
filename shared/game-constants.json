@@ -125,7 +125,8 @@
     {
       "index": 0,
       "name": "MINIGUN",
-      "damage": 6,
+      "damage": 8,
+      "playerDamageScale": 0.5,
       "radius": 0,
       "fireRate": 15.0,
       "maxAmmo": 300,
@@ -139,7 +140,8 @@
     {
       "index": 1,
       "name": "ROCKETS",
-      "damage": 40,
+      "damage": 45,
+      "playerDamageScale": 0.6,
       "radius": 6.0,
       "fireRate": 2.5,
       "maxAmmo": 16,
@@ -153,7 +155,8 @@
     {
       "index": 2,
       "name": "KINETIC PENETRATOR",
-      "damage": 90,
+      "damage": 120,
+      "playerDamageScale": 0.5,
       "radius": 8.0,
       "fireRate": 0.35,
       "maxAmmo": 3,
@@ -167,7 +170,8 @@
     {
       "index": 3,
       "name": "CARPET BOMB",
-      "damage": 55,
+      "damage": 90,
+      "playerDamageScale": 0.45,
       "radius": 7.0,
       "fireRate": 10.0,
       "maxAmmo": 28,
@@ -181,7 +185,8 @@
     {
       "index": 4,
       "name": "AUTOCANNON",
-      "damage": 5,
+      "damage": 7,
+      "playerDamageScale": 0.5,
       "radius": 0,
       "fireRate": 18.0,
       "maxAmmo": 400,
@@ -195,7 +200,8 @@
     {
       "index": 5,
       "name": "SAM MISSILE",
-      "damage": 45,
+      "damage": 55,
+      "playerDamageScale": 0.6,
       "radius": 5.0,
       "fireRate": 1.8,
       "maxAmmo": 8,
@@ -209,7 +215,8 @@
     {
       "index": 6,
       "name": "AIR MISSILE",
-      "damage": 60,
+      "damage": 70,
+      "playerDamageScale": 0.6,
       "radius": 4.0,
       "fireRate": 1.5,
       "maxAmmo": 6,

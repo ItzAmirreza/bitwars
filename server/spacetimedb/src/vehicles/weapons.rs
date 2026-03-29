@@ -280,6 +280,7 @@ pub fn fire_vehicle_weapon(
                     sender,
                     impact,
                     def.damage,
+                    def.player_damage(),
                     def.radius,
                     weapon_code,
                     vehicle_id,
@@ -310,6 +311,7 @@ pub fn fire_vehicle_weapon(
     }
 
     // Standard hitscan path (minigun)
+    // Use scaled damage for infantry targets, full damage for vehicles
     apply_hitscan_player_damage(
         ctx,
         sender,
@@ -317,7 +319,7 @@ pub fn fire_vehicle_weapon(
         &shot_direction,
         dir_len,
         &hit_players,
-        def.damage,
+        def.player_damage(),
         def.max_range,
         weapon_code,
     );
@@ -463,6 +465,7 @@ pub fn vehicle_projectile_impact(
     consume_projectile_shot(ctx, shot, &impact_pos);
 
     // Standard projectile impact (rockets, carpet bomb, etc.)
+    // Use scaled damage for infantry targets, full damage for vehicles
     let hit_players = collect_all_player_ids(ctx);
     let hit_vehicles = collect_all_vehicle_ids(ctx);
     apply_splash_player_damage(
@@ -470,7 +473,7 @@ pub fn vehicle_projectile_impact(
         sender,
         &impact_pos,
         &hit_players,
-        def.damage,
+        def.player_damage(),
         def.radius,
         weapon_code,
     );
