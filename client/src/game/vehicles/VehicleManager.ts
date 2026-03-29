@@ -1026,7 +1026,7 @@ export default class VehicleManager {
             vz: this.localLastServerVel.z,
             yaw: this.localLastServerYaw,
             pitch: this.localLastServerPitch,
-          }, (x, z) => this.getPredictionGroundHeight(typeId, x, z),
+          }, (x, z, maxY) => this.getPredictionGroundHeight(typeId, x, z, maxY),
              (x, y, z) => this.getCollisionBlock(x, y, z));
         }
 

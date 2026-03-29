@@ -163,25 +163,6 @@ export function tickHelicopter(
     if (vy > 0) vy *= 0.15;
   }
 
-  // ── Block collision ──
-  if (blockQuery) {
-    const col = checkBlockCollision(
-      nx, ny, nz,
-      HELICOPTER.hitbox.halfX, HELICOPTER.hitbox.halfY, HELICOPTER.hitbox.halfZ,
-      HELICOPTER.hitbox.centerY,
-      vx, vy, vz,
-      blockQuery,
-    );
-    if (col.count > 0) {
-      const f = Math.pow(VEHICLE_BLOCK_COLLISION.speedRetainPerBlock, col.count);
-      vx *= f; vy *= f; vz *= f;
-      if (collisionOut) {
-        collisionOut.count += col.count;
-        collisionOut.cx = col.cx; collisionOut.cy = col.cy; collisionOut.cz = col.cz;
-      }
-    }
-  }
-
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch };
 }
 
@@ -314,25 +295,6 @@ export function tickFighterJet(
   if (ny > FIGHTER_JET.maxAltitude) {
     ny = FIGHTER_JET.maxAltitude;
     if (vy > 0) vy *= 0.1;
-  }
-
-  // ── Block collision ──
-  if (blockQuery) {
-    const col = checkBlockCollision(
-      nx, ny, nz,
-      FIGHTER_JET.hitbox.halfX, FIGHTER_JET.hitbox.halfY, FIGHTER_JET.hitbox.halfZ,
-      FIGHTER_JET.hitbox.centerY,
-      vx, vy, vz,
-      blockQuery,
-    );
-    if (col.count > 0) {
-      const f = Math.pow(VEHICLE_BLOCK_COLLISION.speedRetainPerBlock, col.count);
-      vx *= f; vy *= f; vz *= f;
-      if (collisionOut) {
-        collisionOut.count += col.count;
-        collisionOut.cx = col.cx; collisionOut.cy = col.cy; collisionOut.cz = col.cz;
-      }
-    }
   }
 
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch };
