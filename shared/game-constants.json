@@ -180,17 +180,17 @@
     },
     {
       "index": 4,
-      "name": "AUTOCANNON",
-      "damage": 7,
+      "name": "CRAM",
+      "damage": 5,
       "radius": 0,
-      "fireRate": 18.0,
-      "maxAmmo": 400,
-      "maxRange": 110.0,
+      "fireRate": 25.0,
+      "maxAmmo": 600,
+      "maxRange": 130.0,
       "projectileSpeed": 0,
       "gravity": 0,
       "delivery": "hitscan",
       "color": "#ffdd33",
-      "reloadTime": 3.5
+      "reloadTime": 4.0
     },
     {
       "index": 5,
@@ -304,6 +304,7 @@
     "dragPiloted": 0.970,
     "dragUnpiloted": 0.940,
     "horizBlend": 0.18,
+    "trackingRange": 200.0,
     "hitbox": {
       "centerY": 2.0,
       "halfX": 4.5,

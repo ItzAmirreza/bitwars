@@ -291,13 +291,9 @@ pub fn vehicle_type_anti_air() -> u8 {
     shared_config::config().vehicle_types.anti_air
 }
 
-/// Anti-Air weapon slot 0 → vehicleWeapons index 4 (AUTOCANNON)
+/// Anti-Air weapon slot 0 → vehicleWeapons index 4 (CRAM)
 pub fn aa_weapon_slot0() -> u8 {
     4
-}
-/// Anti-Air weapon slot 1 → vehicleWeapons index 5 (SAM MISSILE)
-pub fn aa_weapon_slot1() -> u8 {
-    5
 }
 
 /// Not in shared JSON — server-only spawn config.

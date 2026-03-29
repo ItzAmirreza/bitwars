@@ -21,11 +21,8 @@ fn resolve_vehicle_weapon_index(vehicle_type: u8, slot: u8) -> u8 {
             _ => constants::jet_weapon_slot2(),
         }
     } else if vehicle_type == constants::vehicle_type_anti_air() {
-        if slot == 0 {
-            constants::aa_weapon_slot0()
-        } else {
-            constants::aa_weapon_slot1()
-        }
+        // AA has only 1 weapon slot (CRAM)
+        constants::aa_weapon_slot0()
     } else {
         // Helicopter: slot == index
         slot
@@ -83,9 +80,11 @@ pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(
     if vehicle.pilot_identity != Some(sender) {
         return Err("Not the pilot".to_string());
     }
-    // Max slots: 2 for helicopter, 3 for jet
+    // Max slots: 1 for AA, 2 for helicopter, 3 for jet
     let max_slots: u8 = if vehicle.vehicle_type == constants::vehicle_type_fighter_jet() {
         3
+    } else if vehicle.vehicle_type == constants::vehicle_type_anti_air() {
+        1
     } else {
         2
     };
@@ -214,14 +213,6 @@ pub fn fire_vehicle_weapon(
             z: fwd_z * speed * 0.3,
         };
         (bomb_origin, bomb_dir)
-    } else if vehicle.vehicle_type == constants::vehicle_type_anti_air() && slot == 1 {
-        // SAM missile: larger offset to clear AA hitbox
-        let origin = Vec3 {
-            x: muzzle_base.x + normalized_dir.x * 6.0,
-            y: muzzle_base.y + 2.0,
-            z: muzzle_base.z + normalized_dir.z * 6.0,
-        };
-        (origin, direction.clone())
     } else {
         let origin = Vec3 {
             x: muzzle_base.x + normalized_dir.x * 3.5,

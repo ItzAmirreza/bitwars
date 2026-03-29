@@ -230,6 +230,7 @@ pub struct AntiAirConfig {
     pub drag_piloted: f32,
     pub drag_unpiloted: f32,
     pub horiz_blend: f32,
+    pub tracking_range: f32,
     pub hitbox: AntiAirHitbox,
     pub camera: AntiAirCamera,
 }
