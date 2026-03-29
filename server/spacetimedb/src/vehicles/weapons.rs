@@ -367,6 +367,7 @@ pub fn vehicle_projectile_impact(
     _hit_players: Vec<Identity>,
     _hit_vehicles: Vec<u64>,
     _hit_blocks: Vec<Vec3>,
+    shot_event_id: u64,
     source_vehicle_id: u64,
 ) -> Result<(), String> {
     let sender = ctx.sender();
@@ -406,8 +407,9 @@ pub fn vehicle_projectile_impact(
     }
 
     let weapon_code = 100 + resolved_idx;
-    let Some(shot) = find_matching_projectile_shot(
+    let shot = find_valid_shot_by_id(
         ctx,
+        shot_event_id,
         sender,
         weapon_code,
         def.projectile_speed,
@@ -417,11 +419,27 @@ pub fn vehicle_projectile_impact(
         travel_time_ms,
         Some(source_vehicle_id),
         true,
-    ) else {
+    )
+    .or_else(|| {
+        find_matching_projectile_shot(
+            ctx,
+            sender,
+            weapon_code,
+            def.projectile_speed,
+            def.max_range,
+            &impact_pos,
+            &shot_origin,
+            travel_time_ms,
+            Some(source_vehicle_id),
+            true,
+        )
+    });
+    let Some(shot) = shot else {
         log::debug!(
-            "Ignoring unmatched vehicle projectile impact (player={:?}, weapon={}, vehicle={}, pos=({:.2},{:.2},{:.2}))",
+            "Ignoring unmatched vehicle projectile impact (player={:?}, weapon={}, shot_id={}, vehicle={}, pos=({:.2},{:.2},{:.2}))",
             sender,
             resolved_idx,
+            shot_event_id,
             source_vehicle_id,
             impact_pos.x,
             impact_pos.y,

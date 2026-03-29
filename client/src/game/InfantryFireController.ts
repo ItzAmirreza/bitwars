@@ -366,6 +366,7 @@ export class InfantryFireController {
   private syncImpactToServer(impact: ProjectileImpact): void {
     const conn = this.ctx.conn;
     if (!conn) return;
+    const resolvedShotEventId = impact.shotEventId ?? this.resolveShotEventIdForImpact(impact);
 
     conn.reducers.projectileImpact({
       shotOrigin: { x: impact.origin.x, y: impact.origin.y, z: impact.origin.z },
@@ -376,12 +377,37 @@ export class InfantryFireController {
       hitPlayers: [],
       hitVehicles: [],
       hitBlocks: [],
+      shotEventId: resolvedShotEventId ?? 0n,
     });
   }
 
   private syncVehicleImpactToServer(impact: ProjectileImpact): void {
     const conn = this.ctx.conn;
     if (!conn) return;
+    const resolvedShotEventId = impact.shotEventId ?? this.resolveShotEventIdForImpact(impact);
+
+    // Very low-altitude carpet bombs can impact before ShotEvent replication arrives.
+    // Give one short grace retry to capture authoritative shot id and avoid heuristic matching.
+    if (resolvedShotEventId === null && impact.isVehicle && impact.vehicleWeaponIndex === 3) {
+      setTimeout(() => {
+        const retryConn = this.ctx.conn;
+        if (!retryConn) return;
+        const retryShotEventId = this.resolveShotEventIdForImpact(impact);
+        retryConn.reducers.vehicleProjectileImpact({
+          shotOrigin: { x: impact.origin.x, y: impact.origin.y, z: impact.origin.z },
+          impactPos: { x: impact.hitPos.x, y: impact.hitPos.y, z: impact.hitPos.z },
+          direction: { x: impact.direction.x, y: impact.direction.y, z: impact.direction.z },
+          vehicleWeapon: impact.vehicleWeaponIndex,
+          travelTimeMs: Math.round(impact.travelTimeMs),
+          hitPlayers: [],
+          hitVehicles: [],
+          hitBlocks: [],
+          shotEventId: retryShotEventId ?? 0n,
+          sourceVehicleId: BigInt(impact.sourceVehicleId),
+        });
+      }, 40);
+      return;
+    }
 
     conn.reducers.vehicleProjectileImpact({
       shotOrigin: { x: impact.origin.x, y: impact.origin.y, z: impact.origin.z },
@@ -392,7 +418,63 @@ export class InfantryFireController {
       hitPlayers: [],
       hitVehicles: [],
       hitBlocks: [],
+      shotEventId: resolvedShotEventId ?? 0n,
       sourceVehicleId: BigInt(impact.sourceVehicleId),
     });
+  }
+
+  private resolveShotEventIdForImpact(impact: ProjectileImpact): bigint | null {
+    const conn = this.ctx.conn;
+    if (!conn || !this.ctx.localIdentity) return null;
+
+    const targetWeaponCode = impact.isVehicle ? (100 + impact.vehicleWeaponIndex) : impact.weaponIndex;
+    const targetSourceVehicle = impact.isVehicle ? impact.sourceVehicleId : 0;
+    const targetTravelMs = Math.max(0, impact.travelTimeMs);
+    let bestId: bigint | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    const maxOriginDistSq = impact.isVehicle ? 900 : 144;
+
+    for (const row of conn.db.shot_event.iter() as Iterable<any>) {
+      const shooterHex = row.shooter?.toHexString?.();
+      if (shooterHex !== this.ctx.localIdentity) continue;
+      if (Number(row.weapon) !== targetWeaponCode) continue;
+      if (Boolean(row.hasHit)) continue;
+
+      const rowSourceVehicle = Number(row.sourceVehicle ?? 0);
+      if (rowSourceVehicle !== targetSourceVehicle) continue;
+
+      const ox = Number(row.origin?.x ?? 0);
+      const oy = Number(row.origin?.y ?? 0);
+      const oz = Number(row.origin?.z ?? 0);
+      const dx = impact.origin.x - ox;
+      const dy = impact.origin.y - oy;
+      const dz = impact.origin.z - oz;
+      const originDistSq = dx * dx + dy * dy + dz * dz;
+      if (originDistSq > maxOriginDistSq) continue;
+
+      let timingError = 2000;
+      const firedAt = row.firedAt;
+      if (firedAt && typeof firedAt.toMillis === 'function') {
+        const firedAtMs = Number(firedAt.toMillis());
+        if (Number.isFinite(firedAtMs)) {
+          const observedAgeMs = Math.max(0, Date.now() - firedAtMs);
+          timingError = Math.abs(observedAgeMs - targetTravelMs);
+        }
+      }
+
+      const score = originDistSq * 0.4 + timingError;
+      if (score >= bestScore) continue;
+
+      const rowId = row.id;
+      if (typeof rowId === 'bigint') {
+        bestId = rowId;
+        bestScore = score;
+      } else if (typeof rowId === 'number' && Number.isFinite(rowId)) {
+        bestId = BigInt(Math.trunc(rowId));
+        bestScore = score;
+      }
+    }
+
+    return bestId;
   }
 }

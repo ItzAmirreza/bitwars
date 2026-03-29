@@ -1715,11 +1715,55 @@ export class Engine {
     // Remote shot events: render tracers or spawn projectiles for other players
     this.conn.db.shot_event.onInsert((_ctx: unknown, shot: any) => {
       const shooterId = shot.shooter.toHexString();
-      if (shooterId === this.localIdentity) return; // Skip our own shots
 
       const weaponIdx = shot.weapon as number;
       const origin = new THREE.Vector3(shot.origin.x, shot.origin.y, shot.origin.z);
       const dir = new THREE.Vector3(shot.direction.x, shot.direction.y, shot.direction.z);
+      let shotEventId = 0n;
+      if (typeof shot.id === 'bigint') {
+        shotEventId = shot.id;
+      } else if (typeof shot.id === 'number' && Number.isFinite(shot.id)) {
+        shotEventId = BigInt(Math.trunc(shot.id));
+      }
+      const sourceVehicleId = Number(shot.sourceVehicle ?? 0);
+      const firedAt = shot.firedAt;
+      let firedAtPerf: number | null = null;
+      if (firedAt && typeof firedAt.toMillis === 'function') {
+        const firedAtMs = Number(firedAt.toMillis());
+        if (Number.isFinite(firedAtMs)) {
+          const approxAgeMs = Math.max(0, Math.min(3000, Date.now() - firedAtMs));
+          firedAtPerf = performance.now() - approxAgeMs;
+        }
+      }
+
+      // Bind local projectile instances to authoritative shot ids.
+      if (shooterId === this.localIdentity) {
+        if (weaponIdx >= 100) {
+          const vehWeaponIdx = weaponIdx - 100;
+          const vw = VEHICLE_WEAPONS[vehWeaponIdx];
+          if (vw && vw.projectileSpeed > 0 && shotEventId !== 0n) {
+            this.projectileManager.linkLocalShotEventId(
+              shotEventId,
+              weaponIdx,
+              { x: origin.x, y: origin.y, z: origin.z },
+              sourceVehicleId,
+              firedAtPerf,
+            );
+          }
+        } else {
+          const w = WEAPONS[weaponIdx];
+          if (w && weaponIdx !== 4 && isFinite(w.projectile.speed) && shotEventId !== 0n) {
+            this.projectileManager.linkLocalShotEventId(
+              shotEventId,
+              weaponIdx,
+              { x: origin.x, y: origin.y, z: origin.z },
+              0,
+              firedAtPerf,
+            );
+          }
+        }
+        return;
+      }
 
       // Vehicle weapons use 100+ namespace
       if (weaponIdx >= 100) {
@@ -1731,16 +1775,15 @@ export class Engine {
 
         if (vw.projectileSpeed > 0) {
           // Projectile weapon: spawn with vehicle-specific visual config
-          let approxAgeMs = 0;
-          const firedAt = shot.firedAt;
-          if (firedAt && typeof firedAt.toMillis === 'function') {
-            const firedAtMs = Number(firedAt.toMillis());
-            if (Number.isFinite(firedAtMs)) {
-              approxAgeMs = Math.max(0, Math.min(3000, Date.now() - firedAtMs));
-            }
-          }
-          const firedAtPerf = performance.now() - approxAgeMs;
-          this.projectileManager.spawnRemoteVehicle(2, origin, dir, firedAtPerf, shooterId, vehWeaponIdx, 0);
+          this.projectileManager.spawnRemoteVehicle(
+            2,
+            origin,
+            dir,
+            firedAtPerf ?? performance.now(),
+            shooterId,
+            vehWeaponIdx,
+            0,
+          );
           // Muzzle flash at launch point (color varies by weapon)
           const flashColor = vehWeaponIdx === 6 ? 0x00ccff : vehWeaponIdx === 2 ? 0xff2200 : vehWeaponIdx === 3 ? 0xff6600 : vehWeaponIdx === 4 ? 0xffdd33 : 0xff4400;
           this.vfx.emitMuzzleFlashAt(origin, dir, flashColor);
@@ -1781,21 +1824,18 @@ export class Engine {
         if (weaponIdx === 4) return;
 
         // Projectile weapon: spawn flying projectile with timestamp-based catch-up
-        let approxAgeMs = 0;
-        const firedAt = shot.firedAt;
-        if (firedAt && typeof firedAt.toMillis === 'function') {
-          const firedAtMs = Number(firedAt.toMillis());
-          if (Number.isFinite(firedAtMs)) {
-            approxAgeMs = Math.max(0, Math.min(3000, Date.now() - firedAtMs));
-          }
-        }
-        const firedAtPerf = performance.now() - approxAgeMs;
-        this.projectileManager.spawnRemote(weaponIdx, origin, dir, firedAtPerf, shooterId);
+        this.projectileManager.spawnRemote(
+          weaponIdx,
+          origin,
+          dir,
+          firedAtPerf ?? performance.now(),
+          shooterId,
+        );
       } else {
         // Hitscan: render instant tracer + impact VFX at hit position
         const hasHit = shot.hasHit as boolean;
         const hitPos = shot.hitPos;
-      const end = hasHit && hitPos
+        const end = hasHit && hitPos
           ? new THREE.Vector3(hitPos.x, hitPos.y, hitPos.z)
           : origin.clone().add(dir.clone().normalize().multiplyScalar(w.range));
         this.vfx.emitTracer(origin, end, parseInt(w.color.replace('#', ''), 16));
