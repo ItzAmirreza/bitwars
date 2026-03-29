@@ -73,6 +73,7 @@ export function GameScreen({ active }: GameScreenProps) {
     vehicleWeaponSlots: [{ name: 'MINIGUN', color: '#ffaa00' }, { name: 'ROCKETS', color: '#ff4400' }],
     nearVehicle: false,
     nearVehicleName: null,
+    activeBuffs: [],
   });
 
   // ── Kill tracking hook ──
@@ -594,7 +595,7 @@ export function GameScreen({ active }: GameScreenProps) {
       )}
 
       {/* ═══ BUFF INDICATORS ═══ */}
-      <BuffIndicators buffs={engineState.activeBuffs ?? []} />
+      <BuffIndicators buffs={state.activeBuffs ?? []} />
 
       {/* ═══ KILL FEED ═══ */}
       <KillFeed

@@ -2314,9 +2314,7 @@ export class Engine {
     const pickupEventTable = (this.conn.db as any).ability_pickup_event;
     if (pickupEventTable) {
       pickupEventTable.onInsert((_ctx: unknown, e: any) => {
-        // Skip own pickup (already got local feedback via buff table)
-        if (this.localIdentity && e.player.toHexString() === this.localIdentity) return;
-        // Small explosion at pickup location
+        // All players (including collector) see the pickup burst
         this.vfx.emitExplosion(e.pos.x, e.pos.y, e.pos.z, 0.8);
       });
     }
