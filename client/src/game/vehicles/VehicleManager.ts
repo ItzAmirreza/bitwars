@@ -697,10 +697,10 @@ export default class VehicleManager {
     // Match server TerrainSampler fallback when no surface sample is available.
     const surface = top >= 0 ? top : 3.0;
     // Server parity:
-    // - helicopter_ground_rest_height: surface + 2
+    // - helicopter_ground_rest_height: surface + 0.475
     // - fighter_jet_ground_height:    surface + 1
     // - anti-air ground snap:         surface + 1
-    if (typeId === VEHICLE_TYPES.Helicopter) return surface + 2;
+    if (typeId === VEHICLE_TYPES.Helicopter) return surface + 0.475;
     return surface + 1;
   }
 
