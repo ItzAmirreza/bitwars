@@ -52,7 +52,9 @@ pub fn place_outpost_layouts(
             }
 
             let base_y = biome_height(biome, center_x, center_z, seed);
-            place_single_outpost(cb, chunk_wx, chunk_wy, chunk_wz, center_x, center_z, base_y, seed);
+            place_single_outpost(
+                cb, chunk_wx, chunk_wy, chunk_wz, center_x, center_z, base_y, seed,
+            );
         }
     }
 }
@@ -128,27 +130,32 @@ fn place_single_outpost(
     }
 
     // ── Corner reinforcements (3x3 pillars, 3 blocks high) ──
-    let corners = [
-        (x0, z0),
-        (x0, z1 - 2),
-        (x1 - 2, z0),
-        (x1 - 2, z1 - 2),
-    ];
+    let corners = [(x0, z0), (x0, z1 - 2), (x1 - 2, z0), (x1 - 2, z1 - 2)];
     for (corner_x, corner_z) in corners {
         for dx in 0..3 {
             for dz in 0..3 {
                 for dy in 1..=3 {
                     set_chunk_block(
-                        cb, cx, cy, cz,
-                        corner_x + dx, base_y + dy, corner_z + dz,
+                        cb,
+                        cx,
+                        cy,
+                        cz,
+                        corner_x + dx,
+                        base_y + dy,
+                        corner_z + dz,
                         DARK_CONCRETE,
                     );
                 }
                 // Lantern on top of corner pillars
                 if dx == 1 && dz == 1 {
                     set_chunk_block(
-                        cb, cx, cy, cz,
-                        corner_x + 1, base_y + 4, corner_z + 1,
+                        cb,
+                        cx,
+                        cy,
+                        cz,
+                        corner_x + 1,
+                        base_y + 4,
+                        corner_z + 1,
                         LANTERN,
                     );
                 }

@@ -11,6 +11,19 @@ use crate::tables::*;
 use crate::types::*;
 use crate::weapons;
 
+fn projectile_match_score(age_ms: f32, target_ms: f32, origin_dist_sq: f32) -> f32 {
+    // Network transit usually makes the authoritative age slightly later than the
+    // client-reported travel time. Keep a modest bias against "too-early"
+    // candidates so rapid-fire projectiles don't steal earlier impacts, without
+    // making normal slightly-early arrivals lose to the previous shot.
+    let timing_penalty = if age_ms >= target_ms {
+        age_ms - target_ms
+    } else {
+        (target_ms - age_ms) * 1.5
+    };
+    timing_penalty + origin_dist_sq * 0.35
+}
+
 /// Find the best matching, not-yet-consumed projectile shot event for an impact.
 pub fn find_matching_projectile_shot(
     ctx: &ReducerContext,
@@ -108,7 +121,7 @@ pub fn find_matching_projectile_shot(
         }
 
         let origin_dist_sq = dist_sq(&shot.origin, client_shot_origin);
-        let score = (age_ms - target_ms).abs() + origin_dist_sq * 0.35;
+        let score = projectile_match_score(age_ms, target_ms, origin_dist_sq);
         match &best {
             Some((_, best_score)) if score >= *best_score => {}
             _ => best = Some((shot, score)),
@@ -201,7 +214,7 @@ pub fn destroy_spherical_blocks(
 
 #[cfg(test)]
 mod tests {
-    use super::collect_capped_ellipsoid_block_coords;
+    use super::{collect_capped_ellipsoid_block_coords, projectile_match_score};
     use crate::types::Vec3;
 
     #[test]
@@ -230,6 +243,30 @@ mod tests {
         assert!(coords.iter().any(|&(x, _, _)| x > center.x.floor() as i32));
         assert!(coords.iter().any(|&(_, _, z)| z < center.z.floor() as i32));
         assert!(coords.iter().any(|&(_, _, z)| z > center.z.floor() as i32));
+    }
+
+    #[test]
+    fn slightly_late_true_shot_beats_slightly_early_later_shot() {
+        let true_shot_score = projectile_match_score(1_460.0, 1_400.0, 0.0);
+        let later_shot_score = projectile_match_score(1_360.0, 1_400.0, 25.0);
+
+        assert!(true_shot_score < later_shot_score);
+    }
+
+    #[test]
+    fn near_on_time_shot_still_beats_very_late_candidate() {
+        let near_on_time_score = projectile_match_score(1_430.0, 1_400.0, 0.0);
+        let very_late_score = projectile_match_score(1_900.0, 1_400.0, 0.0);
+
+        assert!(near_on_time_score < very_late_score);
+    }
+
+    #[test]
+    fn slightly_early_true_shot_beats_previous_late_shot() {
+        let true_shot_score = projectile_match_score(1_350.0, 1_400.0, 0.0);
+        let previous_shot_score = projectile_match_score(1_500.0, 1_400.0, 25.0);
+
+        assert!(true_shot_score < previous_shot_score);
     }
 }
 

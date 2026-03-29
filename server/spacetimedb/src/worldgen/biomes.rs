@@ -98,8 +98,16 @@ fn outpost_cell(seed: u64) -> Option<(i32, i32)> {
         let dz_cells = (cz - acz).abs();
         if dx_cells < 2 && dz_cells < 2 {
             // Push outpost to the opposite side of the map from the airport.
-            cx = if acx <= (min_cx + max_cx) / 2 { max_cx } else { min_cx };
-            cz = if acz <= (min_cz + max_cz) / 2 { max_cz } else { min_cz };
+            cx = if acx <= (min_cx + max_cx) / 2 {
+                max_cx
+            } else {
+                min_cx
+            };
+            cz = if acz <= (min_cz + max_cz) / 2 {
+                max_cz
+            } else {
+                min_cz
+            };
         }
     }
 
