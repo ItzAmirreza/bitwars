@@ -7,6 +7,7 @@ pub const DEF: VehicleWeaponDef = VehicleWeaponDef {
     name: "Hydra Rockets",
     index: 1,
     damage: 45,
+    player_damage_scale: 0.6,
     radius: 6.0,
     fire_rate: 2.5,
     max_ammo: 16,

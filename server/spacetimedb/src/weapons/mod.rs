@@ -58,6 +58,7 @@ pub struct VehicleWeaponDef {
     pub name: &'static str,
     pub index: u8,
     pub damage: i32,
+    pub player_damage_scale: f32,
     pub radius: f32,
     pub fire_rate: f32,
     pub max_ammo: i32,
@@ -70,6 +71,10 @@ pub struct VehicleWeaponDef {
 impl VehicleWeaponDef {
     pub fn is_hitscan(&self) -> bool {
         self.delivery == DeliveryMethod::Hitscan
+    }
+    /// Damage scaled for hitting infantry players (lower than vehicle-vs-vehicle).
+    pub fn player_damage(&self) -> i32 {
+        ((self.damage as f32) * self.player_damage_scale).round() as i32
     }
 }
 
@@ -118,6 +123,7 @@ fn vehicle_weapons_registry() -> &'static [VehicleWeaponDef] {
                 name: Box::leak(w.name.clone().into_boxed_str()),
                 index: w.index,
                 damage: w.damage,
+                player_damage_scale: w.player_damage_scale,
                 radius: w.radius,
                 fire_rate: w.fire_rate,
                 max_ammo: w.max_ammo,

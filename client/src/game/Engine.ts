@@ -381,6 +381,10 @@ export class Engine {
 
     // ── Weapon Model ──
     this.weaponModel = new WeaponModel(w / h);
+    this.weapons.onLocalSwitch = (weaponIndex) => {
+      if (this.mountedVehicleId !== 0) return;
+      this.applyLocalWeaponSwitch(weaponIndex);
+    };
 
     // ── PostFX ──
     this.postfx = new PostFX();
@@ -431,10 +435,8 @@ export class Engine {
   }
 
   setActive(active: boolean): void {
-    if (this.active === active) return;
-    this.active = active;
-
     if (!active) {
+      this.active = false;
       this.mouseDown = false;
       this.autoFireHeld = false;
       this.controls.releaseAllInput();
@@ -450,6 +452,8 @@ export class Engine {
       return;
     }
 
+    if (this.active === active) return;
+    this.active = active;
     this.audio.resume();
     this.controls.inputEnabled = !(this.chatOpen || this.loadoutMenuOpen);
     this.weapons.setInputEnabled(!(this.chatOpen || this.loadoutMenuOpen));
@@ -668,10 +672,7 @@ export class Engine {
     const changed = this.weapons.setLoadout(loadout, preferredWeapon);
     if (!changed) return false;
 
-    const weaponIdx = this.weapons.currentWeapon;
-    this.weaponModel.switchWeapon(weaponIdx);
-    this.lastWeaponIndex = weaponIdx;
-    this.noteLocalWeaponSwitch();
+    this.applyLocalWeaponSwitch(this.weapons.currentWeapon);
     return true;
   }
 
@@ -1141,12 +1142,7 @@ export class Engine {
       }
       const slot = parseInt(e.code.charAt(5), 10) - 1;
       const idx = this.weapons.switchToSlot(slot);
-      if (idx !== this.lastWeaponIndex) {
-        this.weaponModel.switchWeapon(idx);
-        this.audio.playSwitch(this.localAudioSource(-0.1));
-        this.lastWeaponIndex = idx;
-        this.noteLocalWeaponSwitch();
-      }
+      this.applyLocalWeaponSwitch(idx);
     }
   };
 
@@ -1358,6 +1354,14 @@ export class Engine {
     this.lastLocalWeaponSwitchAt = performance.now();
     this.lastPositionUpdate = 0;
     this.sendPositionUpdate();
+  }
+
+  private applyLocalWeaponSwitch(weaponIndex: number): void {
+    if (weaponIndex === this.lastWeaponIndex) return;
+    this.weaponModel.switchWeapon(weaponIndex);
+    this.audio.playSwitch(this.localAudioSource(-0.1));
+    this.lastWeaponIndex = weaponIndex;
+    this.noteLocalWeaponSwitch();
   }
 
   private getServerCurrentWeapon(): number | undefined {
@@ -3050,6 +3054,7 @@ export class Engine {
     }
     this.grenadeVisuals.clear();
     this.physics.dispose();
+    this.weapons.dispose();
     this.weaponModel.dispose();
     this.postfx.dispose();
     this.audio.dispose();
