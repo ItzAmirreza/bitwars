@@ -166,11 +166,23 @@ pub fn tick_helicopter(
         entity.vel.z = -entity.vel.z.abs() * 0.2;
     }
 
+    entity.pos = next_pos;
+
+    // ── Block collision (BEFORE ground clamping) ──
+    // Must run first so destroyed blocks don't push the vehicle upward via ground height.
+    let (_blocks_hit, destroyed) =
+        super::collision::check_vehicle_block_collision(ctx, &mut entity, &mut vehicle, terrain);
+    if destroyed {
+        return;
+    }
+
     // ── Ground collision ──
-    let ground = terrain.helicopter_ground_rest_height(ctx, next_pos.x, next_pos.z);
+    // After block collision: terrain cache is invalidated, so ground height
+    // now reflects the hole the vehicle punched through.
+    let ground = terrain.helicopter_ground_rest_height(ctx, entity.pos.x, entity.pos.z);
     let min_alt = ground + heli_min_altitude_from_ground();
-    if next_pos.y < min_alt {
-        next_pos.y = min_alt;
+    if entity.pos.y < min_alt {
+        entity.pos.y = min_alt;
         if entity.vel.y < 0.0 {
             entity.vel.y *= -0.08;
         }
@@ -180,23 +192,15 @@ pub fn tick_helicopter(
             entity.vel.z *= 0.93;
         }
     }
-    if next_pos.y > heli_max_altitude() {
-        next_pos.y = heli_max_altitude();
+    if entity.pos.y > heli_max_altitude() {
+        entity.pos.y = heli_max_altitude();
         if entity.vel.y > 0.0 {
             entity.vel.y *= 0.15;
         }
     }
 
-    entity.pos = next_pos;
     entity.sim_tick = next_sim_tick;
     entity.updated_at = ctx.timestamp;
-
-    // ── Block collision ──
-    let (_blocks_hit, destroyed) =
-        super::collision::check_vehicle_block_collision(ctx, &mut entity, &mut vehicle, terrain);
-    if destroyed {
-        return;
-    }
 
     // ── Rotor spin visual ──
     let spin_target = if has_pilot {

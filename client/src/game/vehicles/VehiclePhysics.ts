@@ -131,18 +131,8 @@ export function tickHelicopter(
   if (nz < WORLD_MIN_Z) { nz = WORLD_MIN_Z; vz = Math.abs(vz) * BOUNDS_BOUNCE; }
   if (nz > WORLD_MAX_Z) { nz = WORLD_MAX_Z; vz = -Math.abs(vz) * BOUNDS_BOUNCE; }
 
-  const ground = gnd(nx, nz);
-  const minAlt = ground + HELICOPTER.minAltitude;
-  if (ny < minAlt) {
-    ny = minAlt;
-    if (vy < 0) vy *= -0.08;
-  }
-  if (ny > HELICOPTER.maxAltitude) {
-    ny = HELICOPTER.maxAltitude;
-    if (vy > 0) vy *= 0.15;
-  }
-
-  // ── Block collision ──
+  // ── Block collision (BEFORE ground clamping) ──
+  // Runs first so destroyed blocks don't push the vehicle upward via ground height.
   if (blockQuery) {
     const col = checkBlockCollision(
       nx, ny, nz,
@@ -159,6 +149,18 @@ export function tickHelicopter(
         collisionOut.cx = col.cx; collisionOut.cy = col.cy; collisionOut.cz = col.cz;
       }
     }
+  }
+
+  // ── Ground collision ──
+  const ground = gnd(nx, nz);
+  const minAlt = ground + HELICOPTER.minAltitude;
+  if (ny < minAlt) {
+    ny = minAlt;
+    if (vy < 0) vy *= -0.08;
+  }
+  if (ny > HELICOPTER.maxAltitude) {
+    ny = HELICOPTER.maxAltitude;
+    if (vy > 0) vy *= 0.15;
   }
 
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch };
@@ -260,21 +262,8 @@ export function tickFighterJet(
   if (nz < WORLD_MIN_Z) { nz = WORLD_MIN_Z; vz = Math.abs(vz) * BOUNDS_BOUNCE; }
   if (nz > WORLD_MAX_Z) { nz = WORLD_MAX_Z; vz = -Math.abs(vz) * BOUNDS_BOUNCE; }
 
-  const gndHeight = gnd(nx, nz);
-  const minAlt = gndHeight + FIGHTER_JET.minAltitude;
-  if (ny < minAlt) {
-    ny = minAlt;
-    if (vy < 0) vy *= -0.05;
-  }
-  if (ny <= minAlt + 0.5 && currentSpeed < FIGHTER_JET.stallSpeed) {
-    vy = 0;
-  }
-  if (ny > FIGHTER_JET.maxAltitude) {
-    ny = FIGHTER_JET.maxAltitude;
-    if (vy > 0) vy *= 0.1;
-  }
-
-  // ── Block collision ──
+  // ── Block collision (BEFORE ground clamping) ──
+  // Runs first so destroyed blocks don't push the vehicle upward via ground height.
   if (blockQuery) {
     const col = checkBlockCollision(
       nx, ny, nz,
@@ -291,6 +280,21 @@ export function tickFighterJet(
         collisionOut.cx = col.cx; collisionOut.cy = col.cy; collisionOut.cz = col.cz;
       }
     }
+  }
+
+  // ── Ground collision ──
+  const gndHeight = gnd(nx, nz);
+  const minAlt = gndHeight + FIGHTER_JET.minAltitude;
+  if (ny < minAlt) {
+    ny = minAlt;
+    if (vy < 0) vy *= -0.05;
+  }
+  if (ny <= minAlt + 0.5 && currentSpeed < FIGHTER_JET.stallSpeed) {
+    vy = 0;
+  }
+  if (ny > FIGHTER_JET.maxAltitude) {
+    ny = FIGHTER_JET.maxAltitude;
+    if (vy > 0) vy *= 0.1;
   }
 
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch };

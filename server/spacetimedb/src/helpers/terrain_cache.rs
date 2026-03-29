@@ -56,6 +56,35 @@ impl TerrainSampler {
         found as f32
     }
 
+    /// Invalidate cached surface heights for all columns overlapping the given block range.
+    /// Call this after destroying blocks so subsequent ground-height queries see the updated terrain.
+    pub fn invalidate_surface_range(&mut self, min_x: i32, max_x: i32, min_z: i32, max_z: i32) {
+        self.surface_cache.retain(|&(sx, sz), _| {
+            sx < min_x || sx > max_x || sz < min_z || sz > max_z
+        });
+    }
+
+    /// Invalidate the cached chunk data for all chunks overlapping the given block range.
+    /// Call this after `destroy_blocks_in_world` so subsequent block queries see updated data.
+    pub fn invalidate_chunk_range(&mut self, min_x: i32, max_x: i32, min_y: i32, max_y: i32, min_z: i32, max_z: i32) {
+        // Compute chunk coordinate ranges
+        let cx_min = (min_x.max(0) as usize) / CHUNK_SIZE;
+        let cx_max = (max_x.max(0) as usize) / CHUNK_SIZE;
+        let cy_min = (min_y.max(0) as usize) / CHUNK_SIZE;
+        let cy_max = (max_y.max(0) as usize) / CHUNK_SIZE;
+        let cz_min = (min_z.max(0) as usize) / CHUNK_SIZE;
+        let cz_max = (max_z.max(0) as usize) / CHUNK_SIZE;
+
+        for cx in cx_min..=cx_max {
+            for cy in cy_min..=cy_max {
+                for cz in cz_min..=cz_max {
+                    let chunk_id = worldgen::pack_chunk_id(cx as u8, cy as u8, cz as u8);
+                    self.chunk_cache.remove(&chunk_id);
+                }
+            }
+        }
+    }
+
     pub fn get_block_type(&mut self, ctx: &ReducerContext, x: i32, y: i32, z: i32) -> Option<u8> {
         if !block_in_bounds(x, y, z) {
             return Some(AIR);
