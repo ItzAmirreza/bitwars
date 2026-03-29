@@ -14,6 +14,7 @@ pub enum Biome {
     Mountains,
     Plains,
     Airport,
+    MilitaryOutpost,
 }
 
 const BIOME_CELL_SIZE: i32 = 90;
@@ -58,6 +59,53 @@ fn airport_cell(seed: u64) -> Option<(i32, i32)> {
     Some((cx, cz))
 }
 
+fn outpost_cell(seed: u64) -> Option<(i32, i32)> {
+    let min_cx = 1;
+    let min_cz = 1;
+    let max_cx = ((WORLD_SIZE_X as i32 - 1) / BIOME_CELL_SIZE) - 1;
+    let max_cz = ((WORLD_SIZE_Z as i32 - 1) / BIOME_CELL_SIZE) - 1;
+    if max_cx < min_cx || max_cz < min_cz {
+        return None;
+    }
+
+    let span_x = (max_cx - min_cx + 1) as u64;
+    let span_z = (max_cz - min_cz + 1) as u64;
+    // Use different hash constants than airport to get a different cell
+    let mut cx = min_cx + (hash_u64(seed ^ 0xa1b2_c3d4_e5f6_7890) % span_x) as i32;
+    let mut cz = min_cz + (hash_u64(seed ^ 0x1234_5678_9abc_def0) % span_z) as i32;
+
+    let world_cx = WORLD_SIZE_X as i32 / 2;
+    let world_cz = WORLD_SIZE_Z as i32 / 2;
+    let center_x = cx * BIOME_CELL_SIZE + BIOME_CELL_SIZE / 2;
+    let center_z = cz * BIOME_CELL_SIZE + BIOME_CELL_SIZE / 2;
+    let dx = center_x - world_cx;
+    let dz = center_z - world_cz;
+
+    // Keep outpost away from the forced-Urban center gameplay zone.
+    if dx * dx + dz * dz < 120 * 120 {
+        let mid_x = (min_cx + max_cx) / 2;
+        let mid_z = (min_cz + max_cz) / 2;
+        cx = if cx <= mid_x { max_cx } else { min_cx };
+        cz = if cz <= mid_z { max_cz } else { min_cz };
+    }
+
+    // Avoid overlapping with the airport: the runway is 160 blocks long (±80
+    // from cell center) and the outpost compound is 60 blocks wide (±30), so
+    // adjacent cells (90 blocks apart) can still overlap.  Require Chebyshev
+    // distance >= 2 (i.e. at least 180 blocks between cell centres).
+    if let Some((acx, acz)) = airport_cell(seed) {
+        let dx_cells = (cx - acx).abs();
+        let dz_cells = (cz - acz).abs();
+        if dx_cells < 2 && dz_cells < 2 {
+            // Push outpost to the opposite side of the map from the airport.
+            cx = if acx <= (min_cx + max_cx) / 2 { max_cx } else { min_cx };
+            cz = if acz <= (min_cz + max_cz) / 2 { max_cz } else { min_cz };
+        }
+    }
+
+    Some((cx, cz))
+}
+
 // ── Biome Selection ──
 
 pub fn get_biome(wx: i32, wz: i32, seed: u64) -> Biome {
@@ -69,6 +117,13 @@ pub fn get_biome(wx: i32, wz: i32, seed: u64) -> Biome {
     if let Some((airport_cx, airport_cz)) = airport_cell(seed) {
         if cx == airport_cx && cz == airport_cz {
             return Biome::Airport;
+        }
+    }
+
+    // Reserve exactly one biome cell for the military outpost.
+    if let Some((outpost_cx, outpost_cz)) = outpost_cell(seed) {
+        if cx == outpost_cx && cz == outpost_cz {
+            return Biome::MilitaryOutpost;
         }
     }
 
@@ -154,6 +209,11 @@ pub fn biome_height(biome: Biome, wx: i32, wz: i32, seed: u64) -> i32 {
             let base: f64 = 4.0;
             base.max(4.0).min(4.0)
         }
+        Biome::MilitaryOutpost => {
+            // Slightly elevated flat terrain — good vantage for AA
+            let base: f64 = 7.0;
+            base.max(7.0).min(7.0)
+        }
     };
     h.floor() as i32
 }
@@ -172,6 +232,7 @@ pub fn biome_surface_block(biome: Biome) -> u8 {
         Biome::Mountains => STONE,
         Biome::Plains => GRASS,
         Biome::Airport => ASPHALT,
+        Biome::MilitaryOutpost => CONCRETE,
     }
 }
 
@@ -183,6 +244,7 @@ pub fn biome_subsurface_block(biome: Biome) -> u8 {
         Biome::Mountains => DARK_CONCRETE,
         Biome::Plains => DIRT,
         Biome::Airport => CONCRETE,
+        Biome::MilitaryOutpost => DARK_CONCRETE,
     }
 }
 
@@ -194,6 +256,7 @@ pub fn biome_deep_block(biome: Biome) -> u8 {
         Biome::Mountains => STONE,
         Biome::Plains => DIRT,
         Biome::Airport => DARK_CONCRETE,
+        Biome::MilitaryOutpost => DARK_CONCRETE,
     }
 }
 
@@ -205,6 +268,7 @@ pub fn biome_wall_block(biome: Biome) -> u8 {
         Biome::Mountains => STONE,
         Biome::Plains => BRICK,
         Biome::Airport => METAL,
+        Biome::MilitaryOutpost => CONCRETE,
     }
 }
 
@@ -216,6 +280,7 @@ pub fn biome_floor_block(biome: Biome) -> u8 {
         Biome::Mountains => STONE,
         Biome::Plains => DIRT,
         Biome::Airport => CONCRETE,
+        Biome::MilitaryOutpost => DARK_CONCRETE,
     }
 }
 

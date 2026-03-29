@@ -246,3 +246,54 @@ pub fn spawn_jets_at_airstrips(ctx: &ReducerContext, world_seed: u64) {
 
     log::info!("Spawned {} jets at airport runways", spawned);
 }
+
+/// Spawn anti-air vehicles at military outpost biome cells.
+/// Uses `outpost_vehicle_spawn` to get the center pad position.
+pub fn spawn_aa_at_outposts(ctx: &ReducerContext, world_seed: u64) {
+    use crate::worldgen::biomes::{biome_height, get_biome, Biome};
+    use crate::worldgen::structures::outpost::outpost_vehicle_spawn;
+
+    let cell_size = 90i32;
+    let num_cells_x = (WORLD_SIZE_X as i32 / cell_size) + 1;
+    let num_cells_z = (WORLD_SIZE_Z as i32 / cell_size) + 1;
+    let mut spawned = 0usize;
+
+    'outer: for cx in 0..num_cells_x {
+        for cz in 0..num_cells_z {
+            let center_x = cx * cell_size + cell_size / 2;
+            let center_z = cz * cell_size + cell_size / 2;
+            if center_x < 0
+                || center_x >= WORLD_SIZE_X as i32
+                || center_z < 0
+                || center_z >= WORLD_SIZE_Z as i32
+            {
+                continue;
+            }
+
+            if spawned >= SANDBOX_AA_COUNT {
+                break 'outer;
+            }
+
+            let biome = get_biome(center_x, center_z, world_seed);
+            if biome != Biome::MilitaryOutpost {
+                continue;
+            }
+
+            let base_y = biome_height(biome, center_x, center_z, world_seed);
+            let (sx, sy, sz) = outpost_vehicle_spawn(center_x, center_z, base_y);
+
+            spawn_anti_air(
+                ctx,
+                Vec3 {
+                    x: sx as f32 + 0.5,
+                    y: sy as f32 + 1.0,
+                    z: sz as f32 + 0.5,
+                },
+                0.0, // facing north
+            );
+            spawned += 1;
+        }
+    }
+
+    log::info!("Spawned {} anti-air vehicles at military outposts", spawned);
+}

@@ -8,6 +8,7 @@
 
 pub mod airstrip;
 pub mod barricade;
+pub mod outpost;
 pub mod building;
 pub mod bunker;
 pub mod city_block;
@@ -64,6 +65,7 @@ pub fn place_structure_in_chunk(
 
 // Re-export for mod.rs generate_chunk
 pub use airstrip::place_airport_layouts;
+pub use outpost::place_outpost_layouts;
 pub use vegetation::scatter_vegetation;
 
 // ── Shared Helper ──
@@ -201,8 +203,8 @@ pub fn place_biome_structures(
             }
 
             let biome = get_biome(sox, soz, seed);
-            // Airport biome has its own dedicated layout — skip random structures
-            if biome == Biome::Airport {
+            // Airport and MilitaryOutpost biomes have their own dedicated layouts
+            if biome == Biome::Airport || biome == Biome::MilitaryOutpost {
                 continue;
             }
             let density = match biome {
@@ -211,7 +213,7 @@ pub fn place_biome_structures(
                 Biome::Plains => 0.70,
                 Biome::Desert => 0.60,
                 Biome::Mountains => 0.64,
-                Biome::Airport => unreachable!(),
+                Biome::Airport | Biome::MilitaryOutpost => unreachable!(),
             };
             let roll = hash2d_seeded(gx * 127, gz * 131, seed.wrapping_add(6000));
             if roll > density {
@@ -227,7 +229,7 @@ pub fn place_biome_structures(
                 Biome::Plains => 8 + (size_roll * 10.0) as i32,
                 Biome::Desert => 7 + (size_roll * 9.0) as i32,
                 Biome::Mountains => 7 + (size_roll * 8.0) as i32,
-                Biome::Airport => unreachable!(),
+                Biome::Airport | Biome::MilitaryOutpost => unreachable!(),
             };
             let mut sd = match biome {
                 Biome::Urban => {
@@ -245,7 +247,7 @@ pub fn place_biome_structures(
                 Biome::Mountains => {
                     7 + (hash2d_seeded(gx * 23, gz * 37, seed.wrapping_add(6003)) * 8.0) as i32
                 }
-                Biome::Airport => unreachable!(),
+                Biome::Airport | Biome::MilitaryOutpost => unreachable!(),
             };
 
             let struct_type = match biome {
@@ -312,7 +314,7 @@ pub fn place_biome_structures(
                         4
                     }
                 }
-                Biome::Airport => unreachable!(),
+                Biome::Airport | Biome::MilitaryOutpost => unreachable!(),
             };
 
             if struct_type == 5 {
