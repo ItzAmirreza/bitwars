@@ -65,6 +65,15 @@ export const VEHICLE_WEAPONS: VehicleWeaponInfo[] = VEHICLE_WEAPON_DEFINITIONS.m
   reloadTime: def.reloadTime,
 }));
 
+/** AA target tracking data for HUD overlay. */
+export interface AATarget {
+  screenX: number;   // 0..1 normalized screen X
+  screenY: number;   // 0..1 normalized screen Y
+  distance: number;  // distance in world units
+  name: string;      // vehicle type name
+  entityId: number;
+}
+
 /** Interface exposing only the Engine members VehicleManager needs. */
 export interface VehicleEngineContext {
   scene: THREE.Scene;
@@ -210,8 +219,8 @@ export default class VehicleManager {
       return this.vehicleWeaponIndex + 2;
     }
     if (vt && vt.typeId === VEHICLE_TYPES.AntiAir) {
-      // AA slot 0 → weapon index 4 (Autocannon), slot 1 → weapon index 5 (SAM Missile)
-      return this.vehicleWeaponIndex + 4;
+      // AA has only 1 slot → weapon index 4 (CRAM)
+      return 4;
     }
     return this.vehicleWeaponIndex;
   }
@@ -227,9 +236,57 @@ export default class VehicleManager {
       return slot + 2;
     }
     if (vt && vt.typeId === VEHICLE_TYPES.AntiAir) {
-      return slot + 4;
+      // AA has only 1 slot (CRAM at index 4)
+      return 4;
     }
     return slot;
+  }
+
+  /**
+   * Get nearby flying vehicles (helicopters/jets) for AA CRAM target HUD.
+   * Returns screen-space positions and distances for vehicles within tracking range.
+   */
+  getAATargets(camera: THREE.PerspectiveCamera, trackingRange: number): AATarget[] {
+    if (this.engine.mountedVehicleId === 0) return [];
+    const mounted = this.getMountedVehicleType();
+    if (!mounted || mounted.typeId !== VEHICLE_TYPES.AntiAir) return [];
+
+    const localInst = this.vehicleInstances.get(this.engine.mountedVehicleId);
+    if (!localInst) return [];
+    const aaPos = localInst.mesh.position;
+
+    const targets: AATarget[] = [];
+    const tmpV = new THREE.Vector3();
+    const rangeSq = trackingRange * trackingRange;
+
+    for (const [entityId, inst] of this.vehicleInstances) {
+      if (entityId === this.engine.mountedVehicleId) continue;
+      const vType = this.vehicleTypes.get(inst.type);
+      if (!vType) continue;
+      // Only track flying vehicles (helicopter=0, fighter jet=1)
+      if (vType.typeId !== VEHICLE_TYPES.Helicopter && vType.typeId !== VEHICLE_TYPES.FighterJet) continue;
+
+      const pos = inst.mesh.position;
+      const dSq = aaPos.distanceToSquared(pos);
+      if (dSq > rangeSq) continue;
+
+      // Project to screen space
+      tmpV.copy(pos);
+      tmpV.project(camera);
+      // Check if in front of camera
+      if (tmpV.z > 1) continue;
+
+      const dist = Math.sqrt(dSq);
+      targets.push({
+        screenX: (tmpV.x * 0.5 + 0.5),
+        screenY: (-tmpV.y * 0.5 + 0.5),
+        distance: dist,
+        name: vType.name,
+        entityId,
+      });
+    }
+
+    return targets;
   }
 
   /** Alternating side for carpet bomb drops: +1 = right, -1 = left */

@@ -1,8 +1,9 @@
 /**
- * AntiAirType.ts — VehicleType implementation for the anti-air emplacement.
+ * AntiAirType.ts — VehicleType implementation for the CRAM anti-air emplacement.
  *
- * Stationary ground emplacement with a rotating turret, dual-barrel autocannon,
- * and SAM missile launchers. Sits on a concrete platform with sandbag fortification.
+ * Stationary ground emplacement with a rotating turret and a 6-barrel Gatling
+ * CRAM (Counter Rocket, Artillery, Mortar) cannon. Sits on a concrete platform
+ * with sandbag fortification. Single weapon slot only.
  */
 
 import * as THREE from 'three';
@@ -220,39 +221,33 @@ export class AntiAirType implements VehicleType {
     // Commander's hatch
     B(turret, [0.5, 0.12, 0.5], HULL_DK, [-0.5, 1.55, 0]);
 
-    // ── Autocannon barrels (dual barrel) ──
+    // ── CRAM Gatling barrel cluster (6-barrel rotary cannon) ──
     const barrelGroup = new THREE.Group();
     barrelGroup.name = 'barrel-group';
     barrelGroup.position.set(1.4, 0.8, 0);
     turret.add(barrelGroup);
 
-    // Left barrel
-    B(barrelGroup, [4.0, 0.22, 0.22], BARREL,     [2.0, 0, -0.35]);
-    B(barrelGroup, [0.3, 0.28, 0.28], BARREL_TIP,  [4.05, 0, -0.35]);
-    // Right barrel
-    B(barrelGroup, [4.0, 0.22, 0.22], BARREL,     [2.0, 0, 0.35]);
-    B(barrelGroup, [0.3, 0.28, 0.28], BARREL_TIP,  [4.05, 0, 0.35]);
-    // Barrel housing
-    B(barrelGroup, [1.5, 0.5, 0.9], HULL_DK,      [0.2, 0, 0]);
+    // Barrel housing / shroud (chunky rectangular housing)
+    B(barrelGroup, [2.0, 0.8, 0.8], HULL_DK, [0, 0, 0]);
+    B(barrelGroup, [0.3, 0.9, 0.9], METAL_DK, [-0.9, 0, 0]);
 
-    // ── SAM missile pods (side-mounted on turret) ──
-    for (const side of [-1, 1]) {
-      const pod = new THREE.Group();
-      pod.name = side < 0 ? 'missile-pod-left' : 'missile-pod-right';
-      pod.position.set(-0.2, 0.6, side * 1.6);
-      turret.add(pod);
-
-      // Pod housing
-      B(pod, [1.8, 0.6, 0.5], HULL_DK, [0, 0, 0]);
-      // Missile tubes (2x2 grid)
-      for (const row of [-0.15, 0.15]) {
-        for (const col of [-0.12, 0.12]) {
-          B(pod, [1.6, 0.15, 0.15], DARK, [0.15, row, col]);
-          // Missile nose (red tip)
-          B(pod, [0.15, 0.12, 0.12], ACCENT, [1.0, row, col]);
-        }
-      }
+    // 6 barrels in circular arrangement
+    const BARREL_R = 0.28; // radius of barrel ring
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2;
+      const bz = Math.cos(angle) * BARREL_R;
+      const by = Math.sin(angle) * BARREL_R;
+      B(barrelGroup, [4.5, 0.14, 0.14], BARREL, [2.8, by, bz]);
+      B(barrelGroup, [0.25, 0.18, 0.18], BARREL_TIP, [5.1, by, bz]);
     }
+
+    // Front barrel clamp rings
+    B(barrelGroup, [0.12, 0.7, 0.7], HULL, [1.5, 0, 0]);
+    B(barrelGroup, [0.12, 0.7, 0.7], HULL, [3.5, 0, 0]);
+
+    // Ammo feed chute (side of turret)
+    B(turret, [1.2, 0.35, 0.35], HULL_DK, [0.5, 0.2, -1.35]);
+    B(turret, [0.5, 0.7, 0.35], HULL_DK, [-0.1, -0.05, -1.35]);
 
     // ═══════════════════════════════════════════════
     //  RADAR DISH (on top of turret)

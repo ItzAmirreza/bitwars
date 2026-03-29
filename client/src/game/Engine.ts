@@ -20,7 +20,7 @@ import { InfantryFireController } from './InfantryFireController';
 import type { InfantryFireContext } from './InfantryFireController';
 import { VehicleFireController } from './VehicleFireController';
 import type { VehicleFireContext } from './VehicleFireController';
-import { ENTITY_KINDS } from '../shared-config';
+import { ENTITY_KINDS, VEHICLE_TYPES, ANTI_AIR } from '../shared-config';
 import { GRENADE } from '../shared-config';
 import type { DbConnection } from '../module_bindings';
 import type { GameSettings } from '../store';
@@ -81,6 +81,7 @@ export interface EngineState {
   vehicleThrottle: number;   // 0..1 for jet throttle
   vehicleReloading: boolean;
   vehicleWeaponSlots: { name: string; color: string }[];
+  aaTargets: { screenX: number; screenY: number; distance: number; name: string }[];
   nearVehicle: boolean;
   nearVehicleName: string | null;
 }
@@ -1131,7 +1132,8 @@ export class Engine {
       if (this.mountedVehicleId !== 0) {
         // Vehicle weapon switching: 1/2/3
         const slot = parseInt(e.code.charAt(5), 10) - 1;
-        const maxSlots = this.vehicleManager.getMountedVehicleType()?.typeId === 1 ? 3 : 2; // jet=3, heli=2
+        const vTypeId = this.vehicleManager.getMountedVehicleType()?.typeId;
+        const maxSlots = vTypeId === 1 ? 3 : vTypeId === 2 ? 1 : 2; // jet=3, AA=1, heli=2
         if (slot >= 0 && slot < maxSlots && slot !== this.vehicleManager.vehicleWeaponIndex) {
           this.vehicleManager.vehicleWeaponIndex = slot;
           this.audio.playSwitch(this.localAudioSource(-0.1));
@@ -2987,17 +2989,24 @@ export class Engine {
       vehicleThrottle: this.vehicleManager.jetThrottle,
       vehicleReloading: this.mountedVehicleId !== 0 && this.vehicleManager.vehicleReloadingUntil[this.vehicleManager.vehicleWeaponIndex] > performance.now(),
       vehicleWeaponSlots: (() => {
+        const mountedType = this.vehicleManager.getMountedVehicleType();
+        const isJet = mountedType?.name === 'Fighter Jet';
+        const isAA = mountedType?.typeId === VEHICLE_TYPES.AntiAir;
+        if (isAA) {
+          // AA has only 1 weapon slot (CRAM)
+          return [{ name: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.name ?? '', color: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.color ?? '#fff' }];
+        }
         const slots = [
           { name: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.name ?? '', color: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.color ?? '#fff' },
           { name: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(1)]?.name ?? '', color: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(1)]?.color ?? '#fff' },
         ];
-        const isJet = this.vehicleManager.getMountedVehicleType()?.name === 'Fighter Jet';
         if (isJet) {
           const wep2 = VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(2)];
           if (wep2) slots.push({ name: wep2.name, color: wep2.color });
         }
         return slots;
       })(),
+      aaTargets: this.vehicleManager.getAATargets(this.camera, ANTI_AIR.trackingRange),
       nearVehicle,
       nearVehicleName,
     });
