@@ -25,8 +25,28 @@ impl TerrainSampler {
         self.surface_height(ctx, x, z) + 0.475
     }
 
+    pub fn helicopter_ground_rest_height_below(
+        &mut self,
+        ctx: &ReducerContext,
+        x: f32,
+        z: f32,
+        max_y: f32,
+    ) -> f32 {
+        self.surface_height_below(ctx, x, z, max_y) + 0.475
+    }
+
     pub fn fighter_jet_ground_height(&mut self, ctx: &ReducerContext, x: f32, z: f32) -> f32 {
         self.surface_height(ctx, x, z) + 1.0
+    }
+
+    pub fn fighter_jet_ground_height_below(
+        &mut self,
+        ctx: &ReducerContext,
+        x: f32,
+        z: f32,
+        max_y: f32,
+    ) -> f32 {
+        self.surface_height_below(ctx, x, z, max_y) + 1.0
     }
 
     pub fn ground_surface_height(&mut self, ctx: &ReducerContext, x: f32, z: f32) -> f32 {
@@ -54,6 +74,27 @@ impl TerrainSampler {
 
         self.surface_cache.insert((sx, sz), found);
         found as f32
+    }
+
+    fn surface_height_below(&mut self, ctx: &ReducerContext, x: f32, z: f32, max_y: f32) -> f32 {
+        let sx = x.floor() as i32;
+        let sz = z.floor() as i32;
+        if sx < 0 || sx >= WORLD_SIZE_X as i32 || sz < 0 || sz >= WORLD_SIZE_Z as i32 {
+            return 3.0;
+        }
+
+        let start_y = max_y.floor() as i32;
+        if start_y < 0 {
+            return 3.0;
+        }
+
+        for y in (0..=start_y.min(WORLD_SIZE_Y as i32 - 1)).rev() {
+            if matches!(self.get_block_type(ctx, sx, y, sz), Some(bt) if bt != AIR) {
+                return y as f32;
+            }
+        }
+
+        3.0
     }
 
     /// Invalidate cached surface heights for all columns overlapping the given block range.

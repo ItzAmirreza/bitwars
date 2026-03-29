@@ -272,6 +272,8 @@ pub struct VehicleBlockCollisionConfig {
     pub damage_per_block: i32,
     pub speed_retain_per_block: f32,
     pub min_speed_to_collide: f32,
+    pub speed_destroy_reference: f32,
+    pub min_destroy_fraction: f32,
     pub max_blocks_per_tick: usize,
     pub collision_hitbox_scale: f32,
 }
