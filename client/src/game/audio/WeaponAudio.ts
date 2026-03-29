@@ -626,70 +626,71 @@ export function playSwitch(core: AudioCore, spatial?: SpatialSoundOptions): void
 
 // ── Fighter Jet weapon sounds ──
 
-export function playBunkerBusterDrop(core: AudioCore, spatial?: SpatialSoundOptions): void {
+export function playKineticPenetratorFire(core: AudioCore, spatial?: SpatialSoundOptions): void {
   const busOptions: SpatialBusOptions = {
     gain: 1,
-    minDistance: 6,
-    maxDistance: 300,
-    rolloff: 0.9,
-    coneInner: 80,
-    coneOuter: 260,
-    coneOuterGain: 0.25,
-    occlusionStrength: 0.8,
-    baseLowpass: 8000,
-    reverbAmount: 0.18,
+    minDistance: 8,
+    maxDistance: 350,
+    rolloff: 0.8,
+    coneInner: 90,
+    coneOuter: 270,
+    coneOuterGain: 0.3,
+    occlusionStrength: 0.7,
+    baseLowpass: 10000,
+    reverbAmount: 0.2,
     bus: 'weapon',
     voiceCategory: 'weapon',
-    voiceDuration: 0.8,
+    voiceDuration: 0.6,
   };
-  const result = core.resolveOutput(spatial, busOptions, 0.4);
+  const result = core.resolveOutput(spatial, busOptions, 0.5);
   if (!result) return;
   const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
-  // Heavy descending whistle (bomb falling)
-  const whistle = ctx.createOscillator();
-  whistle.type = 'sine';
-  whistle.frequency.setValueAtTime(900, t0);
-  whistle.frequency.exponentialRampToValueAtTime(200, t0 + 0.7);
-  const wLp = ctx.createBiquadFilter();
-  wLp.type = 'lowpass';
-  wLp.frequency.value = 2200;
-  const wg = ctx.createGain();
-  wg.gain.setValueAtTime(0.25, t0);
-  wg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.7);
-  whistle.connect(wLp).connect(wg).connect(out);
-  whistle.start(t0);
-  whistle.stop(t0 + 0.72);
+  // High-energy electric discharge zap (ascending)
+  const zap = ctx.createOscillator();
+  zap.type = 'sawtooth';
+  zap.frequency.setValueAtTime(200, t0);
+  zap.frequency.exponentialRampToValueAtTime(4000, t0 + 0.05);
+  zap.frequency.exponentialRampToValueAtTime(800, t0 + 0.15);
+  const zapHp = ctx.createBiquadFilter();
+  zapHp.type = 'highpass';
+  zapHp.frequency.value = 400;
+  const zapG = ctx.createGain();
+  zapG.gain.setValueAtTime(0.3, t0);
+  zapG.gain.exponentialRampToValueAtTime(0.001, t0 + 0.2);
+  zap.connect(zapHp).connect(zapG).connect(out);
+  zap.start(t0);
+  zap.stop(t0 + 0.22);
 
-  // Thuddy release
+  // Heavy metallic thud (mass accelerator)
   const thud = ctx.createOscillator();
   thud.type = 'sine';
-  thud.frequency.setValueAtTime(90, t0);
-  thud.frequency.exponentialRampToValueAtTime(35, t0 + 0.15);
-  const tg = ctx.createGain();
-  tg.gain.setValueAtTime(0.35, t0);
-  tg.gain.exponentialRampToValueAtTime(0.001, t0 + 0.15);
-  thud.connect(tg).connect(out);
+  thud.frequency.setValueAtTime(60, t0);
+  thud.frequency.exponentialRampToValueAtTime(25, t0 + 0.2);
+  const thudG = ctx.createGain();
+  thudG.gain.setValueAtTime(0.45, t0);
+  thudG.gain.exponentialRampToValueAtTime(0.001, t0 + 0.25);
+  thud.connect(thudG).connect(out);
   thud.start(t0);
-  thud.stop(t0 + 0.16);
+  thud.stop(t0 + 0.27);
 
-  // Wind noise layer
-  const windSrc = ctx.createBufferSource();
-  windSrc.buffer = core.noise(0.6, 0.3);
-  const windBp = ctx.createBiquadFilter();
-  windBp.type = 'bandpass';
-  windBp.frequency.value = 1200;
-  windBp.Q.value = 0.6;
-  const windG = ctx.createGain();
-  windG.gain.setValueAtTime(0.15, t0);
-  windG.gain.exponentialRampToValueAtTime(0.001, t0 + 0.6);
-  windSrc.connect(windBp).connect(windG).connect(out);
-  windSrc.start(t0);
-  windSrc.stop(t0 + 0.62);
+  // Crackling energy noise
+  const crack = ctx.createBufferSource();
+  crack.buffer = core.noise(0.3, 0.5);
+  const crackBp = ctx.createBiquadFilter();
+  crackBp.type = 'bandpass';
+  crackBp.frequency.value = 3500;
+  crackBp.Q.value = 1.2;
+  const crackG = ctx.createGain();
+  crackG.gain.setValueAtTime(0.2, t0);
+  crackG.gain.exponentialRampToValueAtTime(0.001, t0 + 0.3);
+  crack.connect(crackBp).connect(crackG).connect(out);
+  crack.start(t0);
+  crack.stop(t0 + 0.32);
 }
 
-export function playBunkerBusterDetonation(core: AudioCore, spatial?: SpatialSoundOptions): void {
+export function playKineticPenetratorDetonation(core: AudioCore, spatial?: SpatialSoundOptions): void {
   const busOptions: SpatialBusOptions = {
     gain: 1,
     minDistance: 10,
@@ -710,7 +711,7 @@ export function playBunkerBusterDetonation(core: AudioCore, spatial?: SpatialSou
   const { ctx, t, out, delay } = result;
   const t0 = t + delay;
 
-  // Deep sub-bass rumble
+  // Deep sub-bass rumble (foundation collapsing)
   const subOsc = ctx.createOscillator();
   subOsc.type = 'sine';
   subOsc.frequency.setValueAtTime(45, t0);

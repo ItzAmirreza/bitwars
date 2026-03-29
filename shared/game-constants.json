@@ -151,17 +151,17 @@
     },
     {
       "index": 2,
-      "name": "BUNKER BUSTER",
-      "damage": 150,
-      "radius": 10.0,
-      "fireRate": 0.4,
-      "maxAmmo": 4,
-      "maxRange": 200.0,
-      "projectileSpeed": 60.0,
-      "gravity": 25.0,
-      "delivery": "projectile",
-      "color": "#ff2200",
-      "reloadTime": 8.0
+      "name": "KINETIC PENETRATOR",
+      "damage": 120,
+      "radius": 8.0,
+      "fireRate": 0.35,
+      "maxAmmo": 3,
+      "maxRange": 300.0,
+      "projectileSpeed": 0,
+      "gravity": 0,
+      "delivery": "hitscan",
+      "color": "#00ccff",
+      "reloadTime": 10.0
     },
     {
       "index": 3,
