@@ -146,28 +146,26 @@ pub fn apply_hitscan_vehicle_damage(
             continue;
         }
 
-        let center = Vec3 {
-            x: entity.pos.x,
-            y: entity.pos.y + vehicle_hitbox_center_y(&entity),
-            z: entity.pos.z,
-        };
+        let center = vehicle_hitbox_center(&entity);
         let max_vehicle_range = max_range + vehicle_hitbox_max_half(&entity) + 3.0;
         if dist_sq(origin, &center) > max_vehicle_range * max_vehicle_range {
             continue;
         }
 
-        let (hb_min, hb_max) = vehicle_hitbox_bounds(&entity);
-        let Some(t) = ray_aabb_t(origin, normalized_dir, &hb_min, &hb_max) else {
+        let Some(t) = vehicle_hitbox_ray_t(origin, normalized_dir, &entity, max_vehicle_range)
+        else {
             continue;
         };
-        if t > max_vehicle_range {
-            continue;
-        }
+        let hit_pos = Vec3 {
+            x: origin.x + normalized_dir.x * t,
+            y: origin.y + normalized_dir.y * t,
+            z: origin.z + normalized_dir.z * t,
+        };
 
         if first_hit_pos.is_none() {
-            first_hit_pos = Some(center.clone());
+            first_hit_pos = Some(hit_pos.clone());
         }
-        apply_vehicle_damage(ctx, sender, target_vehicle_id, damage, weapon, center);
+        apply_vehicle_damage(ctx, sender, target_vehicle_id, damage, weapon, hit_pos);
     }
 
     first_hit_pos
@@ -204,12 +202,11 @@ pub fn apply_splash_vehicle_damage(
         let max_half = vehicle_hitbox_max_half(&entity);
         let explosion_range_sq = (radius + max_half + 2.0).powi(2);
 
-        let center = Vec3 {
-            x: entity.pos.x,
-            y: entity.pos.y + vehicle_hitbox_center_y(&entity),
-            z: entity.pos.z,
-        };
+        let center = vehicle_hitbox_center(&entity);
         if dist_sq(impact_pos, &center) > explosion_range_sq {
+            continue;
+        }
+        if !vehicle_hitbox_intersects_sphere(&entity, impact_pos, radius) {
             continue;
         }
 
