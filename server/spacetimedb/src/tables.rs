@@ -12,6 +12,7 @@ use crate::grenades::tick_grenades;
 use crate::map::reset_map;
 // tick_vehicles is in vehicles/mod.rs, re-exported
 use crate::vehicles::tick_vehicles;
+use crate::abilities::tick_abilities;
 
 // ── Core Entities ──
 
@@ -378,6 +379,58 @@ pub struct VehicleTick {
 
 #[table(accessor = grenade_tick, scheduled(tick_grenades))]
 pub struct GrenadeTick {
+    #[primary_key]
+    #[auto_inc]
+    pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+}
+
+// ── Abilities ──
+
+/// Ability pickup spawned in the world.
+#[derive(Clone)]
+#[table(accessor = ability_pickup, public)]
+pub struct AbilityPickup {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub ability_type: u8,
+    pub pos: Vec3,
+    pub active: bool,
+    pub respawn_at: Timestamp,
+    pub created_at: Timestamp,
+}
+
+/// Active buff on a player (public so clients can render indicators).
+#[table(
+    accessor = player_buff,
+    public,
+    index(accessor = idx_buff_identity, btree(columns = [identity]))
+)]
+pub struct PlayerBuff {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub identity: Identity,
+    pub ability_type: u8,
+    pub expires_at: Timestamp,
+    pub created_at: Timestamp,
+}
+
+/// Short-lived event so all clients see the pickup VFX.
+#[table(accessor = ability_pickup_event, public)]
+pub struct AbilityPickupEvent {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub player: Identity,
+    pub ability_type: u8,
+    pub pos: Vec3,
+    pub created_at: Timestamp,
+}
+
+#[table(accessor = ability_tick, scheduled(tick_abilities))]
+pub struct AbilityTick {
     #[primary_key]
     #[auto_inc]
     pub scheduled_id: u64,

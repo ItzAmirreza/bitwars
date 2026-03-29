@@ -14,6 +14,7 @@ import { BottomHud } from './hud/BottomHud';
 import { Crosshair } from './hud/Crosshair';
 import { ChatOverlay } from './hud/ChatOverlay';
 import { DeathScreen } from './hud/DeathScreen';
+import { BuffIndicators } from './hud/BuffIndicators';
 import { useKillTracking } from './hooks/useKillTracking';
 import { useChat } from './hooks/useChat';
 
@@ -591,6 +592,9 @@ export function GameScreen({ active }: GameScreenProps) {
           setActiveLoadoutSlot={setActiveLoadoutSlot}
         />
       )}
+
+      {/* ═══ BUFF INDICATORS ═══ */}
+      <BuffIndicators buffs={engineState.activeBuffs ?? []} />
 
       {/* ═══ KILL FEED ═══ */}
       <KillFeed

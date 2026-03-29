@@ -28,6 +28,7 @@ pub struct GameConfig {
     pub vehicle_block_collision: VehicleBlockCollisionConfig,
     pub combat: CombatConfig,
     pub weather: Vec<WeatherConfig>,
+    pub abilities: AbilitiesConfig,
 }
 
 // ── Sub-Configs ──
@@ -297,6 +298,31 @@ pub struct WeatherConfig {
     pub cloud_density: f32,
     pub fog_density: f32,
     pub wind_speed: f32,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "PascalCase")]
+pub struct AbilityTypes {
+    pub health_regen: u8,
+    pub double_damage: u8,
+    pub speed_boost: u8,
+    pub shield: u8,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AbilitiesConfig {
+    pub types: AbilityTypes,
+    pub double_damage_duration_secs: u64,
+    pub double_damage_multiplier: f32,
+    pub speed_boost_duration_secs: u64,
+    pub speed_boost_multiplier: f32,
+    pub shield_duration_secs: u64,
+    pub shield_damage_reduction: f32,
+    pub pickup_radius: f32,
+    pub max_active_pickups: usize,
+    pub pickup_respawn_secs: u64,
+    pub tick_interval_ms: u64,
 }
 
 // ── Accessor ──

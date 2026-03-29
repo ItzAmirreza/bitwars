@@ -158,6 +158,9 @@ export function connect(
             "SELECT * FROM grenade_projectile",
             "SELECT * FROM kill_event",
             "SELECT * FROM vehicle_destroy_event",
+            "SELECT * FROM ability_pickup",
+            "SELECT * FROM player_buff",
+            "SELECT * FROM ability_pickup_event",
             // Keep vehicle/entity streams stable for prediction + fire origin.
             // These must not churn with AOI chunk resubscriptions.
             `SELECT * FROM entity WHERE kind = ${ENTITY_KINDS.Vehicle}`,
