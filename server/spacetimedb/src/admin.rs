@@ -9,7 +9,7 @@ use crate::tables::*;
 use crate::types::*;
 
 const ADMIN_USERNAME: &str = "amir";
-const ADMIN_HELP_TEXT: &str = "Admin commands:\n/tp <player> or /tp <x> <y> <z>\n/tphere <player>\n/kill <player>\n/heal [player]\n/god\n/fly\n/ammo\n/spawn <heli|jet>\n/weather <0-4>\n/time <0-24>\n/announce <message>\n/killall\n/respawnall";
+const ADMIN_HELP_TEXT: &str = "Admin commands:\n/tp <player> or /tp <x> <y> <z>\n/tphere <player>\n/kill <player>\n/heal [player]\n/god\n/fly\n/ammo\n/spawn <heli|jet|aa>\n/weather <0-4>\n/time <0-24>\n/announce <message>\n/killall\n/respawnall";
 
 pub fn is_admin(username: &str) -> bool {
     username.to_lowercase() == ADMIN_USERNAME
@@ -234,7 +234,7 @@ pub fn process_admin_command(
 
         "/spawn" => {
             if parts.len() != 2 {
-                insert_command_help(ctx, "Usage: /spawn <heli|jet>");
+                insert_command_help(ctx, "Usage: /spawn <heli|jet|aa>");
                 return Ok(());
             }
             let admin = ctx
@@ -265,8 +265,15 @@ pub fn process_admin_command(
                         &format!("Spawned fighter jet (entity {})", eid),
                     );
                 }
+                "aa" | "antiair" | "anti_air" => {
+                    let eid = crate::vehicles::spawn_anti_air(ctx, spawn_pos, yaw);
+                    insert_system_message(
+                        ctx,
+                        &format!("Spawned anti-air vehicle (entity {})", eid),
+                    );
+                }
                 _ => {
-                    insert_command_help(ctx, "Unknown vehicle. Available: heli, jet");
+                    insert_command_help(ctx, "Unknown vehicle. Available: heli, jet, aa");
                     return Ok(());
                 }
             }

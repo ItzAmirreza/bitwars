@@ -131,19 +131,18 @@ pub fn fire_weapon(
         let Some(entity) = ctx.db.entity().id().find(vehicle_id) else {
             continue;
         };
-        if !entity.active
-            || entity.kind != entity_kind_vehicle()
-            || entity.subtype != vehicle_type_helicopter()
-        {
+        if !entity.active || entity.kind != entity_kind_vehicle() {
             continue;
         }
 
+        let center_y_ofs = vehicle_hitbox_center_y(&entity);
+        let max_half = vehicle_hitbox_max_half(&entity);
         let center = Vec3 {
             x: entity.pos.x,
-            y: entity.pos.y + heli_hitbox_center_y(),
+            y: entity.pos.y + center_y_ofs,
             z: entity.pos.z,
         };
-        let max_vehicle_range = def.max_range + heli_hitbox_half_x() + 3.0;
+        let max_vehicle_range = def.max_range + max_half + 3.0;
         if dist_sq(&origin, &center) > max_vehicle_range * max_vehicle_range {
             continue;
         }
@@ -161,7 +160,7 @@ pub fn fire_weapon(
             continue;
         }
 
-        let (hb_min, hb_max) = helicopter_hitbox_bounds(&entity);
+        let (hb_min, hb_max) = vehicle_hitbox_bounds(&entity);
         let Some(t) = ray_aabb_t(&origin, &normalized_dir, &hb_min, &hb_max) else {
             continue;
         };
