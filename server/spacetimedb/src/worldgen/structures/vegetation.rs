@@ -179,7 +179,7 @@ pub fn scatter_vegetation(
             }
         }
         Biome::Urban => {}
-        Biome::Airport => {}           // No vegetation on airport tarmac
+        Biome::Airport => {}         // No vegetation on airport tarmac
         Biome::MilitaryOutpost => {} // No vegetation on military compound
     }
 }

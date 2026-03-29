@@ -8,11 +8,11 @@
 
 pub mod airstrip;
 pub mod barricade;
-pub mod outpost;
 pub mod building;
 pub mod bunker;
 pub mod city_block;
 pub mod megatower;
+pub mod outpost;
 pub mod rubble;
 pub mod tower;
 pub mod vegetation;
