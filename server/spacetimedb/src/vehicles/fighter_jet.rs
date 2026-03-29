@@ -250,6 +250,13 @@ pub fn tick_fighter_jet(
     entity.sim_tick = next_sim_tick;
     entity.updated_at = ctx.timestamp;
 
+    // ── Block collision ──
+    let (_blocks_hit, destroyed) =
+        super::collision::check_vehicle_block_collision(ctx, &mut entity, &mut vehicle, terrain);
+    if destroyed {
+        return;
+    }
+
     // ── Rotor spin (reused for jet engine visual) ──
     let spin_target = if has_pilot {
         8.0 + throttle * 10.0

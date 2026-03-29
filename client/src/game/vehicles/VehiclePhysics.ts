@@ -30,6 +30,7 @@ import {
   FIGHTER_JET,
   ANTI_AIR,
   WORLD,
+  VEHICLE_BLOCK_COLLISION,
 } from '../../shared-config';
 
 // ── Shared constants ──
@@ -62,12 +63,24 @@ export interface PhysicsInput {
 /** Returns ground surface Y (block top) at the given XZ. */
 export type GroundHeightFn = (x: number, z: number) => number;
 
+/** Returns block type at integer coords (0 = air). */
+export type BlockQueryFn = (x: number, y: number, z: number) => number;
+
+/** Info about blocks collided during a physics tick. */
+export interface BlockCollisionResult {
+  count: number;
+  /** Average position of hit blocks (for VFX). */
+  cx: number; cy: number; cz: number;
+}
+
 // ── Helicopter physics (mirrors server/vehicles/helicopter.rs) ──
 
 export function tickHelicopter(
   s: PhysicsState,
   input: PhysicsInput,
   gnd: GroundHeightFn,
+  blockQuery?: BlockQueryFn,
+  collisionOut?: BlockCollisionResult,
 ): PhysicsState {
   let { px, py, pz, vx, vy, vz, yaw, pitch } = s;
 
@@ -129,6 +142,25 @@ export function tickHelicopter(
     if (vy > 0) vy *= 0.15;
   }
 
+  // ── Block collision ──
+  if (blockQuery) {
+    const col = checkBlockCollision(
+      nx, ny, nz,
+      HELICOPTER.hitbox.halfX, HELICOPTER.hitbox.halfY, HELICOPTER.hitbox.halfZ,
+      HELICOPTER.hitbox.centerY,
+      vx, vy, vz,
+      blockQuery,
+    );
+    if (col.count > 0) {
+      const f = Math.pow(VEHICLE_BLOCK_COLLISION.speedRetainPerBlock, col.count);
+      vx *= f; vy *= f; vz *= f;
+      if (collisionOut) {
+        collisionOut.count += col.count;
+        collisionOut.cx = col.cx; collisionOut.cy = col.cy; collisionOut.cz = col.cz;
+      }
+    }
+  }
+
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch };
 }
 
@@ -138,6 +170,8 @@ export function tickFighterJet(
   s: PhysicsState,
   input: PhysicsInput,
   gnd: GroundHeightFn,
+  blockQuery?: BlockQueryFn,
+  collisionOut?: BlockCollisionResult,
 ): PhysicsState {
   let { px, py, pz, vx, vy, vz, yaw, pitch } = s;
 
@@ -240,6 +274,25 @@ export function tickFighterJet(
     if (vy > 0) vy *= 0.1;
   }
 
+  // ── Block collision ──
+  if (blockQuery) {
+    const col = checkBlockCollision(
+      nx, ny, nz,
+      FIGHTER_JET.hitbox.halfX, FIGHTER_JET.hitbox.halfY, FIGHTER_JET.hitbox.halfZ,
+      FIGHTER_JET.hitbox.centerY,
+      vx, vy, vz,
+      blockQuery,
+    );
+    if (col.count > 0) {
+      const f = Math.pow(VEHICLE_BLOCK_COLLISION.speedRetainPerBlock, col.count);
+      vx *= f; vy *= f; vz *= f;
+      if (collisionOut) {
+        collisionOut.count += col.count;
+        collisionOut.cx = col.cx; collisionOut.cy = col.cy; collisionOut.cz = col.cz;
+      }
+    }
+  }
+
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch };
 }
 
@@ -333,7 +386,11 @@ export class VehiclePrediction {
   private prevState: PhysicsState;
   private vehicleType: number;
   private groundFn: GroundHeightFn;
+  private blockQueryFn: BlockQueryFn | undefined;
   private accumulator = 0;
+
+  /** Collision info from the most recent advance() call. */
+  lastCollision: BlockCollisionResult = { count: 0, cx: 0, cy: 0, cz: 0 };
 
   /** Ring buffer of recent sent inputs, keyed by packet sequence. */
   private inputHistory: InputEntry[] = [];
@@ -354,11 +411,13 @@ export class VehiclePrediction {
     vehicleType: number,
     initial: PhysicsState,
     groundFn: GroundHeightFn,
+    blockQueryFn?: BlockQueryFn,
   ) {
     this.vehicleType = vehicleType;
     this.state = { ...initial };
     this.prevState = { ...initial };
     this.groundFn = groundFn;
+    this.blockQueryFn = blockQueryFn;
   }
 
   /** Run physics forward by `delta` seconds using the latest pilot input.
@@ -369,6 +428,7 @@ export class VehiclePrediction {
     input: PhysicsInput,
     onTick?: (input: PhysicsInput) => number,
   ): PhysicsState {
+    this.lastCollision.count = 0;
     this.accumulator += delta;
 
     while (this.accumulator >= TICK_DT) {
@@ -381,7 +441,7 @@ export class VehiclePrediction {
       }
 
       this.prevState = this.state;
-      this.state = this.tick(this.state, input);
+      this.state = this.tick(this.state, input, this.lastCollision);
     }
 
     // ── Per-frame smooth correction decay (render-only) ──
@@ -504,14 +564,14 @@ export class VehiclePrediction {
     this.oyaw = this.opitch = 0;
   }
 
-  private tick(s: PhysicsState, input: PhysicsInput): PhysicsState {
+  private tick(s: PhysicsState, input: PhysicsInput, collisionOut?: BlockCollisionResult): PhysicsState {
     if (this.vehicleType === VEHICLE_TYPES.FighterJet) {
-      return tickFighterJet(s, input, this.groundFn);
+      return tickFighterJet(s, input, this.groundFn, this.blockQueryFn, collisionOut);
     }
     if (this.vehicleType === VEHICLE_TYPES.AntiAir) {
       return tickAntiAir(s, input, this.groundFn);
     }
-    return tickHelicopter(s, input, this.groundFn);
+    return tickHelicopter(s, input, this.groundFn, this.blockQueryFn, collisionOut);
   }
 }
 
@@ -519,6 +579,53 @@ export class VehiclePrediction {
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
+}
+
+/** Check blocks overlapping a vehicle collision volume. Mirrors server collision.rs. */
+function checkBlockCollision(
+  px: number, py: number, pz: number,
+  halfX: number, halfY: number, halfZ: number,
+  centerYOffset: number,
+  vx: number, vy: number, vz: number,
+  blockQuery: BlockQueryFn,
+): { count: number; cx: number; cy: number; cz: number } {
+  const speedSq = vx * vx + vy * vy + vz * vz;
+  const minSpeed = VEHICLE_BLOCK_COLLISION.minSpeedToCollide;
+  if (speedSq < minSpeed * minSpeed) return { count: 0, cx: 0, cy: 0, cz: 0 };
+
+  const scale = VEHICLE_BLOCK_COLLISION.collisionHitboxScale;
+  const hx = halfX * scale;
+  const hy = halfY * scale;
+  const hz = halfZ * scale;
+  const cy = py + centerYOffset;
+
+  const minX = Math.floor(px - hx);
+  const maxX = Math.ceil(px + hx);
+  const minY = Math.floor(cy - hy);
+  const maxY = Math.ceil(cy + hy);
+  const minZ = Math.floor(pz - hz);
+  const maxZ = Math.ceil(pz + hz);
+
+  let count = 0;
+  let sumX = 0, sumY = 0, sumZ = 0;
+  const maxBlocks = VEHICLE_BLOCK_COLLISION.maxBlocksPerTick;
+
+  for (let bx = minX; bx <= maxX; bx++) {
+    for (let by = minY; by <= maxY; by++) {
+      for (let bz = minZ; bz <= maxZ; bz++) {
+        if (count >= maxBlocks) break;
+        const bt = blockQuery(bx, by, bz);
+        // 0 = air, 15 = bedrock — skip both
+        if (bt !== 0 && bt !== 15) {
+          count++;
+          sumX += bx; sumY += by; sumZ += bz;
+        }
+      }
+    }
+  }
+
+  if (count === 0) return { count: 0, cx: 0, cy: 0, cz: 0 };
+  return { count, cx: sumX / count + 0.5, cy: sumY / count + 0.5, cz: sumZ / count + 0.5 };
 }
 
 function lerpState(a: PhysicsState, b: PhysicsState, t: number): PhysicsState {

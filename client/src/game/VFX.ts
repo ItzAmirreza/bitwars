@@ -325,6 +325,54 @@ export class VFX {
     }
   }
 
+  // ── Vehicle block collision (sparks + debris) ──
+  emitVehicleCollision(x: number, y: number, z: number, count: number, vx: number, vy: number, vz: number): void {
+    // Sparks fly opposite to vehicle motion
+    const speed = Math.sqrt(vx * vx + vy * vy + vz * vz);
+    const invSpeed = speed > 0.01 ? 1 / speed : 0;
+    const ndx = -vx * invSpeed;
+    const ndy = -vy * invSpeed;
+    const ndz = -vz * invSpeed;
+
+    const sparkCount = Math.min(30, count * 4);
+    for (let i = 0; i < sparkCount && this.particles.length < MAX_PARTICLES; i++) {
+      // Orange-yellow sparks
+      const bright = 0.7 + Math.random() * 0.3;
+      this.particles.push({
+        x: x + (Math.random() - 0.5) * 2,
+        y: y + (Math.random() - 0.5) * 2,
+        z: z + (Math.random() - 0.5) * 2,
+        vx: ndx * speed * 0.4 + (Math.random() - 0.5) * 8,
+        vy: ndy * speed * 0.4 + Math.random() * 6 + 2,
+        vz: ndz * speed * 0.4 + (Math.random() - 0.5) * 8,
+        r: 1.0 * bright, g: (0.5 + Math.random() * 0.4) * bright, b: 0.1 * bright,
+        life: 0,
+        maxLife: 0.15 + Math.random() * 0.35,
+        size: 4 + Math.random() * 8,
+        gravity: true,
+      });
+    }
+
+    // Dust/debris cloud
+    const dustCount = Math.min(15, count * 2);
+    for (let i = 0; i < dustCount && this.particles.length < MAX_PARTICLES; i++) {
+      const v = 0.3 + Math.random() * 0.25;
+      this.particles.push({
+        x: x + (Math.random() - 0.5) * 3,
+        y: y + (Math.random() - 0.5) * 2,
+        z: z + (Math.random() - 0.5) * 3,
+        vx: (Math.random() - 0.5) * 6,
+        vy: Math.random() * 4 + 1,
+        vz: (Math.random() - 0.5) * 6,
+        r: v, g: v, b: v * 0.9,
+        life: 0,
+        maxLife: 0.3 + Math.random() * 0.5,
+        size: 12 + Math.random() * 10,
+        gravity: true,
+      });
+    }
+  }
+
   // ── Bullet tracer ──
   emitTracer(from: THREE.Vector3, to: THREE.Vector3, color: number): void {
     const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]);

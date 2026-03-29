@@ -25,6 +25,7 @@ pub struct GameConfig {
     pub fighter_jet: FighterJetConfig,
     pub anti_air: AntiAirConfig,
     pub grenade: GrenadeConfig,
+    pub vehicle_block_collision: VehicleBlockCollisionConfig,
     pub combat: CombatConfig,
     pub weather: Vec<WeatherConfig>,
 }
@@ -263,6 +264,16 @@ pub struct GrenadeConfig {
     pub min_bounce_vel: f32,
     pub radius: f32,
     pub weapon_index: u8,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct VehicleBlockCollisionConfig {
+    pub damage_per_block: i32,
+    pub speed_retain_per_block: f32,
+    pub min_speed_to_collide: f32,
+    pub max_blocks_per_tick: usize,
+    pub collision_hitbox_scale: f32,
 }
 
 #[derive(Deserialize, Debug)]

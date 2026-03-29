@@ -16,6 +16,7 @@ export const HELICOPTER = config.helicopter;
 export const FIGHTER_JET = config.fighterJet;
 export const ANTI_AIR = config.antiAir;
 export const GRENADE = config.grenade;
+export const VEHICLE_BLOCK_COLLISION = config.vehicleBlockCollision;
 export const COMBAT = config.combat;
 export const WEATHER = config.weather;
 

@@ -330,6 +330,14 @@
     "weaponIndex": 4
   },
 
+  "vehicleBlockCollision": {
+    "damagePerBlock": 8,
+    "speedRetainPerBlock": 0.92,
+    "minSpeedToCollide": 1.0,
+    "maxBlocksPerTick": 50,
+    "collisionHitboxScale": 0.5
+  },
+
   "combat": {
     "fireRateToleranceUs": 150000,
     "maxShotOriginDistSq": 25.0,
