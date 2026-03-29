@@ -214,6 +214,14 @@ pub fn fire_vehicle_weapon(
             z: fwd_z * speed * 0.3,
         };
         (bomb_origin, bomb_dir)
+    } else if vehicle.vehicle_type == constants::vehicle_type_anti_air() && slot == 1 {
+        // SAM missile: larger offset to clear AA hitbox
+        let origin = Vec3 {
+            x: muzzle_base.x + normalized_dir.x * 6.0,
+            y: muzzle_base.y + 2.0,
+            z: muzzle_base.z + normalized_dir.z * 6.0,
+        };
+        (origin, direction.clone())
     } else {
         let origin = Vec3 {
             x: muzzle_base.x + normalized_dir.x * 3.5,
