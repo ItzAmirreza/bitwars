@@ -70,15 +70,17 @@
     {
       "index": 1,
       "name": "Shotgun",
-      "damage": 14,
-      "radius": 1.5,
+      "damage": 15,
+      "radius": 0,
       "fireRate": 1.2,
-      "maxAmmo": 28,
-      "maxRange": 30.0,
+      "maxAmmo": 8,
+      "maxRange": 25.0,
       "projectileSpeed": 0,
       "delivery": "hitscan",
       "color": "#ff8844",
-      "recoil": 0.06
+      "recoil": 0.09,
+      "pellets": 7,
+      "spread": 0.1
     },
     {
       "index": 2,

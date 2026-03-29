@@ -107,6 +107,10 @@ pub struct WeaponConfig {
     pub delivery: String,
     pub color: String,
     pub recoil: f32,
+    #[serde(default)]
+    pub pellets: u8,
+    #[serde(default)]
+    pub spread: f32,
 }
 
 #[derive(Deserialize, Debug)]
