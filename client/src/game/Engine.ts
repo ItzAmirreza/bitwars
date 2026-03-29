@@ -25,6 +25,7 @@ import { GRENADE } from '../shared-config';
 import type { DbConnection } from '../module_bindings';
 import type { GameSettings } from '../store';
 import { NetDiagnostics } from './NetDiagnostics';
+import { ChunkBoundaryViewer } from './ChunkBoundaryViewer';
 import type { HarnessMode } from './PerfHarness';
 
 const ENTITY_KIND_VEHICLE = ENTITY_KINDS.Vehicle;
@@ -242,6 +243,7 @@ export class Engine {
 
   // Dev-only networking diagnostics (F3 overlay, F4 download)
   private netDiag = new NetDiagnostics();
+  private chunkBoundaryViewer!: ChunkBoundaryViewer;
 
   constructor(
     container: HTMLElement,
@@ -278,6 +280,7 @@ export class Engine {
     // ── Scene ──
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0x5a5856, 200, 500);
+    this.chunkBoundaryViewer = new ChunkBoundaryViewer(this.scene);
 
     // ── Lighting ──
     this.hemiLight = new THREE.HemisphereLight(0x8a8a95, 0x2a2218, 0.8);
@@ -403,6 +406,10 @@ export class Engine {
     window.addEventListener('resize', this.onResize);
 
     this.animate();
+  }
+
+  toggleChunkBoundaries(): void {
+    this.chunkBoundaryViewer.toggle();
   }
 
   // ── SETTINGS ──
@@ -2489,6 +2496,8 @@ export class Engine {
 
     this.chunkStreamer.ensureSpawnGroundReady();
 
+    this.chunkBoundaryViewer.update(this.camera, this.world);
+
     // Vehicle breakup piece physics (delegated to VehicleManager)
     this.vehicleManager.updateBreakupPieces(delta);
 
@@ -2918,6 +2927,7 @@ export class Engine {
     this.vfx.dispose();
     this.projectileManager.dispose();
     this.netDiag.dispose();
+    this.chunkBoundaryViewer.dispose();
     for (const ghost of this.predictedGrenadeGhosts) {
       this.scene.remove(ghost.mesh);
       ghost.mesh.geometry.dispose();

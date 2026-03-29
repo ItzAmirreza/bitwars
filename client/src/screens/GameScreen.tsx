@@ -379,6 +379,12 @@ export function GameScreen() {
         return;
       }
 
+      if (e.code === 'F9') {
+        e.preventDefault();
+        engineRef.current?.toggleChunkBoundaries();
+        return;
+      }
+
       if (e.code === 'KeyE' && state.locked && !showSettings && !state.mountedVehicleName) {
         e.preventDefault();
         openLoadout();
