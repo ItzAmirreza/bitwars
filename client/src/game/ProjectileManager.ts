@@ -5,6 +5,7 @@ import { VEHICLE_WEAPONS } from './vehicles/VehicleManager';
 import { COMBAT } from '../shared-config';
 import { VFX } from './VFX';
 import type { AudioSystem } from './AudioSystem';
+import { collectCappedEllipsoidCoords } from './explosionPattern';
 
 const MAX_PROJECTILES = 64;
 const MAX_LIGHTS = 4;
@@ -469,31 +470,20 @@ export class ProjectileManager {
       return destroyed;
     }
 
-    // Match server's max_block_destroy_per_call cap on candidate positions.
-    // Server counts all in-ellipsoid positions (not just solid blocks) and stops
-    // at this cap, so we must count the same way to predict the same set.
     const maxCandidates = COMBAT.maxBlockDestroyPerCall;
-    let candidates = 0;
-
-    const hr2 = hr * hr;
-    const vr2 = vr * vr;
-    outer:
-    for (let bx = Math.floor(center.x - hr); bx <= Math.ceil(center.x + hr); bx++) {
-      for (let by = Math.floor(center.y - vr); by <= Math.ceil(center.y + vr); by++) {
-        for (let bz = Math.floor(center.z - hr); bz <= Math.ceil(center.z + hr); bz++) {
-          const dx = bx - center.x, dy = by - center.y, dz = bz - center.z;
-          if ((dx * dx + dz * dz) / hr2 + (dy * dy) / vr2 <= 1.0
-            && this.world.inBounds(bx, by, bz)) {
-            candidates++;
-            if (candidates > maxCandidates) break outer;
-            const bt = this.world.getBlock(bx, by, bz);
-            if (bt !== 0 && bt !== BlockType.Bedrock) {
-              this.weapons.trackPendingDestruction(bx, by, bz, bt);
-              this.world.setBlock(bx, by, bz, 0);
-              destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
-            }
-          }
-        }
+    const coords = collectCappedEllipsoidCoords(
+      center,
+      hr,
+      vr,
+      maxCandidates,
+      (x, y, z) => this.world.inBounds(x, y, z),
+    );
+    for (const { x: bx, y: by, z: bz } of coords) {
+      const bt = this.world.getBlock(bx, by, bz);
+      if (bt !== 0 && bt !== BlockType.Bedrock) {
+        this.weapons.trackPendingDestruction(bx, by, bz, bt);
+        this.world.setBlock(bx, by, bz, 0);
+        destroyed.push({ x: bx, y: by, z: bz, blockType: bt });
       }
     }
     return destroyed;

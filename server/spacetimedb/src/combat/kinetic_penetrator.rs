@@ -8,7 +8,9 @@ use crate::chunks::{destroy_blocks_in_world, run_structural_check};
 use crate::combat::damage::{
     apply_splash_player_damage, apply_splash_vehicle_damage, emit_explosion,
 };
-use crate::combat::projectile::{collect_all_player_ids, collect_all_vehicle_ids};
+use crate::combat::projectile::{
+    collect_all_player_ids, collect_all_vehicle_ids, collect_capped_ellipsoid_block_coords,
+};
 use crate::constants::max_block_destroy_per_call;
 use crate::helpers::*;
 use crate::types::*;
@@ -81,33 +83,8 @@ pub fn kinetic_penetrator_strike(
         z: impact_pos.z,
     };
 
-    let r2 = radius * radius;
-    let mut blast_coords: Vec<(i32, i32, i32)> = Vec::new();
-    let det_x = detonation_pos.x;
-    let det_y = detonation_pos.y;
-    let det_z = detonation_pos.z;
-
-    for bx in (det_x - radius).floor() as i32..=(det_x + radius).ceil() as i32 {
-        for by in (det_y - radius).floor() as i32..=(det_y + radius).ceil() as i32 {
-            for bz in (det_z - radius).floor() as i32..=(det_z + radius).ceil() as i32 {
-                let dx = bx as f32 - det_x;
-                let dy = by as f32 - det_y;
-                let dz = bz as f32 - det_z;
-                if dx * dx + dy * dy + dz * dz <= r2 && block_in_bounds(bx, by, bz) {
-                    blast_coords.push((bx, by, bz));
-                    if blast_coords.len() >= max_blocks {
-                        break;
-                    }
-                }
-            }
-            if blast_coords.len() >= max_blocks {
-                break;
-            }
-        }
-        if blast_coords.len() >= max_blocks {
-            break;
-        }
-    }
+    let blast_coords =
+        collect_capped_ellipsoid_block_coords(&detonation_pos, radius, radius, max_blocks);
 
     let blast_destroyed = destroy_blocks_in_world(ctx, &blast_coords);
 

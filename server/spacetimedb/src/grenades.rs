@@ -6,6 +6,7 @@ use std::time::Duration;
 use spacetimedb::{reducer, Identity, ReducerContext, ScheduleAt, Table};
 
 use crate::chunks::{destroy_blocks_in_world, run_structural_check};
+use crate::combat::projectile::collect_capped_ellipsoid_block_coords;
 use crate::combat::{apply_splash_player_damage, apply_splash_vehicle_damage};
 use crate::constants::*;
 use crate::helpers::*;
@@ -90,20 +91,8 @@ fn explode_grenade(ctx: &ReducerContext, grenade: &GrenadeProjectile) {
 
     // Destroy blocks
     let r = def.radius;
-    let r2 = r * r;
-    let mut block_coords: Vec<(i32, i32, i32)> = Vec::new();
-    for bx in (pos.x - r).floor() as i32..=(pos.x + r).ceil() as i32 {
-        for by in (pos.y - r).floor() as i32..=(pos.y + r).ceil() as i32 {
-            for bz in (pos.z - r).floor() as i32..=(pos.z + r).ceil() as i32 {
-                let dx = bx as f32 - pos.x;
-                let dy = by as f32 - pos.y;
-                let dz = bz as f32 - pos.z;
-                if dx * dx + dy * dy + dz * dz <= r2 && block_in_bounds(bx, by, bz) {
-                    block_coords.push((bx, by, bz));
-                }
-            }
-        }
-    }
+    let block_coords =
+        collect_capped_ellipsoid_block_coords(pos, r, r, max_block_destroy_per_call());
     let actually_destroyed = destroy_blocks_in_world(ctx, &block_coords);
     let destroyed_positions: Vec<(i32, i32, i32)> = actually_destroyed
         .iter()

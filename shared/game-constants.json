@@ -334,7 +334,7 @@
     "fireRateToleranceUs": 150000,
     "maxShotOriginDistSq": 25.0,
     "maxVehicleShotOriginDistSq": 225.0,
-    "maxBlockDestroyPerCall": 500,
+    "maxBlockDestroyPerCall": 2500,
     "maxBlockDestroyRange": 40.0,
     "hitscanDotThresholdPlayer": 0.5,
     "hitscanDotThresholdVehicle": 0.35

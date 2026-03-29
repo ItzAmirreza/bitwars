@@ -11,6 +11,7 @@ import { COMBAT } from '../shared-config';
 import type { ChunkApplyBudget, VoxelWorld } from './VoxelWorld';
 import type VehicleManager from './vehicles/VehicleManager';
 import { VEHICLE_WEAPONS } from './vehicles/VehicleManager';
+import { collectCappedEllipsoidCoords } from './explosionPattern';
 
 /** Minimal interface exposing only the Engine members VehicleFireController needs. */
 export interface VehicleFireContext {
@@ -369,24 +370,18 @@ export class VehicleFireController {
     }
 
     // Phase 2: Foundation explosion (sphere at bottom of shaft)
-    const r = radius;
-    const r2 = r * r;
-    let blastCandidates = 0;
-    outer:
-    for (let bx = Math.floor(hitX - r); bx <= Math.ceil(hitX + r); bx++) {
-      for (let by = Math.floor(finalY - r); by <= Math.ceil(finalY + r); by++) {
-        for (let bz = Math.floor(hitZ - r); bz <= Math.ceil(hitZ + r); bz++) {
-          const ddx = bx - hitX, ddy = by - finalY, ddz = bz - hitZ;
-          if (ddx * ddx + ddy * ddy + ddz * ddz <= r2 && ctx.world.inBounds(bx, by, bz)) {
-            blastCandidates++;
-            if (blastCandidates > maxBlastCandidates) break outer;
-            const bt = ctx.world.getBlock(bx, by, bz);
-            if (bt !== 0 && bt !== BlockType.Bedrock) {
-              ctx.weapons.trackPendingDestruction(bx, by, bz, bt);
-              ctx.world.setBlock(bx, by, bz, 0);
-            }
-          }
-        }
+    const blastCoords = collectCappedEllipsoidCoords(
+      { x: hitX, y: finalY, z: hitZ },
+      radius,
+      radius,
+      maxBlastCandidates,
+      (x, y, z) => ctx.world.inBounds(x, y, z),
+    );
+    for (const { x: bx, y: by, z: bz } of blastCoords) {
+      const bt = ctx.world.getBlock(bx, by, bz);
+      if (bt !== 0 && bt !== BlockType.Bedrock) {
+        ctx.weapons.trackPendingDestruction(bx, by, bz, bt);
+        ctx.world.setBlock(bx, by, bz, 0);
       }
     }
 

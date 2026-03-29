@@ -137,42 +137,57 @@ pub fn collect_all_vehicle_ids(ctx: &ReducerContext) -> Vec<u64> {
 
 /// Server-side block destruction volume for projectile explosions.
 /// Uses an ellipsoid (horizontal + vertical radii) and authoritative block checks.
-pub fn destroy_spherical_blocks(
-    ctx: &ReducerContext,
+pub fn collect_capped_ellipsoid_block_coords(
     impact_pos: &Vec3,
     horizontal_radius: f32,
     vertical_radius: f32,
-) -> Vec<(i32, i32, i32, u8)> {
+    max_blocks: usize,
+) -> Vec<(i32, i32, i32)> {
     let hr = horizontal_radius.max(0.1);
     let vr = vertical_radius.max(0.1);
     let hr2 = hr * hr;
     let vr2 = vr * vr;
-    let max_blocks = max_block_destroy_per_call();
 
-    let mut block_coords: Vec<(i32, i32, i32)> = Vec::new();
+    let mut candidates: Vec<((i32, i32, i32), f32)> = Vec::new();
     for bx in (impact_pos.x - hr).floor() as i32..=(impact_pos.x + hr).ceil() as i32 {
         for by in (impact_pos.y - vr).floor() as i32..=(impact_pos.y + vr).ceil() as i32 {
             for bz in (impact_pos.z - hr).floor() as i32..=(impact_pos.z + hr).ceil() as i32 {
                 let dx = bx as f32 - impact_pos.x;
                 let dy = by as f32 - impact_pos.y;
                 let dz = bz as f32 - impact_pos.z;
-                if ((dx * dx + dz * dz) / hr2 + (dy * dy) / vr2 <= 1.0)
-                    && block_in_bounds(bx, by, bz)
-                {
-                    block_coords.push((bx, by, bz));
-                    if block_coords.len() >= max_blocks {
-                        break;
-                    }
+                let normalized_dist = (dx * dx + dz * dz) / hr2 + (dy * dy) / vr2;
+                if normalized_dist <= 1.0 && block_in_bounds(bx, by, bz) {
+                    candidates.push(((bx, by, bz), normalized_dist));
                 }
             }
-            if block_coords.len() >= max_blocks {
-                break;
-            }
-        }
-        if block_coords.len() >= max_blocks {
-            break;
         }
     }
+
+    candidates.sort_by(|a, b| {
+        let ((ax, ay, az), ad) = a;
+        let ((bx, by, bz), bd) = b;
+        ad.total_cmp(bd)
+            .then_with(|| ax.cmp(bx))
+            .then_with(|| ay.cmp(by))
+            .then_with(|| az.cmp(bz))
+    });
+    candidates.truncate(max_blocks);
+    candidates.into_iter().map(|(coord, _)| coord).collect()
+}
+
+pub fn destroy_spherical_blocks(
+    ctx: &ReducerContext,
+    impact_pos: &Vec3,
+    horizontal_radius: f32,
+    vertical_radius: f32,
+) -> Vec<(i32, i32, i32, u8)> {
+    let max_blocks = max_block_destroy_per_call();
+    let block_coords = collect_capped_ellipsoid_block_coords(
+        impact_pos,
+        horizontal_radius,
+        vertical_radius,
+        max_blocks,
+    );
 
     let actually_destroyed = destroy_blocks_in_world(ctx, &block_coords);
     let destroyed_positions: Vec<(i32, i32, i32)> = actually_destroyed
@@ -182,6 +197,40 @@ pub fn destroy_spherical_blocks(
     run_structural_check(ctx, &destroyed_positions);
 
     actually_destroyed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_capped_ellipsoid_block_coords;
+    use crate::types::Vec3;
+
+    #[test]
+    fn large_sphere_fits_current_cap_without_truncation() {
+        let center = Vec3 {
+            x: 50.5,
+            y: 24.5,
+            z: 50.5,
+        };
+
+        let coords = collect_capped_ellipsoid_block_coords(&center, 8.0, 8.0, 2_500);
+        assert_eq!(coords.len(), 2_176);
+    }
+
+    #[test]
+    fn capped_selection_keeps_both_sides_of_blast() {
+        let center = Vec3 {
+            x: 50.5,
+            y: 24.5,
+            z: 50.5,
+        };
+
+        let coords = collect_capped_ellipsoid_block_coords(&center, 8.0, 8.0, 500);
+        assert_eq!(coords.len(), 500);
+        assert!(coords.iter().any(|&(x, _, _)| x < center.x.floor() as i32));
+        assert!(coords.iter().any(|&(x, _, _)| x > center.x.floor() as i32));
+        assert!(coords.iter().any(|&(_, _, z)| z < center.z.floor() as i32));
+        assert!(coords.iter().any(|&(_, _, z)| z > center.z.floor() as i32));
+    }
 }
 
 #[reducer]
