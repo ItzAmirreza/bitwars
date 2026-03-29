@@ -205,6 +205,20 @@
       "delivery": "projectile",
       "color": "#ff3333",
       "reloadTime": 5.0
+    },
+    {
+      "index": 6,
+      "name": "AIR MISSILE",
+      "damage": 70,
+      "radius": 4.0,
+      "fireRate": 1.5,
+      "maxAmmo": 6,
+      "maxRange": 250.0,
+      "projectileSpeed": 120.0,
+      "gravity": 2.0,
+      "delivery": "projectile",
+      "color": "#00ccff",
+      "reloadTime": 5.0
     }
   ],
 

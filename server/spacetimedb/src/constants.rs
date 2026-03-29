@@ -195,6 +195,8 @@ pub fn vehicle_type_fighter_jet() -> u8 {
 pub fn jet_weapon_slot0() -> u8 { 2 }
 /// Carpet Bomb weapon index (jet slot 1).
 pub fn jet_weapon_slot1() -> u8 { 3 }
+/// Air Missile weapon index (jet slot 2).
+pub fn jet_weapon_slot2() -> u8 { 6 }
 
 /// Not in shared JSON — server-only spawn config.
 pub const SANDBOX_JET_COUNT: usize = 1;
