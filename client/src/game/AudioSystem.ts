@@ -420,6 +420,14 @@ export class AudioSystem {
     this.core.setMasterVolume(volume);
   }
 
+  suspend(): void {
+    this.core.suspend();
+  }
+
+  resume(): void {
+    this.core.resume();
+  }
+
   dispose(): void {
     // Terminate the ray tracer worker
     if (this.worker) {
