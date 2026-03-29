@@ -146,12 +146,20 @@ pub fn fire_vehicle_weapon(
             y: muzzle_base.y - 1.0,
             z: muzzle_base.z,
         };
-        let kp_dir = Vec3 { x: 0.0, y: -1.0, z: 0.0 };
+        let kp_dir = Vec3 {
+            x: 0.0,
+            y: -1.0,
+            z: 0.0,
+        };
         (kp_origin, kp_dir)
     // Carpet bomb: compute origin from jet position, direction straight down
     // with forward velocity inheritance. Alternate left/right offset.
     } else if resolved_idx == constants::jet_weapon_slot1() {
-        let side = if current_ammo % 2 == 0 { 1.0f32 } else { -1.0f32 };
+        let side = if current_ammo % 2 == 0 {
+            1.0f32
+        } else {
+            -1.0f32
+        };
         let right_x = entity.rot.yaw.cos();
         let right_z = -entity.rot.yaw.sin();
         let bomb_origin = Vec3 {
@@ -317,7 +325,7 @@ pub fn vehicle_projectile_impact(
     impact_pos: Vec3,
     _direction: Vec3,
     vehicle_weapon: u8,
-    _travel_time_ms: u32,
+    travel_time_ms: u32,
     _hit_players: Vec<Identity>,
     _hit_vehicles: Vec<u64>,
     _hit_blocks: Vec<Vec3>,
@@ -368,6 +376,7 @@ pub fn vehicle_projectile_impact(
         def.max_range,
         &impact_pos,
         &shot_origin,
+        travel_time_ms,
         Some(source_vehicle_id),
         true,
     ) else {
@@ -387,6 +396,13 @@ pub fn vehicle_projectile_impact(
     if dist_sq(&shot.origin, &impact_pos) > max_range * max_range {
         return Err("Impact too far from origin".to_string());
     }
+
+    weapons::validate_travel_time(
+        &shot.origin,
+        &impact_pos,
+        def.projectile_speed,
+        travel_time_ms,
+    );
 
     consume_projectile_shot(ctx, shot, &impact_pos);
 

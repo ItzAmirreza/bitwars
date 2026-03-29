@@ -138,7 +138,9 @@ pub fn tick_fighter_jet(
 
     // Pitch: Space = pull up (positive pitch_input), Shift = push down
     let on_ground = entity.pos.y
-        < terrain.fighter_jet_ground_height(ctx, entity.pos.x, entity.pos.z) + jet_min_altitude() + 1.0;
+        < terrain.fighter_jet_ground_height(ctx, entity.pos.x, entity.pos.z)
+            + jet_min_altitude()
+            + 1.0;
     let pitch_target = if has_pilot {
         pitch_input * 0.7 * stall_factor // Pitch authority scales with speed
     } else if on_ground || current_speed < 2.0 {

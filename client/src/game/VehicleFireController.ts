@@ -7,6 +7,7 @@ import type { PhysicsSystem } from './PhysicsSystem';
 import type { ProjectileManager } from './ProjectileManager';
 import type { FPSControls } from './FPSControls';
 import type { DbConnection } from '../module_bindings';
+import { COMBAT } from '../shared-config';
 import type { ChunkApplyBudget, VoxelWorld } from './VoxelWorld';
 import type VehicleManager from './vehicles/VehicleManager';
 import { VEHICLE_WEAPONS } from './vehicles/VehicleManager';
@@ -326,6 +327,7 @@ export class VehicleFireController {
   private predictKineticPenetratorStrike(hitX: number, hitY: number, hitZ: number, radius: number): void {
     const ctx = this.ctx;
     const maxDrill = 30;
+    const maxBlastCandidates = COMBAT.maxBlockDestroyPerCall;
     let finalY = hitY;
 
     // Phase 1: Drill 3x3 column downward
@@ -350,11 +352,15 @@ export class VehicleFireController {
     // Phase 2: Foundation explosion (sphere at bottom of shaft)
     const r = radius;
     const r2 = r * r;
+    let blastCandidates = 0;
+    outer:
     for (let bx = Math.floor(hitX - r); bx <= Math.ceil(hitX + r); bx++) {
       for (let by = Math.floor(finalY - r); by <= Math.ceil(finalY + r); by++) {
         for (let bz = Math.floor(hitZ - r); bz <= Math.ceil(hitZ + r); bz++) {
           const ddx = bx - hitX, ddy = by - finalY, ddz = bz - hitZ;
-          if (ddx * ddx + ddy * ddy + ddz * ddz <= r2) {
+          if (ddx * ddx + ddy * ddy + ddz * ddz <= r2 && ctx.world.inBounds(bx, by, bz)) {
+            blastCandidates++;
+            if (blastCandidates > maxBlastCandidates) break outer;
             const bt = ctx.world.getBlock(bx, by, bz);
             if (bt !== 0 && bt !== BlockType.Bedrock) {
               ctx.weapons.trackPendingDestruction(bx, by, bz, bt);

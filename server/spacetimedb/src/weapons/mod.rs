@@ -148,6 +148,36 @@ pub fn get_vehicle_weapon(index: u8) -> &'static VehicleWeaponDef {
     &vehicle_weapons_registry()[index as usize]
 }
 
+pub fn shot_event_retention_us(weapon_code: u8) -> u64 {
+    const HITSCAN_RETENTION_US: u64 = 2_000_000;
+    const PROJECTILE_GRACE_US: u64 = 2_000_000;
+    const MIN_PROJECTILE_RETENTION_US: u64 = 4_000_000;
+    const MAX_PROJECTILE_RETENTION_US: u64 = 12_000_000;
+
+    let (delivery, max_range, projectile_speed) = if weapon_code >= 100 {
+        let vehicle_index = weapon_code - 100;
+        if vehicle_index >= num_vehicle_weapons() {
+            return HITSCAN_RETENTION_US;
+        }
+        let def = get_vehicle_weapon(vehicle_index);
+        (def.delivery, def.max_range, def.projectile_speed)
+    } else {
+        if weapon_code >= num_weapons() {
+            return HITSCAN_RETENTION_US;
+        }
+        let def = get_weapon(weapon_code);
+        (def.delivery, def.max_range, def.projectile_speed)
+    };
+
+    if delivery == DeliveryMethod::Hitscan || projectile_speed <= 0.01 {
+        return HITSCAN_RETENTION_US;
+    }
+
+    let expected_flight_us = ((max_range / projectile_speed) * 1_000_000.0).ceil() as u64;
+    (expected_flight_us + PROJECTILE_GRACE_US)
+        .clamp(MIN_PROJECTILE_RETENTION_US, MAX_PROJECTILE_RETENTION_US)
+}
+
 // ── Normalized Ammo Accessors ──
 // These work with the PlayerAmmo table (1 row per player+weapon).
 // Adding a new weapon does NOT require changes here.
