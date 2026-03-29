@@ -34,7 +34,8 @@ export class AbilityPickupManager {
   private scene: THREE.Scene;
   private pickups: Map<bigint, PickupVisual> = new Map();
   private elapsed = 0;
-  private pendingCollect: Set<bigint> = new Set();
+  /** Cooldown timestamps to avoid spamming the reducer (cleared after 500ms). */
+  private collectCooldowns: Map<bigint, number> = new Map();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -110,23 +111,25 @@ export class AbilityPickupManager {
     (visual.label.material as THREE.SpriteMaterial).map?.dispose();
     (visual.label.material as THREE.Material).dispose();
     this.pickups.delete(id);
-    this.pendingCollect.delete(id);
+    this.collectCooldowns.delete(id);
   }
 
   setActive(id: bigint, active: boolean): void {
     const visual = this.pickups.get(id);
     if (visual) {
       visual.group.visible = active;
-      if (active) this.pendingCollect.delete(id);
+      if (active) this.collectCooldowns.delete(id);
     }
   }
 
   /** Returns pickup IDs within collection radius of the given position. */
   getPickupsInRange(px: number, py: number, pz: number): bigint[] {
+    const now = performance.now();
     const result: bigint[] = [];
     for (const [id, visual] of this.pickups) {
       if (!visual.group.visible) continue;
-      if (this.pendingCollect.has(id)) continue;
+      const cd = this.collectCooldowns.get(id);
+      if (cd !== undefined && now < cd) continue;
       const g = visual.group.position;
       const dx = g.x - px, dy = g.y - py, dz = g.z - pz;
       if (dx * dx + dy * dy + dz * dz <= PICKUP_RADIUS_SQ) {
@@ -136,9 +139,9 @@ export class AbilityPickupManager {
     return result;
   }
 
-  /** Mark a pickup as pending collection (avoid re-sending reducer). */
-  markPendingCollect(id: bigint): void {
-    this.pendingCollect.add(id);
+  /** Set a short cooldown so we don't spam the reducer for this pickup. */
+  markCollectAttempt(id: bigint): void {
+    this.collectCooldowns.set(id, performance.now() + 500);
   }
 
   update(delta: number): void {

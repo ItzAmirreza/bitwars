@@ -2332,7 +2332,7 @@ export class Engine {
     const pos = this.camera.position;
     const nearby = this.abilityPickups.getPickupsInRange(pos.x, pos.y, pos.z);
     for (const id of nearby) {
-      this.abilityPickups.markPendingCollect(id);
+      this.abilityPickups.markCollectAttempt(id);
       this.conn.reducers.collectAbility({ pickupId: id });
     }
   }
