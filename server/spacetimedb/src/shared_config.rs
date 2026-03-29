@@ -115,6 +115,8 @@ pub struct VehicleWeaponConfig {
     pub index: u8,
     pub name: String,
     pub damage: i32,
+    #[serde(default = "default_damage_scale")]
+    pub player_damage_scale: f32,
     pub radius: f32,
     pub fire_rate: f32,
     pub max_ammo: i32,
@@ -124,6 +126,10 @@ pub struct VehicleWeaponConfig {
     pub delivery: String,
     pub color: String,
     pub reload_time: f32,
+}
+
+fn default_damage_scale() -> f32 {
+    1.0
 }
 
 #[derive(Deserialize, Debug)]
