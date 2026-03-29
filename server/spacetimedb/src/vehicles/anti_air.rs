@@ -68,12 +68,11 @@ pub fn tick_anti_air(
     entity.vel.z = 0.0;
     entity.vel.y = 0.0;
 
-    // Ground snap (settle onto terrain if spawned slightly above)
+    // Ground snap (surface_height is the top solid block Y; +1.0 is the
+    // walkable top surface where the AA base should rest).
     let ground =
         terrain.ground_surface_height(ctx, entity.pos.x, entity.pos.z) + aa_min_altitude() + 1.0;
-    if entity.pos.y < ground {
-        entity.pos.y = ground;
-    }
+    entity.pos.y = ground;
 
     // Keep pitch level
     entity.rot.pitch = 0.0;
