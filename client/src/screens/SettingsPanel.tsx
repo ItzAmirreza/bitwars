@@ -2,112 +2,58 @@ import { useGameStore } from '../store';
 import type { GameSettings } from '../store';
 import { menuAudio } from '../menuAudio';
 
-function Slider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  display,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  display: string;
-  onChange: (v: number) => void;
+function Slider({ label, value, min, max, step, display, onChange }: {
+  label: string; value: number; min: number; max: number; step: number;
+  display: string; onChange: (v: number) => void;
 }) {
   return (
     <div style={{ marginBottom: '12px' }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          marginBottom: '4px',
-        }}
-      >
-        <span
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '12px',
-            color: 'var(--c-muted)',
-            letterSpacing: '0.1em',
-          }}
-        >
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+        <span style={{
+          fontFamily: 'var(--font-pixel)', fontSize: '7px',
+          color: '#6b7080', letterSpacing: '0.1em',
+        }}>
           {label}
         </span>
-        <span
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '12px',
-            color: 'var(--c-green)',
-          }}
-        >
+        <span style={{
+          fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#ff6b35',
+        }}>
           {display}
         </span>
       </div>
       <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
+        type="range" min={min} max={max} step={step} value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        style={{
-          width: '100%',
-          accentColor: 'var(--c-green)',
-          cursor: 'pointer',
-        }}
+        style={{ width: '100%', accentColor: '#ff6b35', cursor: 'pointer' }}
       />
     </div>
   );
 }
 
-function Toggle({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: boolean;
-  onChange: (v: boolean) => void;
+function Toggle({ label, value, onChange }: {
+  label: string; value: boolean; onChange: (v: boolean) => void;
 }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '10px',
-      }}
-    >
-      <span
-        style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '12px',
-          color: 'var(--c-muted)',
-          letterSpacing: '0.1em',
-        }}
-      >
+    <div style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px',
+    }}>
+      <span style={{
+        fontFamily: 'var(--font-pixel)', fontSize: '7px',
+        color: '#6b7080', letterSpacing: '0.1em',
+      }}>
         {label}
       </span>
       <button
-        onClick={() => {
-          onChange(!value);
-          menuAudio.playUIClick();
-        }}
+        onClick={() => { onChange(!value); menuAudio.playUIClick(); }}
         style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '12px',
-          padding: '4px 14px',
-          background: value ? 'rgba(0,255,65,0.15)' : 'rgba(255,255,255,0.05)',
-          border: `1px solid ${value ? 'var(--c-green)' : 'var(--c-border)'}`,
-          color: value ? 'var(--c-green)' : 'var(--c-muted)',
+          fontFamily: 'var(--font-pixel)', fontSize: '7px',
+          padding: '4px 12px',
+          background: value ? 'rgba(118,255,3,0.15)' : 'rgba(255,255,255,0.05)',
+          border: `2px solid ${value ? '#76ff03' : '#1a1e2e'}`,
+          color: value ? '#76ff03' : '#6b7080',
           cursor: 'pointer',
           letterSpacing: '0.05em',
-          transition: 'all 0.15s',
+          transition: 'all 0.1s',
         }}
       >
         {value ? 'ON' : 'OFF'}
@@ -116,55 +62,36 @@ function Toggle({
   );
 }
 
-function QualitySelect({
-  value,
-  onChange,
-}: {
+function QualitySelect({ value, onChange }: {
   value: GameSettings['graphicsQuality'];
   onChange: (v: GameSettings['graphicsQuality']) => void;
 }) {
   const options: GameSettings['graphicsQuality'][] = ['low', 'medium', 'high'];
   return (
-    <div
-      style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '10px',
-      }}
-    >
-      <span
-        style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '12px',
-          color: 'var(--c-muted)',
-          letterSpacing: '0.1em',
-        }}
-      >
+    <div style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px',
+    }}>
+      <span style={{
+        fontFamily: 'var(--font-pixel)', fontSize: '7px',
+        color: '#6b7080', letterSpacing: '0.1em',
+      }}>
         QUALITY
       </span>
       <div style={{ display: 'flex', gap: '4px' }}>
         {options.map((opt) => (
           <button
             key={opt}
-            onClick={() => {
-              onChange(opt);
-              menuAudio.playUIClick();
-            }}
+            onClick={() => { onChange(opt); menuAudio.playUIClick(); }}
             style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '11px',
-              padding: '4px 12px',
-              background:
-                value === opt
-                  ? 'rgba(0,255,65,0.15)'
-                  : 'rgba(255,255,255,0.05)',
-              border: `1px solid ${value === opt ? 'var(--c-green)' : 'var(--c-border)'}`,
-              color: value === opt ? 'var(--c-green)' : 'var(--c-muted)',
+              fontFamily: 'var(--font-pixel)', fontSize: '6px',
+              padding: '4px 10px',
+              background: value === opt ? 'rgba(255,107,53,0.15)' : 'rgba(255,255,255,0.05)',
+              border: `2px solid ${value === opt ? '#ff6b35' : '#1a1e2e'}`,
+              color: value === opt ? '#ff6b35' : '#6b7080',
               cursor: 'pointer',
               letterSpacing: '0.05em',
               textTransform: 'uppercase',
-              transition: 'all 0.15s',
+              transition: 'all 0.1s',
             }}
           >
             {opt}
@@ -176,181 +103,91 @@ function QualitySelect({
 }
 
 export function SettingsPanel() {
-  const { settings, setSettings, resetSettings, setShowSettings } =
-    useGameStore();
+  const { settings, setSettings, resetSettings, setShowSettings } = useGameStore();
 
-  const sectionStyle = {
-    marginBottom: '20px',
-  };
-
-  const sectionTitleStyle = {
-    fontFamily: 'var(--font-mono)' as const,
-    fontSize: '13px',
-    color: 'var(--c-amber)',
+  const sectionTitleStyle: React.CSSProperties = {
+    fontFamily: 'var(--font-pixel)',
+    fontSize: '8px',
+    color: '#ff6b35',
     letterSpacing: '0.15em',
     marginBottom: '12px',
     paddingBottom: '6px',
-    borderBottom: '1px solid var(--c-border)',
+    borderBottom: '2px solid #1a1e2e',
   };
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        inset: 0,
-        zIndex: 50,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'rgba(6,8,16,0.85)',
-        backdropFilter: 'blur(12px)',
-      }}
-    >
-      <div
-        style={{
-          width: 'min(420px, calc(100vw - 32px))',
-          maxHeight: '80vh',
-          overflowY: 'auto',
-          background: 'rgba(10,12,20,0.95)',
-          border: '1px solid var(--c-border)',
-          padding: '24px',
-        }}
-      >
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 50,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(10,12,20,0.9)',
+    }}>
+      <div style={{
+        width: 'min(420px, calc(100vw - 32px))',
+        maxHeight: '80vh',
+        overflowY: 'auto',
+        background: 'rgba(12,16,24,0.98)',
+        border: '3px solid #1a1e2e',
+        padding: '24px',
+        boxShadow: '6px 6px 0 rgba(0,0,0,0.4)',
+      }}>
         {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '20px',
-          }}
-        >
-          <span
-            style={{
-              fontFamily: 'var(--font-pixel)',
-              fontSize: '16px',
-              color: 'var(--c-green)',
-              letterSpacing: '0.1em',
-              textShadow: '0 0 15px rgba(0,255,65,0.4)',
-            }}
-          >
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px',
+        }}>
+          <span style={{
+            fontFamily: 'var(--font-pixel)', fontSize: '12px',
+            color: '#fff', letterSpacing: '0.1em',
+            textShadow: '2px 2px 0 #ff6b35',
+          }}>
             SETTINGS
           </span>
           <button
-            onClick={() => {
-              setShowSettings(false);
-              menuAudio.playUIClick();
-            }}
+            onClick={() => { setShowSettings(false); menuAudio.playUIClick(); }}
             style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: '16px',
-              color: 'var(--c-muted)',
-              background: 'none',
-              border: '1px solid var(--c-border)',
-              padding: '4px 10px',
-              cursor: 'pointer',
-              transition: 'all 0.15s',
+              fontFamily: 'var(--font-pixel)', fontSize: '10px',
+              color: '#6b7080', background: 'none',
+              border: '2px solid #1a1e2e', padding: '4px 10px',
+              cursor: 'pointer', transition: 'all 0.1s',
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = 'var(--c-red)';
-              e.currentTarget.style.color = 'var(--c-red)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = 'var(--c-border)';
-              e.currentTarget.style.color = 'var(--c-muted)';
-            }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#ff2d78'; e.currentTarget.style.color = '#ff2d78'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#1a1e2e'; e.currentTarget.style.color = '#6b7080'; }}
           >
             X
           </button>
         </div>
 
-        {/* CONTROLS */}
-        <div style={sectionStyle}>
+        <div style={{ marginBottom: '20px' }}>
           <div style={sectionTitleStyle}>CONTROLS</div>
-          <Slider
-            label="SENSITIVITY"
-            value={settings.sensitivity}
-            min={0.0005}
-            max={0.008}
-            step={0.0005}
-            display={settings.sensitivity.toFixed(4)}
-            onChange={(v) => setSettings({ sensitivity: v })}
-          />
-          <Slider
-            label="FIELD OF VIEW"
-            value={settings.fov}
-            min={60}
-            max={120}
-            step={1}
-            display={`${settings.fov}`}
-            onChange={(v) => setSettings({ fov: v })}
-          />
-          <Toggle
-            label="SPRINT TOGGLE"
-            value={settings.sprintToggle}
-            onChange={(v) => setSettings({ sprintToggle: v })}
-          />
+          <Slider label="SENSITIVITY" value={settings.sensitivity} min={0.0005} max={0.008} step={0.0005}
+            display={settings.sensitivity.toFixed(4)} onChange={(v) => setSettings({ sensitivity: v })} />
+          <Slider label="FIELD OF VIEW" value={settings.fov} min={60} max={120} step={1}
+            display={`${settings.fov}`} onChange={(v) => setSettings({ fov: v })} />
+          <Toggle label="SPRINT TOGGLE" value={settings.sprintToggle} onChange={(v) => setSettings({ sprintToggle: v })} />
         </div>
 
-        {/* GRAPHICS */}
-        <div style={sectionStyle}>
+        <div style={{ marginBottom: '20px' }}>
           <div style={sectionTitleStyle}>GRAPHICS</div>
-          <QualitySelect
-            value={settings.graphicsQuality}
-            onChange={(v) => setSettings({ graphicsQuality: v })}
-          />
-          <Toggle
-            label="SHADOWS"
-            value={settings.shadowsEnabled}
-            onChange={(v) => setSettings({ shadowsEnabled: v })}
-          />
-          <Toggle
-            label="POST EFFECTS"
-            value={settings.postFXEnabled}
-            onChange={(v) => setSettings({ postFXEnabled: v })}
-          />
+          <QualitySelect value={settings.graphicsQuality} onChange={(v) => setSettings({ graphicsQuality: v })} />
+          <Toggle label="SHADOWS" value={settings.shadowsEnabled} onChange={(v) => setSettings({ shadowsEnabled: v })} />
+          <Toggle label="POST EFFECTS" value={settings.postFXEnabled} onChange={(v) => setSettings({ postFXEnabled: v })} />
         </div>
 
-        {/* AUDIO */}
-        <div style={sectionStyle}>
+        <div style={{ marginBottom: '20px' }}>
           <div style={sectionTitleStyle}>AUDIO</div>
-          <Slider
-            label="MASTER VOLUME"
-            value={settings.masterVolume}
-            min={0}
-            max={1}
-            step={0.05}
-            display={`${Math.round(settings.masterVolume * 100)}%`}
-            onChange={(v) => setSettings({ masterVolume: v })}
-          />
+          <Slider label="MASTER VOLUME" value={settings.masterVolume} min={0} max={1} step={0.05}
+            display={`${Math.round(settings.masterVolume * 100)}%`} onChange={(v) => setSettings({ masterVolume: v })} />
         </div>
 
-        {/* Reset */}
         <button
-          onClick={() => {
-            resetSettings();
-            menuAudio.playUINavigate();
-          }}
+          onClick={() => { resetSettings(); menuAudio.playUINavigate(); }}
           style={{
-            width: '100%',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '12px',
-            color: 'var(--c-muted)',
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid var(--c-border)',
-            padding: '10px',
-            cursor: 'pointer',
-            letterSpacing: '0.15em',
-            transition: 'all 0.15s',
+            width: '100%', fontFamily: 'var(--font-pixel)', fontSize: '7px',
+            color: '#6b7080', background: 'rgba(255,255,255,0.03)',
+            border: '2px solid #1a1e2e', padding: '10px',
+            cursor: 'pointer', letterSpacing: '0.12em', transition: 'all 0.1s',
           }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'var(--c-amber)';
-            e.currentTarget.style.color = 'var(--c-amber)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = 'var(--c-border)';
-            e.currentTarget.style.color = 'var(--c-muted)';
-          }}
+          onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#ffd600'; e.currentTarget.style.color = '#ffd600'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#1a1e2e'; e.currentTarget.style.color = '#6b7080'; }}
         >
           RESET DEFAULTS
         </button>

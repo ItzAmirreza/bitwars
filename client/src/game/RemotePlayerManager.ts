@@ -51,64 +51,30 @@ export class RemotePlayerManager {
     const h = canvas.height;
     const displayName = username.length > 16 ? `${username.slice(0, 16)}...` : username;
     ctx2d.clearRect(0, 0, w, h);
+    ctx2d.imageSmoothingEnabled = false;
 
-    // Background with rounded corners and gradient
+    // Flat dark background — sharp rectangle
     const bgX = 16, bgY = 6, bgW = w - 32, bgH = h - 12;
-    const radius = 6;
-    ctx2d.beginPath();
-    ctx2d.moveTo(bgX + radius, bgY);
-    ctx2d.lineTo(bgX + bgW - radius, bgY);
-    ctx2d.quadraticCurveTo(bgX + bgW, bgY, bgX + bgW, bgY + radius);
-    ctx2d.lineTo(bgX + bgW, bgY + bgH - radius);
-    ctx2d.quadraticCurveTo(bgX + bgW, bgY + bgH, bgX + bgW - radius, bgY + bgH);
-    ctx2d.lineTo(bgX + radius, bgY + bgH);
-    ctx2d.quadraticCurveTo(bgX, bgY + bgH, bgX, bgY + bgH - radius);
-    ctx2d.lineTo(bgX, bgY + radius);
-    ctx2d.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
-    ctx2d.closePath();
+    ctx2d.fillStyle = 'rgba(6, 12, 22, 0.9)';
+    ctx2d.fillRect(bgX, bgY, bgW, bgH);
 
-    // Dark background fill
-    const bgGrad = ctx2d.createLinearGradient(bgX, bgY, bgX, bgY + bgH);
-    bgGrad.addColorStop(0, 'rgba(6, 12, 22, 0.85)');
-    bgGrad.addColorStop(1, 'rgba(4, 8, 16, 0.9)');
-    ctx2d.fillStyle = bgGrad;
-    ctx2d.fill();
+    // 2px solid border
+    ctx2d.strokeStyle = '#76ff03';
+    ctx2d.lineWidth = 3;
+    ctx2d.strokeRect(bgX, bgY, bgW, bgH);
 
-    // Border
-    ctx2d.strokeStyle = 'rgba(0, 255, 136, 0.45)';
-    ctx2d.lineWidth = 2;
-    ctx2d.stroke();
-
-    // Top accent line
-    ctx2d.beginPath();
-    ctx2d.moveTo(bgX + 20, bgY);
-    ctx2d.lineTo(bgX + bgW - 20, bgY);
-    ctx2d.strokeStyle = 'rgba(0, 255, 136, 0.7)';
-    ctx2d.lineWidth = 2;
-    ctx2d.stroke();
-
-    // Name text with shadow
-    ctx2d.shadowColor = 'rgba(0, 255, 136, 0.5)';
-    ctx2d.shadowBlur = 8;
-    ctx2d.fillStyle = '#00ff99';
-    ctx2d.font = 'bold 30px monospace';
+    // Name text — pixel font with hard offset shadow
+    ctx2d.font = 'bold 24px "Press Start 2P", monospace';
     ctx2d.textAlign = 'center';
     ctx2d.textBaseline = 'middle';
-    ctx2d.fillText(displayName, w / 2, h / 2);
-    ctx2d.shadowBlur = 0;
 
-    // Small corner brackets
-    const cLen = 6;
-    ctx2d.strokeStyle = 'rgba(0, 255, 136, 0.6)';
-    ctx2d.lineWidth = 2;
-    // Top-left
-    ctx2d.beginPath(); ctx2d.moveTo(bgX + 4, bgY + 4 + cLen); ctx2d.lineTo(bgX + 4, bgY + 4); ctx2d.lineTo(bgX + 4 + cLen, bgY + 4); ctx2d.stroke();
-    // Top-right
-    ctx2d.beginPath(); ctx2d.moveTo(bgX + bgW - 4 - cLen, bgY + 4); ctx2d.lineTo(bgX + bgW - 4, bgY + 4); ctx2d.lineTo(bgX + bgW - 4, bgY + 4 + cLen); ctx2d.stroke();
-    // Bottom-left
-    ctx2d.beginPath(); ctx2d.moveTo(bgX + 4, bgY + bgH - 4 - cLen); ctx2d.lineTo(bgX + 4, bgY + bgH - 4); ctx2d.lineTo(bgX + 4 + cLen, bgY + bgH - 4); ctx2d.stroke();
-    // Bottom-right
-    ctx2d.beginPath(); ctx2d.moveTo(bgX + bgW - 4 - cLen, bgY + bgH - 4); ctx2d.lineTo(bgX + bgW - 4, bgY + bgH - 4); ctx2d.lineTo(bgX + bgW - 4, bgY + bgH - 4 - cLen); ctx2d.stroke();
+    // Hard shadow (offset, no blur)
+    ctx2d.fillStyle = '#000000';
+    ctx2d.fillText(displayName, w / 2 + 2, h / 2 + 2);
+
+    // Main text
+    ctx2d.fillStyle = '#76ff03';
+    ctx2d.fillText(displayName, w / 2, h / 2);
 
     texture.needsUpdate = true;
   }
@@ -119,120 +85,49 @@ export class RemotePlayerManager {
     const preset = getCharacterPreset(presetValue);
     const model = new THREE.Group();
 
-    // Upgraded materials with roughness/metalness for a more solid, grounded look
-    const bodyMat = new THREE.MeshStandardMaterial({ color: preset.bodyColor, roughness: 0.85, metalness: 0.05 });
-    const vestMat = new THREE.MeshStandardMaterial({ color: preset.vestColor, roughness: 0.7, metalness: 0.1 });
-    const headMat = new THREE.MeshStandardMaterial({ color: preset.headColor, roughness: 0.9, metalness: 0.0 });
-    const visorMat = new THREE.MeshStandardMaterial({ color: preset.visorColor, emissive: preset.visorColor, emissiveIntensity: 0.4, roughness: 0.2, metalness: 0.6 });
-    const accentMat = new THREE.MeshStandardMaterial({ color: preset.accentColor, emissive: preset.accentColor, emissiveIntensity: 0.15, roughness: 0.5, metalness: 0.3 });
-    const bootMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.95, metalness: 0.05 });
-    const beltMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8, metalness: 0.15 });
-    const helmetMat = new THREE.MeshStandardMaterial({ color: preset.vestColor, roughness: 0.6, metalness: 0.2 });
+    // Flat Lambert materials — retro blocky look
+    const bodyMat = new THREE.MeshLambertMaterial({ color: preset.bodyColor });
+    const vestMat = new THREE.MeshLambertMaterial({ color: preset.vestColor });
+    const headMat = new THREE.MeshLambertMaterial({ color: preset.headColor });
+    const visorMat = new THREE.MeshLambertMaterial({ color: preset.visorColor, emissive: preset.visorColor, emissiveIntensity: 0.4 });
+    const accentMat = new THREE.MeshLambertMaterial({ color: preset.accentColor, emissive: preset.accentColor, emissiveIntensity: 0.15 });
+    // Darkened body for legs
+    const legMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(preset.bodyColor).multiplyScalar(0.7).getHex() });
 
     const addBox = (
       size: [number, number, number],
       material: THREE.Material,
       position: [number, number, number],
-      rotation: [number, number, number] = [0, 0, 0],
     ): THREE.Mesh => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
       mesh.position.set(...position);
-      mesh.rotation.set(...rotation);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       model.add(mesh);
       return mesh;
     };
 
-    // ── BOOTS ──
-    addBox([0.24, 0.16, 0.28], bootMat, [-0.16, 0.08, -0.02]);
-    addBox([0.24, 0.16, 0.28], bootMat, [0.16, 0.08, -0.02]);
+    // ── HEAD ──
+    addBox([0.5, 0.5, 0.5], headMat, [0, 1.65, 0]);
+    // Visor slit
+    addBox([0.44, 0.12, 0.06], visorMat, [0, 1.68, -0.26]);
 
-    // ── LEGS ──
-    addBox([0.22, 0.48, 0.22], bodyMat, [-0.16, 0.40, 0]);
-    addBox([0.22, 0.48, 0.22], bodyMat, [0.16, 0.40, 0]);
-
-    // ── KNEE PADS ──
-    addBox([0.14, 0.10, 0.06], vestMat, [-0.16, 0.38, -0.14]);
-    addBox([0.14, 0.10, 0.06], vestMat, [0.16, 0.38, -0.14]);
-
-    // ── WAIST / HIPS ──
-    addBox([0.56, 0.34, 0.30], bodyMat, [0, 0.79, 0]);
-
-    // ── BELT ──
-    addBox([0.60, 0.08, 0.34], beltMat, [0, 0.94, 0]);
-    // Belt pouches
-    addBox([0.10, 0.10, 0.08], vestMat, [-0.24, 0.90, -0.18]);
-    addBox([0.10, 0.10, 0.08], vestMat, [0.24, 0.90, -0.18]);
-    addBox([0.12, 0.12, 0.06], vestMat, [0.30, 0.88, 0.0]);
-
-    // ── UPPER TORSO ──
-    addBox([0.62, 0.78, 0.34], bodyMat, [0, 1.34, 0]);
-
-    // ── TACTICAL VEST ──
-    addBox([0.68, 0.64, 0.38], vestMat, [0, 1.34, 0.01]);
-    // Vest chest plate detail
-    addBox([0.30, 0.22, 0.04], accentMat, [0, 1.42, -0.21]);
-    // Shoulder straps
-    addBox([0.08, 0.30, 0.18], vestMat, [-0.28, 1.52, 0.0]);
-    addBox([0.08, 0.30, 0.18], vestMat, [0.28, 1.52, 0.0]);
-
-    // ── SHOULDER PADS ──
-    addBox([0.22, 0.12, 0.22], vestMat, [-0.38, 1.58, 0.0]);
-    addBox([0.22, 0.12, 0.22], vestMat, [0.38, 1.58, 0.0]);
-    // Shoulder pad accent stripe
-    addBox([0.16, 0.04, 0.16], accentMat, [-0.38, 1.65, 0.0]);
-    addBox([0.16, 0.04, 0.16], accentMat, [0.38, 1.65, 0.0]);
+    // ── BODY ──
+    addBox([0.55, 0.65, 0.3], vestMat, [0, 1.1, 0]);
+    // Accent stripe across chest
+    addBox([0.55, 0.06, 0.32], accentMat, [0, 1.35, 0]);
 
     // ── ARMS ──
-    // Left arm (relaxed)
-    addBox([0.18, 0.50, 0.18], bodyMat, [-0.40, 1.25, -0.02], [0.12, 0, 0.22]);
-    addBox([0.16, 0.34, 0.16], bodyMat, [-0.37, 0.92, -0.12], [0.2, 0, 0.24]);
-    // Left glove
-    addBox([0.14, 0.10, 0.14], bootMat, [-0.34, 0.73, -0.18], [0.2, 0, 0.24]);
+    addBox([0.2, 0.6, 0.2], bodyMat, [-0.38, 1.05, 0]);
+    addBox([0.2, 0.6, 0.2], bodyMat, [0.38, 1.05, 0]);
 
-    // Right arm (holding weapon)
-    addBox([0.18, 0.44, 0.18], bodyMat, [0.39, 1.35, 0.02], [-0.38, 0.12, -0.08]);
-    addBox([0.16, 0.28, 0.16], bodyMat, [0.47, 1.09, -0.12], [-0.45, 0.1, -0.12]);
-    // Right glove
-    addBox([0.14, 0.10, 0.14], bootMat, [0.50, 0.95, -0.18], [-0.45, 0.1, -0.12]);
-
-    // ── NECK ──
-    addBox([0.18, 0.10, 0.18], headMat, [0, 1.76, 0]);
-
-    // ── HEAD (HELMET) ──
-    addBox([0.44, 0.44, 0.44], helmetMat, [0, 1.95, 0]);
-    // Helmet brim/ridge
-    addBox([0.48, 0.06, 0.48], helmetMat, [0, 2.10, 0]);
-    // Face plate (slightly inset)
-    addBox([0.34, 0.28, 0.04], headMat, [0, 1.92, -0.24]);
-
-    // ── VISOR ──
-    addBox([0.30, 0.12, 0.05], visorMat, [0, 1.98, -0.26]);
-    // Visor side accents
-    addBox([0.04, 0.08, 0.08], visorMat, [-0.19, 1.98, -0.22]);
-    addBox([0.04, 0.08, 0.08], visorMat, [0.19, 1.98, -0.22]);
-
-    // ── CHIN / MOUTH GUARD ──
-    addBox([0.20, 0.08, 0.06], accentMat, [0, 1.85, -0.25]);
-    // Breathing apparatus
-    addBox([0.08, 0.08, 0.06], accentMat, [0, 1.88, -0.29]);
-
-    // ── BACKPACK ──
-    addBox([0.36, 0.46, 0.14], vestMat, [0, 1.24, 0.24]);
-    // Backpack top flap
-    addBox([0.32, 0.06, 0.12], vestMat, [0, 1.49, 0.24]);
-    // Backpack accent stripe
-    addBox([0.06, 0.30, 0.02], accentMat, [0, 1.24, 0.32]);
-    // Antenna nub on backpack
-    addBox([0.03, 0.14, 0.03], accentMat, [0.14, 1.56, 0.26]);
-
-    // ── CHEST BADGE ──
-    addBox([0.12, 0.06, 0.04], accentMat, [-0.14, 1.50, -0.20]);
+    // ── LEGS ──
+    addBox([0.22, 0.5, 0.22], legMat, [-0.14, 0.4, 0]);
+    addBox([0.22, 0.5, 0.22], legMat, [0.14, 0.4, 0]);
 
     const gunMount = new THREE.Group();
     gunMount.name = 'remote-player-gun-mount';
-    gunMount.position.set(0.5, 1.04, -0.17);
+    gunMount.position.set(0.48, 0.95, -0.15);
     gunMount.rotation.set(-0.08, -0.03, -0.22);
     model.add(gunMount);
 
@@ -257,9 +152,9 @@ export class RemotePlayerManager {
     const gun = new THREE.Group();
     gun.name = 'remote-player-gun';
 
-    const gunMat = new THREE.MeshStandardMaterial({ color: mainColor, roughness: 0.6, metalness: 0.3 });
-    const bodyMat = new THREE.MeshStandardMaterial({ color: preset.gunColor, roughness: 0.5, metalness: 0.4 });
-    const detailMat = new THREE.MeshStandardMaterial({ color: preset.accentColor, emissive: preset.accentColor, emissiveIntensity: 0.25, roughness: 0.4, metalness: 0.3 });
+    const gunMat = new THREE.MeshLambertMaterial({ color: mainColor });
+    const bodyMat = new THREE.MeshLambertMaterial({ color: preset.gunColor });
+    const detailMat = new THREE.MeshLambertMaterial({ color: preset.accentColor, emissive: preset.accentColor, emissiveIntensity: 0.25 });
 
     const add = (size: [number, number, number], material: THREE.Material, pos: [number, number, number]): void => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
@@ -270,30 +165,30 @@ export class RemotePlayerManager {
     };
 
     if (idx === 1) {
-      add([0.13, 0.12, 0.44], bodyMat, [0, 0, -0.03]);
-      add([0.1, 0.09, 0.24], gunMat, [0, 0, 0.3]);
-      add([0.06, 0.06, 0.36], detailMat, [0, -0.09, -0.18]);
-      add([0.07, 0.16, 0.07], bodyMat, [0, -0.12, 0.02]);
+      // Shotgun: body + barrel + accent
+      add([0.1, 0.09, 0.4], bodyMat, [0, 0, -0.03]);
+      add([0.06, 0.06, 0.3], gunMat, [0, 0, -0.3]);
+      add([0.08, 0.015, 0.06], detailMat, [0, 0.05, -0.1]);
     } else if (idx === 2) {
-      add([0.17, 0.17, 0.58], bodyMat, [0, 0, -0.07]);
-      add([0.1, 0.1, 0.18], gunMat, [0, 0, 0.36]);
-      add([0.08, 0.08, 0.09], detailMat, [0, 0, -0.42]);
-      add([0.08, 0.18, 0.08], gunMat, [0, -0.13, 0.06]);
+      // RPG: tube + flare + tip
+      add([0.12, 0.12, 0.5], bodyMat, [0, 0, -0.07]);
+      add([0.14, 0.14, 0.06], gunMat, [0, 0, -0.36]);
+      add([0.07, 0.07, 0.07], detailMat, [0, 0, -0.42]);
     } else if (idx === 3) {
-      add([0.12, 0.11, 0.52], bodyMat, [0, 0, -0.08]);
-      add([0.07, 0.07, 0.26], detailMat, [0, 0.09, -0.18]);
-      add([0.1, 0.1, 0.2], gunMat, [0, 0, 0.28]);
-      add([0.09, 0.22, 0.1], gunMat, [0, -0.16, 0]);
+      // Machine gun: body + barrel + accent
+      add([0.1, 0.09, 0.4], bodyMat, [0, 0, 0]);
+      add([0.05, 0.05, 0.35], gunMat, [0, 0.01, -0.3]);
+      add([0.1, 0.015, 0.12], detailMat, [0, 0.06, 0]);
     } else if (idx === 4) {
-      add([0.14, 0.13, 0.48], bodyMat, [0, 0, -0.03]);
-      add([0.12, 0.12, 0.2], gunMat, [0, 0, 0.27]);
-      add([0.12, 0.12, 0.12], detailMat, [0, -0.11, 0.08]);
-      add([0.07, 0.17, 0.07], bodyMat, [0, -0.13, 0]);
+      // Grenade launcher: tube + breech + drum
+      add([0.12, 0.12, 0.4], bodyMat, [0, 0, -0.05]);
+      add([0.13, 0.11, 0.1], gunMat, [0, 0, 0.2]);
+      add([0.08, 0.08, 0.08], detailMat, [0, -0.09, 0.06]);
     } else {
-      add([0.11, 0.1, 0.5], bodyMat, [0, 0, -0.08]);
-      add([0.05, 0.05, 0.5], detailMat, [0, 0, -0.35]);
-      add([0.08, 0.08, 0.2], gunMat, [0, 0, 0.27]);
-      add([0.06, 0.16, 0.07], gunMat, [0, -0.12, 0.03]);
+      // Rifle: body + barrel + accent
+      add([0.08, 0.08, 0.3], bodyMat, [0, 0, 0]);
+      add([0.04, 0.04, 0.3], gunMat, [0, 0, -0.28]);
+      add([0.075, 0.015, 0.12], detailMat, [0, 0.04, -0.08]);
     }
 
     return gun;
@@ -346,7 +241,7 @@ export class RemotePlayerManager {
       this.drawNametag(canvas, texture, username);
       const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
       sprite.name = 'remote-player-nametag';
-      sprite.position.y = 2.45; sprite.scale.set(2.4, 0.6, 1);
+      sprite.position.y = 2.15; sprite.scale.set(2.4, 0.6, 1);
       group.add(sprite);
       group.userData.username = username;
       group.userData.characterPreset = normalizedPreset;

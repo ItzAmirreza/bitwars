@@ -190,22 +190,21 @@ function StatBar({ label, value, max, color }: { label: string; value: number; m
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
       <span style={{
-        fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'var(--c-muted)',
+        fontFamily: 'var(--font-pixel)', fontSize: '6px', color: 'var(--c-muted)',
         letterSpacing: '0.1em', width: '28px', flexShrink: 0, textAlign: 'right',
       }}>{label}</span>
       <div style={{
         flex: 1, height: '4px', background: 'rgba(255,255,255,0.06)',
-        borderRadius: '2px', overflow: 'hidden', position: 'relative',
+        overflow: 'hidden', position: 'relative',
       }}>
         <div style={{
-          width: `${pct}%`, height: '100%', borderRadius: '2px',
-          background: `linear-gradient(90deg, ${color}cc, ${color})`,
-          boxShadow: `0 0 6px ${color}40`,
+          width: `${pct}%`, height: '100%',
+          background: color,
           transition: 'width 0.3s ease',
         }} />
       </div>
       <span style={{
-        fontFamily: 'var(--font-mono)', fontSize: '8px', color: 'var(--c-muted)',
+        fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--c-muted)',
         width: '22px', textAlign: 'right', flexShrink: 0,
       }}>{value}</span>
     </div>
@@ -235,8 +234,7 @@ export function LoadoutOverlay({
     <div
       className="absolute inset-0 z-30 flex items-center justify-center"
       style={{
-        background: 'radial-gradient(circle at center, rgba(8,12,20,0.9) 0%, rgba(4,6,12,0.96) 65%, rgba(2,3,8,0.99) 100%)',
-        backdropFilter: 'blur(8px)',
+        background: 'rgba(10,12,20,0.92)',
         pointerEvents: 'auto',
       }}
     >
@@ -245,10 +243,9 @@ export function LoadoutOverlay({
           width: 'min(960px, calc(100vw - 28px))',
           maxHeight: 'calc(100vh - 34px)',
           overflowY: 'auto',
-          background: 'linear-gradient(180deg, rgba(14,20,32,0.95) 0%, rgba(8,12,22,0.97) 100%)',
-          border: '1px solid rgba(102,224,255,0.2)',
-          boxShadow: '0 30px 100px rgba(0,0,0,0.6), inset 0 0 60px rgba(102,224,255,0.06)',
-          borderRadius: '12px',
+          background: 'rgba(12,16,24,0.98)',
+          border: '3px solid #1a1e2e',
+          boxShadow: '6px 6px 0 rgba(0,0,0,0.4)',
           padding: '24px 28px',
         }}
       >
@@ -259,28 +256,28 @@ export function LoadoutOverlay({
         }}>
           <div>
             <div style={{
-              fontFamily: 'var(--font-pixel)', fontSize: '18px', letterSpacing: '0.1em',
-              color: 'var(--c-cyan)',
-              textShadow: '0 0 20px rgba(102,224,255,0.35), 0 0 40px rgba(102,224,255,0.15)',
+              fontFamily: 'var(--font-pixel)', fontSize: '14px', letterSpacing: '0.1em',
+              color: '#ff6b35',
+              textShadow: '3px 3px 0 rgba(0,0,0,0.5)',
             }}>
               WEAPON LOADOUT
             </div>
             <div style={{
-              marginTop: '8px', fontFamily: 'var(--font-mono)', fontSize: '11px',
-              letterSpacing: '0.08em', color: 'var(--c-muted)', lineHeight: '1.6',
+              marginTop: '8px', fontFamily: 'var(--font-pixel)', fontSize: '7px',
+              letterSpacing: '0.08em', color: 'var(--c-muted)', lineHeight: '2',
             }}>
-              <span style={{ color: 'var(--c-cyan)', opacity: 0.8 }}>1.</span> Click a slot below &nbsp;
-              <span style={{ color: 'var(--c-cyan)', opacity: 0.8 }}>2.</span> Choose a weapon from the arsenal &nbsp;
-              <span style={{ color: 'var(--c-cyan)', opacity: 0.8 }}>3.</span> Save
+              <span style={{ color: '#ff6b35', opacity: 0.8 }}>1.</span> Click a slot below &nbsp;
+              <span style={{ color: '#ff6b35', opacity: 0.8 }}>2.</span> Choose a weapon from the arsenal &nbsp;
+              <span style={{ color: '#ff6b35', opacity: 0.8 }}>3.</span> Save
             </div>
           </div>
           <button
             onClick={closeLoadout}
             className="pointer-events-auto cursor-pointer px-3 py-1 hud-btn"
             style={{
-              fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--c-muted)',
-              background: 'rgba(6,8,16,0.65)', border: '1px solid var(--c-border)',
-              letterSpacing: '0.1em', borderRadius: '4px', flexShrink: 0,
+              fontFamily: 'var(--font-pixel)', fontSize: '7px', color: 'var(--c-muted)',
+              background: 'rgba(12,16,24,0.88)', border: '2px solid #1a1e2e',
+              letterSpacing: '0.1em', flexShrink: 0,
             }}
           >
             [E] CLOSE
@@ -289,7 +286,7 @@ export function LoadoutOverlay({
 
         {/* ── Section: Your Loadout Slots ── */}
         <div style={{
-          fontFamily: 'var(--font-mono)', fontSize: '9px', letterSpacing: '0.2em',
+          fontFamily: 'var(--font-pixel)', fontSize: '7px', letterSpacing: '0.2em',
           color: 'var(--c-muted)', marginBottom: '8px', textTransform: 'uppercase',
         }}>
           YOUR LOADOUT <span style={{ opacity: 0.5 }}>— click a slot to edit, or press 1 / 2 / 3</span>
@@ -310,18 +307,17 @@ export function LoadoutOverlay({
                 style={{
                   position: 'relative',
                   background: isActive
-                    ? `linear-gradient(180deg, ${weapon.rawColor}18 0%, ${weapon.rawColor}08 100%)`
-                    : 'rgba(6,8,16,0.7)',
+                    ? `${weapon.rawColor}15`
+                    : 'rgba(12,16,24,0.88)',
                   border: isActive
                     ? `2px solid ${weapon.rawColor}`
-                    : '1px solid var(--c-border)',
-                  borderRadius: '10px',
-                  padding: isActive ? '12px 14px 10px' : '13px 15px 11px',
+                    : '2px solid #1a1e2e',
+                  padding: '12px 14px 10px',
                   textAlign: 'center',
                   cursor: 'pointer',
-                  transition: 'all 0.2s ease',
+                  transition: 'all 0.1s',
                   boxShadow: isActive
-                    ? `0 0 20px ${weapon.rawColor}20, inset 0 0 30px ${weapon.rawColor}08`
+                    ? `3px 3px 0 rgba(0,0,0,0.3)`
                     : 'none',
                   overflow: 'hidden',
                 }}
@@ -330,10 +326,10 @@ export function LoadoutOverlay({
                 {isActive && (
                   <div style={{
                     position: 'absolute', top: '6px', right: '8px',
-                    fontFamily: 'var(--font-mono)', fontSize: '7px', letterSpacing: '0.15em',
+                    fontFamily: 'var(--font-pixel)', fontSize: '6px', letterSpacing: '0.15em',
                     color: weapon.rawColor, background: `${weapon.rawColor}20`,
-                    padding: '2px 6px', borderRadius: '3px',
-                    border: `1px solid ${weapon.rawColor}40`,
+                    padding: '2px 6px',
+                    border: `2px solid ${weapon.rawColor}40`,
                     animation: 'weapon-silhouette-pulse 2s ease-in-out infinite',
                   }}>
                     EDITING
@@ -343,20 +339,20 @@ export function LoadoutOverlay({
                 {/* Key binding badge */}
                 <div style={{
                   position: 'absolute', top: '6px', left: '8px',
-                  fontFamily: 'var(--font-mono)', fontSize: '9px', fontWeight: 'bold',
+                  fontFamily: 'var(--font-pixel)', fontSize: '7px', fontWeight: 400,
                   color: isActive ? weapon.rawColor : 'var(--c-muted)',
                   background: isActive ? `${weapon.rawColor}20` : 'rgba(255,255,255,0.05)',
                   width: '20px', height: '20px', display: 'flex',
                   alignItems: 'center', justifyContent: 'center',
-                  borderRadius: '4px', border: isActive
-                    ? `1px solid ${weapon.rawColor}40` : '1px solid var(--c-border)',
+                  border: isActive
+                    ? `2px solid ${weapon.rawColor}40` : '2px solid #1a1e2e',
                 }}>
                   {slot + 1}
                 </div>
 
                 {/* Slot label */}
                 <div style={{
-                  fontFamily: 'var(--font-mono)', fontSize: '9px', letterSpacing: '0.15em',
+                  fontFamily: 'var(--font-pixel)', fontSize: '6px', letterSpacing: '0.15em',
                   color: isActive ? weapon.rawColor : 'var(--c-muted)',
                   marginBottom: '6px',
                 }}>
@@ -374,10 +370,10 @@ export function LoadoutOverlay({
 
                 {/* Weapon name */}
                 <div style={{
-                  fontFamily: 'var(--font-ui)', fontSize: '14px', fontWeight: 700,
+                  fontFamily: 'var(--font-pixel)', fontSize: '9px', fontWeight: 400,
                   color: isActive ? weapon.color : 'var(--c-muted)',
                   letterSpacing: '0.06em',
-                  textShadow: isActive ? `0 0 10px ${weapon.rawColor}30` : 'none',
+                  textShadow: isActive ? `2px 2px 0 rgba(0,0,0,0.5)` : 'none',
                 }}>
                   {weapon.name}
                 </div>
@@ -385,10 +381,8 @@ export function LoadoutOverlay({
                 {/* Bottom glow bar for active slot */}
                 {isActive && (
                   <div style={{
-                    position: 'absolute', bottom: 0, left: '10%', right: '10%', height: '2px',
+                    position: 'absolute', bottom: 0, left: 0, right: 0, height: '2px',
                     background: weapon.rawColor,
-                    boxShadow: `0 0 8px ${weapon.rawColor}, 0 -3px 12px ${weapon.rawColor}30`,
-                    borderRadius: '1px',
                   }} />
                 )}
               </button>
@@ -398,7 +392,7 @@ export function LoadoutOverlay({
 
         {/* ── Section: Weapon Arsenal ── */}
         <div style={{
-          fontFamily: 'var(--font-mono)', fontSize: '9px', letterSpacing: '0.2em',
+          fontFamily: 'var(--font-pixel)', fontSize: '7px', letterSpacing: '0.2em',
           color: 'var(--c-muted)', marginBottom: '8px', textTransform: 'uppercase',
         }}>
           ARSENAL <span style={{ opacity: 0.5 }}>— pick a weapon for</span>{' '}
@@ -425,17 +419,16 @@ export function LoadoutOverlay({
                 style={{
                   position: 'relative',
                   background: isAssignedToActive
-                    ? `linear-gradient(180deg, ${weapon.rawColor}1a 0%, ${weapon.rawColor}08 100%)`
+                    ? `${weapon.rawColor}15`
                     : isInOtherSlot
                       ? `${weapon.rawColor}0a`
-                      : 'rgba(6,8,16,0.65)',
+                      : 'rgba(12,16,24,0.88)',
                   border: isAssignedToActive
                     ? `2px solid ${weapon.rawColor}`
                     : isInOtherSlot
-                      ? `1px solid ${weapon.rawColor}66`
-                      : '1px solid var(--c-border)',
-                  borderRadius: '8px',
-                  padding: isAssignedToActive ? '10px 11px 10px' : '11px 12px 11px',
+                      ? `2px solid ${weapon.rawColor}66`
+                      : '2px solid #1a1e2e',
+                  padding: '10px 11px 10px',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '4px',
@@ -449,12 +442,12 @@ export function LoadoutOverlay({
                 {inSlot >= 0 && (
                   <div style={{
                     position: 'absolute', top: '6px', right: '6px',
-                    fontFamily: 'var(--font-mono)', fontSize: '7px', fontWeight: 'bold',
+                    fontFamily: 'var(--font-pixel)', fontSize: '6px', fontWeight: 400,
                     letterSpacing: '0.1em',
                     color: isAssignedToActive ? weapon.rawColor : `${weapon.rawColor}cc`,
                     background: isAssignedToActive ? `${weapon.rawColor}25` : `${weapon.rawColor}15`,
-                    padding: '2px 5px', borderRadius: '3px',
-                    border: `1px solid ${weapon.rawColor}${isAssignedToActive ? '50' : '30'}`,
+                    padding: '2px 5px',
+                    border: `2px solid ${weapon.rawColor}${isAssignedToActive ? '50' : '30'}`,
                   }}>
                     SLOT {inSlot + 1}
                   </div>
@@ -463,11 +456,11 @@ export function LoadoutOverlay({
                 {/* Weapon type badge */}
                 <div style={{
                   alignSelf: 'flex-start',
-                  fontFamily: 'var(--font-mono)', fontSize: '7px', letterSpacing: '0.15em',
+                  fontFamily: 'var(--font-pixel)', fontSize: '6px', letterSpacing: '0.15em',
                   color: weapon.rawColor,
                   background: `${weapon.rawColor}18`,
-                  padding: '2px 6px', borderRadius: '3px',
-                  border: `1px solid ${weapon.rawColor}30`,
+                  padding: '2px 6px',
+                  border: `2px solid ${weapon.rawColor}30`,
                 }}>
                   {weapon.type}
                 </div>
@@ -481,16 +474,16 @@ export function LoadoutOverlay({
 
                 {/* Name */}
                 <div style={{
-                  fontFamily: 'var(--font-ui)', fontSize: '13px', fontWeight: 700,
+                  fontFamily: 'var(--font-pixel)', fontSize: '8px', fontWeight: 400,
                   color: weapon.color, letterSpacing: '0.05em',
-                  textShadow: isAssignedToActive ? `0 0 8px ${weapon.rawColor}30` : 'none',
+                  textShadow: isAssignedToActive ? `2px 2px 0 rgba(0,0,0,0.5)` : 'none',
                 }}>
                   {weapon.name}
                 </div>
 
                 {/* Description */}
                 <div style={{
-                  fontFamily: 'var(--font-mono)', fontSize: '8px', lineHeight: '1.5',
+                  fontFamily: 'var(--font-pixel)', fontSize: '6px', lineHeight: '1.8',
                   color: 'var(--c-muted)', letterSpacing: '0.04em',
                   minHeight: '24px',
                 }}>
@@ -508,7 +501,7 @@ export function LoadoutOverlay({
                 {/* Status line */}
                 <div style={{
                   marginTop: '4px',
-                  fontFamily: 'var(--font-mono)', fontSize: '8px', letterSpacing: '0.12em',
+                  fontFamily: 'var(--font-pixel)', fontSize: '6px', letterSpacing: '0.12em',
                   color: isAssignedToActive
                     ? weapon.rawColor
                     : isInOtherSlot
@@ -526,10 +519,8 @@ export function LoadoutOverlay({
                 {/* Bottom glow for equipped weapon */}
                 {isAssignedToActive && (
                   <div style={{
-                    position: 'absolute', bottom: 0, left: '15%', right: '15%', height: '2px',
+                    position: 'absolute', bottom: 0, left: 0, right: 0, height: '2px',
                     background: weapon.rawColor,
-                    boxShadow: `0 0 6px ${weapon.rawColor}, 0 -2px 8px ${weapon.rawColor}30`,
-                    borderRadius: '1px',
                   }} />
                 )}
               </button>
@@ -546,10 +537,9 @@ export function LoadoutOverlay({
             onClick={closeLoadout}
             className="pointer-events-auto cursor-pointer px-5 py-2 hud-btn"
             style={{
-              fontFamily: 'var(--font-mono)', fontSize: '10px',
-              color: 'var(--c-muted)', background: 'rgba(6,8,16,0.65)',
-              border: '1px solid var(--c-border)', letterSpacing: '0.1em',
-              borderRadius: '6px',
+              fontFamily: 'var(--font-pixel)', fontSize: '7px',
+              color: 'var(--c-muted)', background: 'rgba(12,16,24,0.88)',
+              border: '2px solid #1a1e2e', letterSpacing: '0.1em',
             }}
           >
             CANCEL
@@ -559,12 +549,12 @@ export function LoadoutOverlay({
             disabled={savingLoadout}
             className="pointer-events-auto cursor-pointer px-5 py-2 hud-btn"
             style={{
-              fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 'bold',
-              color: 'var(--c-cyan)', background: 'rgba(6,18,28,0.75)',
-              border: '1px solid rgba(102,224,255,0.5)', letterSpacing: '0.1em',
-              borderRadius: '6px', opacity: savingLoadout ? 0.7 : 1,
-              boxShadow: savingLoadout ? 'none' : '0 0 15px rgba(102,224,255,0.15)',
-              transition: 'all 0.15s ease',
+              fontFamily: 'var(--font-pixel)', fontSize: '8px', fontWeight: 400,
+              color: '#ff6b35', background: 'rgba(12,16,24,0.88)',
+              border: '2px solid #ff6b35', letterSpacing: '0.1em',
+              opacity: savingLoadout ? 0.7 : 1,
+              boxShadow: savingLoadout ? 'none' : '3px 3px 0 rgba(0,0,0,0.3)',
+              transition: 'all 0.1s',
             }}
           >
             {savingLoadout ? 'SAVING...' : 'SAVE LOADOUT'}

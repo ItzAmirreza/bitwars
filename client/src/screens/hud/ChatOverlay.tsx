@@ -19,12 +19,7 @@ export interface ChatOverlayProps {
 }
 
 export function ChatOverlay({
-  chatOpen,
-  chatMessages,
-  chatDraft,
-  setChatDraft,
-  sendChatMessage,
-  closeChat,
+  chatOpen, chatMessages, chatDraft, setChatDraft, sendChatMessage, closeChat,
 }: ChatOverlayProps) {
   const chatInputRef = useRef<HTMLInputElement>(null);
   const chatListRef = useRef<HTMLDivElement>(null);
@@ -41,39 +36,32 @@ export function ChatOverlay({
     [chatOpen],
   );
 
-  // Periodic tick for message fading (when chat is closed)
   useEffect(() => {
     if (chatOpen) return;
     const interval = setInterval(() => chatTick((n) => n + 1), 1000);
     return () => clearInterval(interval);
   }, [chatOpen]);
 
-  // Focus chat input when opened
   useEffect(() => {
     if (chatOpen) {
       const timer = window.setTimeout(() => {
         const input = chatInputRef.current;
         if (!input) return;
-
         input.focus();
         const end = input.value.length;
         input.setSelectionRange(end, end);
       }, 0);
-
       return () => window.clearTimeout(timer);
     }
   }, [chatOpen]);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     if (!chatOpen) return;
-
     const frame = window.requestAnimationFrame(() => {
       const list = chatListRef.current;
       if (!list) return;
       list.scrollTop = list.scrollHeight;
     });
-
     return () => window.cancelAnimationFrame(frame);
   }, [chatMessages, chatOpen]);
 
@@ -91,7 +79,6 @@ export function ChatOverlay({
         pointerEvents: 'none',
       }}
     >
-      {/* Message list — stacks upward from bottom */}
       <div
         ref={chatListRef}
         style={{
@@ -116,24 +103,22 @@ export function ChatOverlay({
               <div
                 key={msg.id}
                 style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '12px',
-                  lineHeight: '1.3',
+                  fontFamily: 'var(--font-pixel)',
+                  fontSize: '7px',
+                  lineHeight: '1.8',
                   opacity,
-                  padding: '1px 4px',
-                  background: chatOpen ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.35)',
+                  padding: '2px 6px',
+                  background: chatOpen ? 'rgba(12,16,24,0.85)' : 'rgba(12,16,24,0.6)',
                   transition: 'opacity 0.4s',
-                  textShadow: '1px 1px 2px rgba(0,0,0,0.9)',
                 }}
               >
                 {isSystem ? (
-                  <span style={{ color: '#ffaa00' }}>{msg.text}</span>
+                  <span style={{ color: '#ffd600', fontFamily: "'Vazirmatn', var(--font-pixel), sans-serif", fontSize: '8px' }} dir="auto">{msg.text}</span>
                 ) : (
                   <>
-                    <span style={{ color: '#e0e0e0', fontWeight: 400 }}>{'<'}</span>
-                    <span style={{ color: '#55ff55', fontWeight: 400 }}>{msg.senderName}</span>
-                    <span style={{ color: '#e0e0e0', fontWeight: 400 }}>{'> '}</span>
-                    <span style={{ color: '#ffffff' }}>{msg.text}</span>
+                    <span style={{ color: '#76ff03' }}>{msg.senderName}</span>
+                    <span style={{ color: '#4a4e5e' }}>{': '}</span>
+                    <span style={{ color: '#e8e8f0', fontFamily: "'Vazirmatn', var(--font-pixel), sans-serif", fontSize: '8px' }} dir="auto">{msg.text}</span>
                   </>
                 )}
               </div>
@@ -141,7 +126,6 @@ export function ChatOverlay({
           })}
       </div>
 
-      {/* Chat input — full-width bar at the very bottom */}
       {chatOpen && (
         <div style={{ pointerEvents: 'auto' }}>
           <input
@@ -166,17 +150,18 @@ export function ChatOverlay({
             }}
             style={{
               width: '100%',
-              fontFamily: 'var(--font-mono)',
-              fontSize: '12px',
-              background: 'rgba(0,0,0,0.5)',
+              fontFamily: "'Vazirmatn', var(--font-pixel), sans-serif",
+              fontSize: '9px',
+              background: 'rgba(12,16,24,0.9)',
               border: 'none',
-              borderTop: '1px solid rgba(255,255,255,0.15)',
-              color: '#ffffff',
-              padding: '6px 4px',
+              borderTop: '2px solid #ff6b35',
+              color: '#e8e8f0',
+              padding: '6px 6px',
               outline: 'none',
               borderRadius: 0,
-              caretColor: '#55ff55',
-              textShadow: '1px 1px 2px rgba(0,0,0,0.9)',
+              caretColor: '#ff6b35',
+              letterSpacing: '0.02em',
+              direction: 'ltr',
             }}
           />
         </div>
