@@ -24,6 +24,134 @@ fn projectile_match_score(age_ms: f32, target_ms: f32, origin_dist_sq: f32) -> f
     timing_penalty + origin_dist_sq * 0.35
 }
 
+fn shot_matches_impact(
+    now_us: u64,
+    shot: &ShotEvent,
+    weapon_code: u8,
+    projectile_speed: f32,
+    max_range: f32,
+    impact_pos: &Vec3,
+    client_shot_origin: &Vec3,
+    reported_travel_time_ms: u32,
+) -> Option<f32> {
+    if projectile_speed <= 0.01 {
+        return None;
+    }
+
+    let fired_at_us = timestamp_micros(shot.fired_at);
+    let age_us = now_us.saturating_sub(fired_at_us);
+    if age_us > weapons::shot_event_retention_us(weapon_code) {
+        return None;
+    }
+
+    // Client-reported origin can diverge from authoritative server pose,
+    // especially for fast vehicles. Allow a wider envelope for vehicle shots.
+    let origin_tol_sq = if shot.source_vehicle == 0 {
+        64.0
+    } else {
+        625.0
+    };
+    let origin_dist_sq = dist_sq(&shot.origin, client_shot_origin);
+    if origin_dist_sq > origin_tol_sq {
+        return None;
+    }
+
+    let to_impact = Vec3 {
+        x: impact_pos.x - shot.origin.x,
+        y: impact_pos.y - shot.origin.y,
+        z: impact_pos.z - shot.origin.z,
+    };
+    let (impact_dir, impact_len) = normalize_direction(&to_impact);
+    if impact_len <= 0.01 {
+        return None;
+    }
+    if impact_len > max_range + 10.0 {
+        return None;
+    }
+
+    let (shot_dir, shot_dir_len) = normalize_direction(&shot.direction);
+    if shot_dir_len <= 0.01 {
+        return None;
+    }
+    let dir_dot = shot_dir.x * impact_dir.x + shot_dir.y * impact_dir.y + shot_dir.z * impact_dir.z;
+    let min_dir_dot = if shot.source_vehicle == 0 { 0.45 } else { 0.05 };
+    if dir_dot < min_dir_dot {
+        return None;
+    }
+
+    let expected_ms = impact_len / projectile_speed * 1000.0;
+    let age_ms = age_us as f32 / 1000.0;
+    let target_ms = if reported_travel_time_ms > 0 {
+        reported_travel_time_ms as f32
+    } else {
+        expected_ms
+    };
+    let early_slack_ms = if shot.source_vehicle == 0 {
+        250.0
+    } else {
+        1_200.0
+    };
+    let late_slack_ms = if shot.source_vehicle == 0 {
+        1_200.0
+    } else {
+        2_500.0
+    };
+    let min_ms = (target_ms - early_slack_ms).max(0.0);
+    let max_ms = target_ms + late_slack_ms;
+    if age_ms < min_ms || age_ms > max_ms {
+        return None;
+    }
+
+    Some(projectile_match_score(age_ms, target_ms, origin_dist_sq))
+}
+
+pub fn find_valid_shot_by_id(
+    ctx: &ReducerContext,
+    shot_event_id: u64,
+    sender: Identity,
+    weapon_code: u8,
+    projectile_speed: f32,
+    max_range: f32,
+    impact_pos: &Vec3,
+    client_shot_origin: &Vec3,
+    reported_travel_time_ms: u32,
+    source_vehicle_filter: Option<u64>,
+    require_vehicle_source: bool,
+) -> Option<ShotEvent> {
+    if shot_event_id == 0 {
+        return None;
+    }
+    let shot = ctx.db.shot_event().id().find(&shot_event_id)?;
+    if shot.shooter != sender || shot.weapon != weapon_code || shot.has_hit {
+        return None;
+    }
+    if let Some(source_vehicle_id) = source_vehicle_filter {
+        if shot.source_vehicle != source_vehicle_id {
+            return None;
+        }
+    } else if require_vehicle_source && shot.source_vehicle == 0 {
+        return None;
+    }
+
+    let now_us = timestamp_micros(ctx.timestamp);
+    if shot_matches_impact(
+        now_us,
+        &shot,
+        weapon_code,
+        projectile_speed,
+        max_range,
+        impact_pos,
+        client_shot_origin,
+        reported_travel_time_ms,
+    )
+    .is_none()
+    {
+        return None;
+    }
+
+    Some(shot)
+}
+
 /// Find the best matching, not-yet-consumed projectile shot event for an impact.
 pub fn find_matching_projectile_shot(
     ctx: &ReducerContext,
@@ -56,72 +184,18 @@ pub fn find_matching_projectile_shot(
             continue;
         }
 
-        let fired_at_us = timestamp_micros(shot.fired_at);
-        let age_us = now_us.saturating_sub(fired_at_us);
-        if age_us > weapons::shot_event_retention_us(weapon_code) {
+        let Some(score) = shot_matches_impact(
+            now_us,
+            &shot,
+            weapon_code,
+            projectile_speed,
+            max_range,
+            impact_pos,
+            client_shot_origin,
+            reported_travel_time_ms,
+        ) else {
             continue;
-        }
-
-        // Client-reported origin can diverge from authoritative server pose,
-        // especially for fast vehicles. Allow a wider envelope for vehicle shots.
-        let origin_tol_sq = if shot.source_vehicle == 0 {
-            64.0
-        } else {
-            625.0
         };
-        if dist_sq(&shot.origin, client_shot_origin) > origin_tol_sq {
-            continue;
-        }
-
-        let to_impact = Vec3 {
-            x: impact_pos.x - shot.origin.x,
-            y: impact_pos.y - shot.origin.y,
-            z: impact_pos.z - shot.origin.z,
-        };
-        let (impact_dir, impact_len) = normalize_direction(&to_impact);
-        if impact_len <= 0.01 {
-            continue;
-        }
-        if impact_len > max_range + 10.0 {
-            continue;
-        }
-
-        let (shot_dir, shot_dir_len) = normalize_direction(&shot.direction);
-        if shot_dir_len <= 0.01 {
-            continue;
-        }
-        let dir_dot =
-            shot_dir.x * impact_dir.x + shot_dir.y * impact_dir.y + shot_dir.z * impact_dir.z;
-        let min_dir_dot = if shot.source_vehicle == 0 { 0.45 } else { 0.05 };
-        if dir_dot < min_dir_dot {
-            continue;
-        }
-
-        let expected_ms = impact_len / projectile_speed * 1000.0;
-        let age_ms = age_us as f32 / 1000.0;
-        let target_ms = if reported_travel_time_ms > 0 {
-            reported_travel_time_ms as f32
-        } else {
-            expected_ms
-        };
-        let early_slack_ms = if shot.source_vehicle == 0 {
-            250.0
-        } else {
-            1_200.0
-        };
-        let late_slack_ms = if shot.source_vehicle == 0 {
-            1_200.0
-        } else {
-            2_500.0
-        };
-        let min_ms = (target_ms - early_slack_ms).max(0.0);
-        let max_ms = target_ms + late_slack_ms;
-        if age_ms < min_ms || age_ms > max_ms {
-            continue;
-        }
-
-        let origin_dist_sq = dist_sq(&shot.origin, client_shot_origin);
-        let score = projectile_match_score(age_ms, target_ms, origin_dist_sq);
         match &best {
             Some((_, best_score)) if score >= *best_score => {}
             _ => best = Some((shot, score)),
@@ -281,6 +355,7 @@ pub fn projectile_impact(
     _hit_players: Vec<Identity>,
     _hit_vehicles: Vec<u64>,
     _hit_blocks: Vec<Vec3>,
+    shot_event_id: u64,
 ) -> Result<(), String> {
     let sender = ctx.sender();
     let _player = ctx
@@ -301,8 +376,9 @@ pub fn projectile_impact(
         return Err("Grenade impacts are server-authoritative".to_string());
     }
 
-    let Some(shot) = find_matching_projectile_shot(
+    let shot = find_valid_shot_by_id(
         ctx,
+        shot_event_id,
         sender,
         weapon,
         def.projectile_speed,
@@ -312,11 +388,27 @@ pub fn projectile_impact(
         travel_time_ms,
         Some(0),
         false,
-    ) else {
-        log::debug!(
-            "Ignoring unmatched projectile impact (player={:?}, weapon={}, pos=({:.2},{:.2},{:.2}))",
+    )
+    .or_else(|| {
+        find_matching_projectile_shot(
+            ctx,
             sender,
             weapon,
+            def.projectile_speed,
+            def.max_range,
+            &impact_pos,
+            &shot_origin,
+            travel_time_ms,
+            Some(0),
+            false,
+        )
+    });
+    let Some(shot) = shot else {
+        log::debug!(
+            "Ignoring unmatched projectile impact (player={:?}, weapon={}, shot_id={}, pos=({:.2},{:.2},{:.2}))",
+            sender,
+            weapon,
+            shot_event_id,
             impact_pos.x,
             impact_pos.y,
             impact_pos.z

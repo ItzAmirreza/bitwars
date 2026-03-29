@@ -60,6 +60,7 @@ export interface ProjectileImpact {
   isVehicle: boolean;
   vehicleWeaponIndex: number;
   sourceVehicleId: number;
+  shotEventId: bigint | null;
 }
 
 interface ActiveProjectile {
@@ -72,6 +73,7 @@ interface ActiveProjectile {
   // Origin data (for server sync)
   origin: THREE.Vector3;
   firedAt: number; // performance.now()
+  shotEventId: bigint | null;
   // Config
   lifetime: number;
   age: number;
@@ -166,6 +168,58 @@ export class ProjectileManager {
       p.pos.addScaledVector(p.vel, catchupDt);
       p.vel.y -= p.gravity * catchupDt;
       p.age += catchupDt;
+    }
+  }
+
+  /** Associate a local projectile with an authoritative server ShotEvent id. */
+  linkLocalShotEventId(
+    shotEventId: bigint,
+    weaponCode: number,
+    origin: { x: number; y: number; z: number },
+    sourceVehicleId: number,
+    firedAtPerf: number | null,
+  ): void {
+    const isVehicle = weaponCode >= 100;
+    const vehicleWeaponIndex = weaponCode - 100;
+
+    let bestIdx = -1;
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    for (let i = 0; i < this.projectiles.length; i++) {
+      const p = this.projectiles[i];
+      if (!p || !p.isLocal || p.shotEventId !== null) continue;
+      if (p.isVehicle !== isVehicle) continue;
+
+      if (isVehicle) {
+        if (p.vehicleWeaponIndex !== vehicleWeaponIndex) continue;
+        if (sourceVehicleId !== 0 && p.sourceVehicleId !== sourceVehicleId) continue;
+      } else if (p.weaponIndex !== weaponCode) {
+        continue;
+      }
+
+      const dx = p.origin.x - origin.x;
+      const dy = p.origin.y - origin.y;
+      const dz = p.origin.z - origin.z;
+      const originDistSq = dx * dx + dy * dy + dz * dz;
+      const maxOriginDistSq = isVehicle ? 900 : 144;
+      if (originDistSq > maxOriginDistSq) continue;
+
+      let score = originDistSq;
+      if (firedAtPerf !== null) {
+        score += Math.abs(p.firedAt - firedAtPerf) * 0.04;
+      } else {
+        // Prefer newer local projectiles if no usable timestamp is available.
+        score += p.age * 50;
+      }
+
+      if (score < bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+
+    if (bestIdx >= 0) {
+      this.projectiles[bestIdx]!.shotEventId = shotEventId;
     }
   }
 
@@ -265,6 +319,7 @@ export class ProjectileManager {
       speed: cfg.speed,
       origin: origin.clone(),
       firedAt,
+      shotEventId: null,
       lifetime: cfg.lifetime,
       age: 0,
       radius,
@@ -534,6 +589,7 @@ export class ProjectileManager {
         isVehicle: p.isVehicle,
         vehicleWeaponIndex: p.vehicleWeaponIndex,
         sourceVehicleId: p.sourceVehicleId,
+        shotEventId: p.shotEventId,
       });
     } else {
       // Remote projectile: just VFX
@@ -579,6 +635,7 @@ export class ProjectileManager {
         isVehicle: p.isVehicle,
         vehicleWeaponIndex: p.vehicleWeaponIndex,
         sourceVehicleId: p.sourceVehicleId,
+        shotEventId: p.shotEventId,
       });
     }
 
@@ -642,6 +699,7 @@ export class ProjectileManager {
         isVehicle: p.isVehicle,
         vehicleWeaponIndex: p.vehicleWeaponIndex,
         sourceVehicleId: p.sourceVehicleId,
+        shotEventId: p.shotEventId,
       });
     }
 
