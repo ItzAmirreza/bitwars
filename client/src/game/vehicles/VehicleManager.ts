@@ -693,7 +693,6 @@ export default class VehicleManager {
       }
     }
   }
-
   /** Block query for collision prediction. Returns 0 (air) for blocks already
    *  collided with locally, preventing repeated slowdown before the chunk update. */
   private getCollisionBlock(x: number, y: number, z: number): number {

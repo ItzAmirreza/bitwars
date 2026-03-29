@@ -84,7 +84,6 @@ impl TerrainSampler {
             }
         }
     }
-
     pub fn get_block_type(&mut self, ctx: &ReducerContext, x: i32, y: i32, z: i32) -> Option<u8> {
         if !block_in_bounds(x, y, z) {
             return Some(AIR);

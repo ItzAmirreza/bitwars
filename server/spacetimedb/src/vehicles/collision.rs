@@ -79,7 +79,6 @@ pub fn check_vehicle_block_collision(
     // sees the hole we just punched through (vehicle passes through, not over).
     terrain.invalidate_surface_range(min_x, max_x, min_z, max_z);
     terrain.invalidate_chunk_range(min_x, max_x, min_y, max_y, min_z, max_z);
-
     // Apply damage
     let damage = vehicle_collision_damage_per_block() * actually_destroyed as i32;
     vehicle.health -= damage;
