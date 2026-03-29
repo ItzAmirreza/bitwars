@@ -147,6 +147,8 @@ function buildVehicleWeaponDefinition(cfg: VehicleWeaponConfig): VehicleWeaponDe
     1: { x: 0, y: 0 },          // Rockets
     2: { x: 0, y: 0 },          // Bunker Buster
     3: { x: 0, y: 0 },          // Carpet Bomb
+    4: { x: 0.025, y: 0.015 },  // Autocannon
+    5: { x: 0, y: 0 },          // SAM Missile
   };
 
   return {

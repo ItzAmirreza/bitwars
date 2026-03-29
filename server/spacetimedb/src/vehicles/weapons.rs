@@ -20,6 +20,12 @@ fn resolve_vehicle_weapon_index(vehicle_type: u8, slot: u8) -> u8 {
         } else {
             constants::jet_weapon_slot1()
         }
+    } else if vehicle_type == constants::vehicle_type_anti_air() {
+        if slot == 0 {
+            constants::aa_weapon_slot0()
+        } else {
+            constants::aa_weapon_slot1()
+        }
     } else {
         // Helicopter: slot == index
         slot

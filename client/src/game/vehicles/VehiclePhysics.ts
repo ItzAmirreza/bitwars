@@ -28,6 +28,7 @@ import {
   VEHICLE_TICK_INTERVAL_MS,
   HELICOPTER,
   FIGHTER_JET,
+  ANTI_AIR,
   WORLD,
 } from '../../shared-config';
 
@@ -242,6 +243,72 @@ export function tickFighterJet(
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch };
 }
 
+// ── Anti-Air physics (mirrors server/vehicles/anti_air.rs) ──
+
+export function tickAntiAir(
+  s: PhysicsState,
+  input: PhysicsInput,
+  gnd: GroundHeightFn,
+): PhysicsState {
+  let { px, py, pz, vx, vy, vz, yaw } = s;
+
+  const fwd = clamp(input.forward, -1, 1);
+  const str = clamp(input.strafe, -1, 1);
+  const ywIn = clamp(input.yaw, -1, 1);
+
+  // Hull yaw
+  const yawStep = ywIn * ANTI_AIR.maxYawRate * TICK_DT;
+  yaw += yawStep;
+  if (yaw > PI) yaw -= TAU;
+  if (yaw < -PI) yaw += TAU;
+
+  // Velocity
+  const fwdSpeed = fwd * ANTI_AIR.cruiseSpeed;
+  const strSpeed = str * ANTI_AIR.strafeSpeed;
+
+  const fx = -Math.sin(yaw);
+  const fz = -Math.cos(yaw);
+  const rx = Math.cos(yaw);
+  const rz = -Math.sin(yaw);
+
+  const targetVx = fx * fwdSpeed + rx * strSpeed;
+  const targetVz = fz * fwdSpeed + rz * strSpeed;
+
+  const hb = ANTI_AIR.horizBlend;
+  vx += (targetVx - vx) * hb;
+  vz += (targetVz - vz) * hb;
+
+  const drag = ANTI_AIR.dragPiloted;
+  vx *= drag;
+  vz *= drag;
+
+  let nx = px + vx * TICK_DT;
+  let ny = py + vy * TICK_DT;
+  let nz = pz + vz * TICK_DT;
+
+  // World bounds
+  const BB = 0.1;
+  if (nx < WORLD_MIN_X) { nx = WORLD_MIN_X; vx = Math.abs(vx) * BB; }
+  if (nx > WORLD_MAX_X) { nx = WORLD_MAX_X; vx = -Math.abs(vx) * BB; }
+  if (nz < WORLD_MIN_Z) { nz = WORLD_MIN_Z; vz = Math.abs(vz) * BB; }
+  if (nz > WORLD_MAX_Z) { nz = WORLD_MAX_Z; vz = -Math.abs(vz) * BB; }
+
+  // Ground snapping
+  const ground = gnd(nx, nz) + ANTI_AIR.minAltitude + 1.0;
+  if (ny > ground + 0.5) {
+    vy -= 25.0 * TICK_DT;
+  } else if (ny < ground) {
+    ny = ground;
+    vy = 0;
+  } else {
+    vy = (ground - ny) * 5.0;
+  }
+  ny = Math.max(ny, ground);
+
+  // pitch stays 0 (ground vehicle)
+  return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch: 0 };
+}
+
 // ── Input history entry ──
 
 interface InputEntry {
@@ -446,6 +513,9 @@ export class VehiclePrediction {
   private tick(s: PhysicsState, input: PhysicsInput): PhysicsState {
     if (this.vehicleType === VEHICLE_TYPES.FighterJet) {
       return tickFighterJet(s, input, this.groundFn);
+    }
+    if (this.vehicleType === VEHICLE_TYPES.AntiAir) {
+      return tickAntiAir(s, input, this.groundFn);
     }
     return tickHelicopter(s, input, this.groundFn);
   }
