@@ -297,7 +297,9 @@ export class VehicleFireController {
 
     // Player hit detection
     const hitPlayerIds = ctx.weapons.raycastPlayers(origin, dir, wep.maxRange);
-    const hitVehicleIds = ctx.weapons.raycastVehicles(origin, dir, wep.maxRange);
+    const hitVehicleIds = ctx.weapons
+      .raycastVehicles(origin, dir, wep.maxRange)
+      .filter((id) => id !== ctx.mountedVehicleId);
 
     // VFX: tracer + muzzle flash
     ctx.vfx.emitTracer(origin, tracerEnd, 0xffaa00);

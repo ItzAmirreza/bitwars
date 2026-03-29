@@ -340,7 +340,10 @@ export class ProjectileManager {
           }
 
           // Vehicle collision
-          const hitVehicleIds = this.weapons.raycastVehicles(segOrigin, segDir, subDist);
+          const hitVehicleIds = this.filterSourceVehicleId(
+            p,
+            this.weapons.raycastVehicles(segOrigin, segDir, subDist),
+          );
           if (hitVehicleIds.length > 0) {
             // Impact at current position
             const hitPos = {
@@ -518,9 +521,12 @@ export class ProjectileManager {
         hitPos: blockHit,
         destroyedBlocks: destroyed,
         hitPlayerIds,
-        hitVehicleIds: this.weapons.vehiclesWithinRadius(
-          new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5),
-          splashRadius + 0.5,
+        hitVehicleIds: this.filterSourceVehicleId(
+          p,
+          this.weapons.vehiclesWithinRadius(
+            new THREE.Vector3(blockHit.x + 0.5, blockHit.y + 0.5, blockHit.z + 0.5),
+            splashRadius + 0.5,
+          ),
         ),
         origin: p.origin,
         direction: p.vel.clone().normalize(),
@@ -560,9 +566,12 @@ export class ProjectileManager {
         hitPos,
         destroyedBlocks: destroyed,
         hitPlayerIds,
-        hitVehicleIds: this.weapons.vehiclesWithinRadius(
-          new THREE.Vector3(hitPos.x + 0.5, hitPos.y + 0.5, hitPos.z + 0.5),
-          splashRadius + 0.5,
+        hitVehicleIds: this.filterSourceVehicleId(
+          p,
+          this.weapons.vehiclesWithinRadius(
+            new THREE.Vector3(hitPos.x + 0.5, hitPos.y + 0.5, hitPos.z + 0.5),
+            splashRadius + 0.5,
+          ),
         ),
         origin: p.origin,
         direction: p.vel.clone().normalize(),
@@ -613,9 +622,11 @@ export class ProjectileManager {
         impactCenter,
         splashRadius + 0.5,
       );
+      const directFiltered = this.filterSourceVehicleId(p, directHitVehicleIds);
+      const splashFiltered = this.filterSourceVehicleId(p, splashVehicleIds);
       const hitVehicleIds = Array.from(new Set<number>([
-        ...directHitVehicleIds,
-        ...splashVehicleIds,
+        ...directFiltered,
+        ...splashFiltered,
       ]));
 
       const travelTimeMs = performance.now() - p.firedAt;
@@ -643,6 +654,11 @@ export class ProjectileManager {
       this.vfx.emitExplosion(hitPos.x, hitPos.y, hitPos.z, vfxRadius);
     }
     this.vfx.emitImpact(hitPos.x, hitPos.y, hitPos.z);
+  }
+
+  private filterSourceVehicleId(p: ActiveProjectile, vehicleIds: number[]): number[] {
+    if (!p.isVehicle || p.sourceVehicleId === 0) return vehicleIds;
+    return vehicleIds.filter((id) => id !== p.sourceVehicleId);
   }
 
   /**
