@@ -193,13 +193,15 @@ export class VehicleFireController {
     if (!isHitscan) {
       // ── CARPET BOMB PATH (weapon index 3) ──
       if (resolvedIdx === 3) {
-        // Drop bomb from jet position, alternating left/right
-        const side = ctx.vehicleManager.carpetBombSide;
-        ctx.vehicleManager.carpetBombSide *= -1; // Alternate for next drop
+        // Match the server's side selection, which is based on the pre-fire ammo count.
+        const preFireAmmo = ctx.vehicleManager.vehicleAmmo[ctx.vehicleManager.vehicleWeaponIndex] + 1;
+        const side = preFireAmmo % 2 === 0 ? 1 : -1;
+        ctx.vehicleManager.carpetBombSide = -side;
 
-        // Compute right vector from yaw
-        const rightX = Math.cos(lookYaw);
-        const rightZ = -Math.sin(lookYaw);
+        // Server uses the mounted vehicle yaw, not pilot look yaw, for bomb offset/heading.
+        const vehicleYaw = pose.yaw;
+        const rightX = Math.cos(vehicleYaw);
+        const rightZ = -Math.sin(vehicleYaw);
         const offset = side * 2.5; // Lateral offset
 
         const bombOrigin = new THREE.Vector3(
@@ -207,8 +209,19 @@ export class VehicleFireController {
           pose.y - 1.0,
           pose.z + rightZ * offset,
         );
-        // Bomb drops mostly downward with a small forward velocity component
-        const bombDir = new THREE.Vector3(dir.x * 0.15, -0.98, dir.z * 0.15).normalize();
+        const entity = ctx.vehicleManager.findEntityRow(ctx.mountedVehicleId);
+        const vel = entity?.vel ?? { x: 0, y: 0, z: 0 };
+        const horizontalSpeed = Math.sqrt(
+          Number(vel.x) ** 2 + Number(vel.z) ** 2,
+        );
+        const forwardX = -Math.sin(vehicleYaw);
+        const forwardZ = -Math.cos(vehicleYaw);
+        // Match the server's forward-velocity inheritance for the bomb trajectory.
+        const bombDir = new THREE.Vector3(
+          forwardX * horizontalSpeed * 0.3,
+          -1.0,
+          forwardZ * horizontalSpeed * 0.3,
+        );
 
         ctx.projectileManager.spawnLocalVehicle(
           2, bombOrigin, bombDir,
@@ -315,7 +328,9 @@ export class VehicleFireController {
 
     // Player hit detection
     const hitPlayerIds = ctx.weapons.raycastPlayers(origin, dir, wep.maxRange);
-    const hitVehicleIds = ctx.weapons.raycastVehicles(origin, dir, wep.maxRange);
+    const hitVehicleIds = ctx.weapons
+      .raycastVehicles(origin, dir, wep.maxRange)
+      .filter((id) => id !== ctx.mountedVehicleId);
 
     // VFX: tracer + muzzle flash
     ctx.vfx.emitTracer(origin, tracerEnd, 0xffaa00);
