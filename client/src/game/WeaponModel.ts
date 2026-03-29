@@ -52,6 +52,7 @@ export class WeaponModel {
       this.buildRPG(),
       this.buildMachineGun(),
       this.buildGrenadeLauncher(),
+      this.buildSniper(),
     ];
 
     this.weapons.forEach((w) => this.scene.add(w));
@@ -204,6 +205,57 @@ export class WeaponModel {
     return g;
   }
 
+  // ── Sniper: Long barrel, scope on top, slim stock ──
+  private buildSniper(): THREE.Group {
+    const g = new THREE.Group();
+    const dark = this.mat(0x1a1a22);
+    const metal = this.mat(0x2a2a34);
+    const purple = this.mat(0x7722cc, 0x440088);
+
+    // Long barrel
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.55), dark);
+    barrel.position.set(0, 0, -0.22);
+    g.add(barrel);
+
+    // Body / receiver
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.22), metal);
+    body.position.set(0, 0, 0.08);
+    g.add(body);
+
+    // Scope
+    const scope = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.04, 0.18), dark);
+    scope.position.set(0, 0.05, -0.02);
+    g.add(scope);
+
+    // Scope lens (front)
+    const lens = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.03, 0.01), purple);
+    lens.position.set(0, 0.05, -0.11);
+    g.add(lens);
+
+    // Scope lens (rear)
+    const lensR = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.03, 0.01), purple);
+    lensR.position.set(0, 0.05, 0.07);
+    g.add(lensR);
+
+    // Slim stock
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.2), metal);
+    stock.position.set(0, -0.01, 0.28);
+    g.add(stock);
+
+    // Magazine
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.07, 0.04), dark);
+    mag.position.set(0, -0.06, 0.1);
+    g.add(mag);
+
+    // Bolt handle accent
+    const bolt = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.015, 0.03), purple);
+    bolt.position.set(0.03, 0.01, 0.06);
+    g.add(bolt);
+
+    g.position.set(0.28, -0.26, -0.48);
+    return g;
+  }
+
   private showWeapon(index: number): void {
     this.weapons.forEach((w, i) => {
       w.visible = i === index;
@@ -335,6 +387,7 @@ export class WeaponModel {
       new THREE.Vector3(0.32, -0.30, -0.38),  // RPG
       new THREE.Vector3(0.30, -0.26, -0.46),  // Machine Gun
       new THREE.Vector3(0.31, -0.29, -0.40),  // Grenade Launcher
+      new THREE.Vector3(0.28, -0.26, -0.48),  // Sniper
     ];
     return positions[index] || positions[0];
   }

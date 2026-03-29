@@ -98,6 +98,11 @@ const CLIENT_PROJECTILE_CONFIGS: Record<number, ProjectileConfig> = {
     speed: 48, gravity: 8, size: 0.19, trailLength: 0.35,
     trailColor: 0x8dff66, lightIntensity: 2.8, lightColor: 0x9dff44, lightRange: 10, lifetime: 5,
   },
+  // Sniper (index 5) — fast bullet, bright purple tracer, no gravity
+  5: {
+    speed: 280, gravity: 0, size: 0.06, trailLength: 0.3,
+    trailColor: 0xd060ff, lightIntensity: 2.5, lightColor: 0xe040ff, lightRange: 6, lifetime: 3,
+  },
 };
 
 // ── Client-only HUD descriptions ──
@@ -108,6 +113,7 @@ const WEAPON_DESCRIPTIONS: Record<number, string> = {
   2: 'Explosive rocket. Destroys terrain and players.',
   3: 'Rapid fire suppression. Best sustained DPS.',
   4: 'Arcing grenades. Largest blast radius.',
+  5: 'Bolt-action sniper. Visible tracer, extreme range.',
 };
 
 // ── Build weapon definitions by merging shared + client data ──

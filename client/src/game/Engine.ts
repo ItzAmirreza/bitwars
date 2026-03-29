@@ -357,7 +357,7 @@ export class Engine {
     this.controls = new FPSControls(this.camera, container, WORLD_X, WORLD_Z);
 
     // ── Remote players ──
-    this.remotePlayers = new RemotePlayerManager({ scene: this.scene, localIdentity: this.localIdentity });
+    this.remotePlayers = new RemotePlayerManager({ scene: this.scene, camera: this.camera, localIdentity: this.localIdentity });
 
     // ── Ability pickups ──
     this.abilityPickups = new AbilityPickupManager(this.scene);
@@ -1322,6 +1322,7 @@ export class Engine {
     else if (weaponIdx === 2) this.audio.playRPGLaunch(spatial);
     else if (weaponIdx === 3) this.audio.playMachineGun(spatial);
     else if (weaponIdx === 4) this.audio.playGrenadeLaunch(spatial);
+    else if (weaponIdx === 5) this.audio.playSniper(spatial);
     // Vehicle weapons (100+ namespace)
     else if (weaponIdx === 100) this.audio.playVehicleMinigun(spatial); // Minigun
     else if (weaponIdx === 101) this.audio.playVehicleRocket(spatial);  // Rockets
@@ -2622,8 +2623,8 @@ export class Engine {
     this.updateGameSystems(delta);
     this.updateFeedback(delta);
 
-    // Interpolate remote players every frame
-    this.remotePlayers.interpolateAll();
+    // Interpolate remote players every frame (delta for sniper glint animation)
+    this.remotePlayers.interpolateAll(delta);
 
     // Vehicle per-frame update FIRST so mesh positions are current before camera sync.
     // Old order (camera → mesh update) caused one-frame lag on the camera.

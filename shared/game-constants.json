@@ -120,6 +120,19 @@
       "delivery": "server_projectile",
       "color": "#6bff6b",
       "recoil": 0.11
+    },
+    {
+      "index": 5,
+      "name": "Sniper",
+      "damage": 85,
+      "radius": 0,
+      "fireRate": 0.7,
+      "maxAmmo": 5,
+      "maxRange": 200.0,
+      "projectileSpeed": 280.0,
+      "delivery": "projectile",
+      "color": "#e040ff",
+      "recoil": 0.14
     }
   ],
 

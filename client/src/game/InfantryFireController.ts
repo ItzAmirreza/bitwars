@@ -72,6 +72,7 @@ export class InfantryFireController {
     const isRPG = result.weaponIndex === 2;
     const isMachineGun = result.weaponIndex === 3;
     const isGrenade = result.weaponIndex === 4;
+    const isSniper = result.weaponIndex === 5;
 
     // Audio (always plays on fire)
     const localShotAudio = ctx.localAudioSource(-0.1);
@@ -80,10 +81,11 @@ export class InfantryFireController {
     else if (isRPG) ctx.audio.playRPGLaunch(localShotAudio);
     else if (isMachineGun) ctx.audio.playMachineGun(localShotAudio);
     else if (isGrenade) ctx.audio.playGrenadeLaunch(localShotAudio);
+    else if (isSniper) ctx.audio.playSniper(localShotAudio);
 
     // Muzzle flash + shake + recoil (always)
     ctx.vfx.emitMuzzleFlash();
-    ctx.vfx.shake(isGrenade ? 0.55 : isRPG ? 0.5 : isShotgun ? 0.8 : isMachineGun ? 0.25 : 0.3);
+    ctx.vfx.shake(isSniper ? 0.7 : isGrenade ? 0.55 : isRPG ? 0.5 : isShotgun ? 0.8 : isMachineGun ? 0.25 : 0.3);
     ctx.weaponModel.triggerRecoil(WEAPONS[result.weaponIndex].recoil);
 
     if (result.isProjectile) {

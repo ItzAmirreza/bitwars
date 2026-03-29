@@ -23,18 +23,73 @@ export function disposeObjectMaterials(root: THREE.Object3D): void {
 /** Dependencies the RemotePlayerManager needs from the Engine. */
 export interface RemotePlayerContext {
   scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
   localIdentity: string | null;
 }
 
 // ── RemotePlayerManager ──
+
+// ── Sniper glint constants ──
+const SNIPER_WEAPON_INDEX = 5;
+const GLINT_DOT_THRESHOLD = 0.92;   // cos(~23°) — must be roughly aimed at you
+const GLINT_MAX_DIST = 200;         // meters — matches sniper max range
+const GLINT_MIN_DIST = 8;           // too close = no glint visible
+const GLINT_PULSE_SPEED = 4;        // shimmer speed
 
 export class RemotePlayerManager {
   readonly otherPlayers: Map<string, THREE.Group> = new Map();
   readonly interpBuffers: Map<string, InterpolationBuffer> = new Map();
   private ctx: RemotePlayerContext;
 
+  // Sniper glint system
+  private glintSprites: Map<string, THREE.Sprite> = new Map();
+  private glintTime = 0;
+  private static glintMaterial: THREE.SpriteMaterial | null = null;
+
   constructor(ctx: RemotePlayerContext) {
     this.ctx = ctx;
+  }
+
+  private getGlintMaterial(): THREE.SpriteMaterial {
+    if (!RemotePlayerManager.glintMaterial) {
+      // Create a radial gradient texture for the lens flare
+      const size = 64;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const c = canvas.getContext('2d')!;
+      const cx = size / 2, cy = size / 2;
+
+      // Outer soft glow
+      const outer = c.createRadialGradient(cx, cy, 0, cx, cy, size / 2);
+      outer.addColorStop(0, 'rgba(255, 255, 255, 1)');
+      outer.addColorStop(0.1, 'rgba(230, 180, 255, 0.9)');
+      outer.addColorStop(0.3, 'rgba(200, 100, 255, 0.4)');
+      outer.addColorStop(0.6, 'rgba(180, 60, 255, 0.1)');
+      outer.addColorStop(1, 'rgba(180, 60, 255, 0)');
+      c.fillStyle = outer;
+      c.fillRect(0, 0, size, size);
+
+      // Horizontal flare streak
+      c.globalCompositeOperation = 'lighter';
+      const streak = c.createLinearGradient(0, cy, size, cy);
+      streak.addColorStop(0, 'rgba(255, 200, 255, 0)');
+      streak.addColorStop(0.3, 'rgba(255, 200, 255, 0.15)');
+      streak.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)');
+      streak.addColorStop(0.7, 'rgba(255, 200, 255, 0.15)');
+      streak.addColorStop(1, 'rgba(255, 200, 255, 0)');
+      c.fillStyle = streak;
+      c.fillRect(0, cy - 3, size, 6);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      RemotePlayerManager.glintMaterial = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+    }
+    return RemotePlayerManager.glintMaterial;
   }
 
   // ── Nametag drawing ──
@@ -301,17 +356,82 @@ export class RemotePlayerManager {
       this.otherPlayers.delete(id);
     }
     this.interpBuffers.delete(id);
+    // Clean up sniper glint
+    const glint = this.glintSprites.get(id);
+    if (glint) {
+      glint.material.dispose();
+      this.ctx.scene.remove(glint);
+      this.glintSprites.delete(id);
+    }
   }
 
   /** Interpolate all remote players — call once per frame. */
-  interpolateAll(): void {
+  interpolateAll(delta = 0.016): void {
+    this.glintTime += delta;
     const interpRot = { yaw: 0, pitch: 0 };
+    const camPos = this.ctx.camera.position;
+    const toPlayer = new THREE.Vector3();
+    const lookDir = new THREE.Vector3();
+
     for (const [id, group] of this.otherPlayers) {
       const buffer = this.interpBuffers.get(id);
       if (buffer && buffer.hasData()) {
         buffer.sample(group.position, interpRot);
         group.rotation.y = interpRot.yaw;
       }
+
+      // ── Sniper scope glint ──
+      const weaponIdx = group.userData.currentWeapon as number;
+      if (weaponIdx === SNIPER_WEAPON_INDEX) {
+        // Vector from remote player's eye to local camera
+        toPlayer.set(
+          camPos.x - group.position.x,
+          camPos.y - group.position.y,
+          camPos.z - group.position.z,
+        );
+        const dist = toPlayer.length();
+
+        if (dist > GLINT_MIN_DIST && dist < GLINT_MAX_DIST) {
+          toPlayer.divideScalar(dist); // normalize
+
+          // Remote player's look direction from yaw (they face -Z in local space)
+          lookDir.set(-Math.sin(interpRot.yaw), 0, -Math.cos(interpRot.yaw));
+
+          const dot = lookDir.dot(toPlayer);
+
+          if (dot > GLINT_DOT_THRESHOLD) {
+            // They're looking at us — show glint
+            const intensity = (dot - GLINT_DOT_THRESHOLD) / (1 - GLINT_DOT_THRESHOLD);
+            const distFade = 1 - (dist - GLINT_MIN_DIST) / (GLINT_MAX_DIST - GLINT_MIN_DIST);
+            const pulse = 0.6 + 0.4 * Math.sin(this.glintTime * GLINT_PULSE_SPEED);
+            const alpha = intensity * distFade * pulse;
+
+            let sprite = this.glintSprites.get(id);
+            if (!sprite) {
+              sprite = new THREE.Sprite(this.getGlintMaterial().clone());
+              sprite.renderOrder = 999;
+              this.ctx.scene.add(sprite);
+              this.glintSprites.set(id, sprite);
+            }
+            // Position at remote player's eye height
+            sprite.position.set(
+              group.position.x,
+              group.position.y + 0.15,
+              group.position.z,
+            );
+            // Scale grows with distance so it remains visible from afar
+            const baseScale = 0.4 + dist * 0.012;
+            sprite.scale.setScalar(baseScale * (0.8 + intensity * 0.4));
+            sprite.material.opacity = Math.min(1, alpha * 1.2);
+            sprite.visible = true;
+            continue;
+          }
+        }
+      }
+
+      // Hide glint if not applicable
+      const existingGlint = this.glintSprites.get(id);
+      if (existingGlint) existingGlint.visible = false;
     }
   }
 

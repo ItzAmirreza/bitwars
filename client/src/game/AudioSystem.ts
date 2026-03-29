@@ -188,6 +188,10 @@ export class AudioSystem {
     WeaponAudio.playGrenadeLaunch(this.core, spatial);
   }
 
+  playSniper(spatial?: SpatialSoundOptions): void {
+    WeaponAudio.playSniper(this.core, spatial);
+  }
+
   playVehicleMinigun(spatial?: SpatialSoundOptions): void {
     WeaponAudio.playVehicleMinigun(this.core, spatial);
   }
