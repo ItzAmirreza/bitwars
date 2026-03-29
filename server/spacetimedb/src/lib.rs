@@ -41,6 +41,7 @@
 //   cleanup     - Scheduled event cleanup, health regeneration
 //   map         - Map reset, chunk requests
 
+pub mod abilities;
 pub mod admin;
 pub mod chat;
 pub mod chunks;

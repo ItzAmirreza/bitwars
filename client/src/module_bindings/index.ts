@@ -55,6 +55,8 @@ import VehicleProjectileImpactReducer from "./vehicle_projectile_impact_reducer"
 // Import all procedure arg schemas
 
 // Import all table schema definitions
+import AbilityPickupRow from "./ability_pickup_table";
+import AbilityPickupEventRow from "./ability_pickup_event_table";
 import ChatMessageRow from "./chat_message_table";
 import DetachEventRow from "./detach_event_table";
 import EntityRow from "./entity_table";
@@ -63,6 +65,7 @@ import GrenadeProjectileRow from "./grenade_projectile_table";
 import KillEventRow from "./kill_event_table";
 import PlayerRow from "./player_table";
 import PlayerAmmoRow from "./player_ammo_table";
+import PlayerBuffRow from "./player_buff_table";
 import PlayerLoadoutRow from "./player_loadout_table";
 import ShotEventRow from "./shot_event_table";
 import VehicleRow from "./vehicle_table";
@@ -75,6 +78,28 @@ import WorldEnvironmentRow from "./world_environment_table";
 
 /** The schema information for all tables in this module. This is defined the same was as the tables would have been defined in the server. */
 const tablesSchema = __schema({
+  ability_pickup: __table({
+    name: 'ability_pickup',
+    indexes: [
+      { accessor: 'id', name: 'ability_pickup_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'ability_pickup_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, AbilityPickupRow),
+  ability_pickup_event: __table({
+    name: 'ability_pickup_event',
+    indexes: [
+      { accessor: 'id', name: 'ability_pickup_event_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'ability_pickup_event_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, AbilityPickupEventRow),
   chat_message: __table({
     name: 'chat_message',
     indexes: [
@@ -169,6 +194,20 @@ const tablesSchema = __schema({
       { name: 'player_ammo_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, PlayerAmmoRow),
+  player_buff: __table({
+    name: 'player_buff',
+    indexes: [
+      { accessor: 'id', name: 'player_buff_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'idx_buff_identity', name: 'player_buff_identity_idx_btree', algorithm: 'btree', columns: [
+        'identity',
+      ] },
+    ],
+    constraints: [
+      { name: 'player_buff_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, PlayerBuffRow),
   player_loadout: __table({
     name: 'player_loadout',
     indexes: [

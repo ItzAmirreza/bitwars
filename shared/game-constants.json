@@ -366,5 +366,24 @@
     { "name": "Overcast", "cloudDensity": 0.8, "fogDensity": 1.2, "windSpeed": 0.4 },
     { "name": "Rainy",    "cloudDensity": 0.7, "fogDensity": 1.5, "windSpeed": 0.5 },
     { "name": "Stormy",   "cloudDensity": 0.9, "fogDensity": 1.8, "windSpeed": 0.8 }
-  ]
+  ],
+
+  "abilities": {
+    "types": {
+      "HealthRegen": 0,
+      "DoubleDamage": 1,
+      "SpeedBoost": 2,
+      "Shield": 3
+    },
+    "doubleDamageDurationSecs": 15,
+    "doubleDamageMultiplier": 2.0,
+    "speedBoostDurationSecs": 12,
+    "speedBoostMultiplier": 1.6,
+    "shieldDurationSecs": 15,
+    "shieldDamageReduction": 0.5,
+    "pickupRadius": 2.0,
+    "maxActivePickups": 12,
+    "pickupRespawnSecs": 45,
+    "tickIntervalMs": 1000
+  }
 }

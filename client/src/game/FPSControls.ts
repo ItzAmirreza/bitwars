@@ -60,6 +60,7 @@ export class FPSControls {
   gravityAscending = -22;
   sensitivity = 0.002;
   locked = false;
+  speedMultiplier = 1.0;
 
   // Enhanced gravity feel
   private readonly terminalVelocity = -35;
@@ -424,6 +425,7 @@ export class FPSControls {
     let targetSpeed = this.speed;
     if (this.isSprinting) targetSpeed = this.sprintSpeed;
     else if (this.isCrouching && !this.isSliding) targetSpeed = this.crouchSpeed;
+    targetSpeed *= this.speedMultiplier;
 
     // Eye height interpolation
     this.targetEyeHeight = this.isCrouching ? this.crouchHeight : this.standHeight;

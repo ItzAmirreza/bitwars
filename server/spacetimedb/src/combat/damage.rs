@@ -58,7 +58,10 @@ pub fn apply_hitscan_player_damage(
                 }
             }
 
-            let new_health = (target.health - damage).max(0);
+            let attack_mult = crate::abilities::damage_multiplier(ctx, sender);
+            let defense_mult = crate::abilities::defense_multiplier(ctx, *target_id);
+            let effective_damage = ((damage as f32) * attack_mult * defense_mult) as i32;
+            let new_health = (target.health - effective_damage).max(0);
             ctx.db.player().identity().update(Player {
                 health: new_health,
                 last_damage_time: ctx.timestamp,
@@ -103,7 +106,10 @@ pub fn apply_splash_player_damage(
                 continue;
             }
 
-            let new_health = (target.health - damage).max(0);
+            let attack_mult = crate::abilities::damage_multiplier(ctx, sender);
+            let defense_mult = crate::abilities::defense_multiplier(ctx, *target_id);
+            let effective_damage = ((damage as f32) * attack_mult * defense_mult) as i32;
+            let new_health = (target.health - effective_damage).max(0);
             ctx.db.player().identity().update(Player {
                 health: new_health,
                 last_damage_time: ctx.timestamp,
@@ -165,7 +171,9 @@ pub fn apply_hitscan_vehicle_damage(
         if first_hit_pos.is_none() {
             first_hit_pos = Some(hit_pos.clone());
         }
-        apply_vehicle_damage(ctx, sender, target_vehicle_id, damage, weapon, hit_pos);
+        let attack_mult = crate::abilities::damage_multiplier(ctx, sender);
+        let effective_damage = ((damage as f32) * attack_mult) as i32;
+        apply_vehicle_damage(ctx, sender, target_vehicle_id, effective_damage, weapon, hit_pos);
     }
 
     first_hit_pos
@@ -210,11 +218,13 @@ pub fn apply_splash_vehicle_damage(
             continue;
         }
 
+        let attack_mult = crate::abilities::damage_multiplier(ctx, sender);
+        let effective_damage = ((damage as f32) * attack_mult) as i32;
         apply_vehicle_damage(
             ctx,
             sender,
             target_vehicle_id,
-            damage,
+            effective_damage,
             weapon,
             impact_pos.clone(),
         );

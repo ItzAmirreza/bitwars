@@ -332,6 +332,7 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
     sync_player_entity(ctx, &respawned);
 
     weapons::reset_all_ammo(ctx, sender);
+    crate::abilities::clear_buffs(ctx, sender);
 
     init_movement_state(ctx, sender, &SPAWN_POS);
     Ok(())

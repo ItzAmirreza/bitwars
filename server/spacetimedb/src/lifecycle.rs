@@ -9,6 +9,7 @@ use crate::constants::*;
 use crate::helpers::*;
 use crate::tables::*;
 use crate::types::*;
+use crate::abilities;
 use crate::vehicles::{spawn_aa_at_outposts, spawn_jets_at_airstrips, spawn_sandbox_helicopters};
 
 use crate::worldgen::{self, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
@@ -109,6 +110,14 @@ pub fn init(ctx: &ReducerContext) {
     spawn_jets_at_airstrips(ctx, seed);
     spawn_aa_at_outposts(ctx, seed);
 
+    abilities::spawning::spawn_initial_ability_pickups(ctx, seed);
+    ctx.db.ability_tick().insert(AbilityTick {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(
+            ctx.timestamp + Duration::from_millis(ability_tick_interval_ms()),
+        ),
+    });
+
     log::info!(
         "Environment initialized: time={:.1}h, weather={}",
         initial_time,
@@ -162,6 +171,7 @@ pub fn client_disconnected(ctx: &ReducerContext) {
         };
         ctx.db.player().identity().update(disconnected.clone());
         sync_player_entity(ctx, &disconnected);
+        abilities::clear_buffs(ctx, sender);
         log::info!("Player disconnected: {:?}", sender);
     }
 }

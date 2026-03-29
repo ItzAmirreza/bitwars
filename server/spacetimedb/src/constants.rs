@@ -455,6 +455,52 @@ pub fn weather_presets() -> &'static [WeatherPreset] {
     })
 }
 
+// ── Abilities ──
+// Sourced from shared/game-constants.json → abilities
+
+pub fn ability_type_health_regen() -> u8 {
+    shared_config::config().abilities.types.health_regen
+}
+pub fn ability_type_double_damage() -> u8 {
+    shared_config::config().abilities.types.double_damage
+}
+pub fn ability_type_speed_boost() -> u8 {
+    shared_config::config().abilities.types.speed_boost
+}
+pub fn ability_type_shield() -> u8 {
+    shared_config::config().abilities.types.shield
+}
+pub fn double_damage_duration_secs() -> u64 {
+    shared_config::config().abilities.double_damage_duration_secs
+}
+pub fn double_damage_multiplier() -> f32 {
+    shared_config::config().abilities.double_damage_multiplier
+}
+pub fn speed_boost_duration_secs() -> u64 {
+    shared_config::config().abilities.speed_boost_duration_secs
+}
+pub fn speed_boost_multiplier() -> f32 {
+    shared_config::config().abilities.speed_boost_multiplier
+}
+pub fn shield_duration_secs() -> u64 {
+    shared_config::config().abilities.shield_duration_secs
+}
+pub fn shield_damage_reduction() -> f32 {
+    shared_config::config().abilities.shield_damage_reduction
+}
+pub fn ability_pickup_radius() -> f32 {
+    shared_config::config().abilities.pickup_radius
+}
+pub fn ability_max_active_pickups() -> usize {
+    shared_config::config().abilities.max_active_pickups
+}
+pub fn ability_pickup_respawn_secs() -> u64 {
+    shared_config::config().abilities.pickup_respawn_secs
+}
+pub fn ability_tick_interval_ms() -> u64 {
+    shared_config::config().abilities.tick_interval_ms
+}
+
 // ── Backward-compatible const aliases ──
 // These are kept so that existing code using `constants::SOME_CONST` continues
 // to compile. They shadow the old `pub const` names with the same values

@@ -20,8 +20,10 @@ import { InfantryFireController } from './InfantryFireController';
 import type { InfantryFireContext } from './InfantryFireController';
 import { VehicleFireController } from './VehicleFireController';
 import type { VehicleFireContext } from './VehicleFireController';
-import { ENTITY_KINDS, VEHICLE_TYPES, ANTI_AIR } from '../shared-config';
+import { ENTITY_KINDS, VEHICLE_TYPES, ANTI_AIR, ABILITIES } from '../shared-config';
 import { GRENADE } from '../shared-config';
+import { AbilityPickupManager, ABILITY_NAMES } from './AbilityPickupManager';
+import type { ActiveBuff } from '../screens/hud/BuffIndicators';
 import type { DbConnection } from '../module_bindings';
 import type { GameSettings } from '../store';
 import { NetDiagnostics } from './NetDiagnostics';
@@ -84,6 +86,7 @@ export interface EngineState {
   aaTargets: { screenX: number; screenY: number; distance: number; name: string }[];
   nearVehicle: boolean;
   nearVehicleName: string | null;
+  activeBuffs: ActiveBuff[];
 }
 
 export class Engine {
@@ -144,6 +147,7 @@ export class Engine {
   }>();
   private dynamicLightSeq = 0;
   private lanterns = new LanternSystem();
+  private abilityPickups!: AbilityPickupManager;
 
   // Vehicle manager
   private vehicleManager!: VehicleManager;
@@ -354,6 +358,9 @@ export class Engine {
 
     // ── Remote players ──
     this.remotePlayers = new RemotePlayerManager({ scene: this.scene, localIdentity: this.localIdentity });
+
+    // ── Ability pickups ──
+    this.abilityPickups = new AbilityPickupManager(this.scene);
 
     // ── Weapons ──
     this.weapons = new WeaponSystem(this.camera, this.world);
@@ -1466,6 +1473,7 @@ export class Engine {
     this.setupEnvironmentListeners();
     this.setupAmmoAndLoadoutListeners();
     this.setupGrenadeListeners();
+    this.setupAbilityListeners();
   }
 
   private setupChunkListeners(): void {
@@ -2282,6 +2290,42 @@ export class Engine {
     }
   }
 
+  private setupAbilityListeners(): void {
+    if (!this.conn) return;
+
+    const pickupTable = (this.conn.db as any).ability_pickup;
+    if (pickupTable) {
+      pickupTable.onInsert((_ctx: unknown, p: any) => {
+        this.abilityPickups.addPickup(BigInt(p.id), p.abilityType, p.pos.x, p.pos.y, p.pos.z);
+        if (!p.active) this.abilityPickups.setActive(BigInt(p.id), false);
+      });
+      pickupTable.onUpdate((_ctx: unknown, _old: any, p: any) => {
+        const id = BigInt(p.id);
+        if (!this.abilityPickups['pickups'].has(id)) {
+          this.abilityPickups.addPickup(id, p.abilityType, p.pos.x, p.pos.y, p.pos.z);
+        }
+        this.abilityPickups.setActive(id, p.active);
+      });
+      pickupTable.onDelete((_ctx: unknown, p: any) => {
+        this.abilityPickups.removePickup(BigInt(p.id));
+      });
+      // Bootstrap existing pickups
+      for (const p of pickupTable.iter()) {
+        this.abilityPickups.addPickup(BigInt(p.id), p.abilityType, p.pos.x, p.pos.y, p.pos.z);
+        if (!p.active) this.abilityPickups.setActive(BigInt(p.id), false);
+      }
+    }
+
+    // Pickup VFX events
+    const pickupEventTable = (this.conn.db as any).ability_pickup_event;
+    if (pickupEventTable) {
+      pickupEventTable.onInsert((_ctx: unknown, e: any) => {
+        // All players (including collector) see the pickup burst
+        this.vfx.emitExplosion(e.pos.x, e.pos.y, e.pos.z, 0.8);
+      });
+    }
+  }
+
   /** Update local ammo from a single PlayerAmmo row */
   private syncAmmoRow(row: any): void {
     if (!this.conn) return;
@@ -2701,6 +2745,10 @@ export class Engine {
     // Update systems
     if (!startupLocked) {
       if (this.mountedVehicleId === 0) {
+        // Apply speed boost from active buffs
+        const buffs = this.getActiveBuffs();
+        const hasSpeedBuff = buffs.some(b => b.type === ABILITIES.types.SpeedBoost);
+        this.controls.speedMultiplier = hasSpeedBuff ? ABILITIES.speedBoostMultiplier : 1.0;
         this.controls.update(delta, this.world);
       } else {
         this.controls.resetVelocity();
@@ -2762,6 +2810,7 @@ export class Engine {
   private updateGameSystems(delta: number): void {
     // Physics (falling blocks)
     this.physics.update(delta);
+    this.abilityPickups.update(delta);
 
     // Dynamic lights
     this.updateDynamicLights(delta);
@@ -3009,7 +3058,27 @@ export class Engine {
       aaTargets: this.vehicleManager.getAATargets(this.camera, ANTI_AIR.trackingRange),
       nearVehicle,
       nearVehicleName,
+      activeBuffs: this.getActiveBuffs(),
     });
+  }
+
+  private getActiveBuffs(): ActiveBuff[] {
+    if (!this.conn || !this.localIdentity) return [];
+    const buffTable = (this.conn.db as any).player_buff;
+    if (!buffTable) return [];
+    const now = Date.now();
+    const buffs: ActiveBuff[] = [];
+    for (const b of buffTable.iter()) {
+      if (b.identity.toHexString() !== this.localIdentity) continue;
+      const expiresMs = (b.expiresAt && typeof b.expiresAt.toMillis === 'function')
+        ? Number(b.expiresAt.toMillis())
+        : Date.now();
+      const remaining = expiresMs - now;
+      if (remaining > 0) {
+        buffs.push({ type: b.abilityType, remainingMs: remaining });
+      }
+    }
+    return buffs;
   }
 
   // ── RESIZE ──
@@ -3037,6 +3106,7 @@ export class Engine {
     window.removeEventListener('resize', this.onResize);
     this.controls.dispose();
     this.sky.dispose();
+    this.abilityPickups.dispose();
     this.vfx.dispose();
     this.projectileManager.dispose();
     this.netDiag.dispose();

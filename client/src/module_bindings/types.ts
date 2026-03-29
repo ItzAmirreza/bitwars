@@ -10,6 +10,35 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
+export const AbilityPickup = __t.object("AbilityPickup", {
+  id: __t.u64(),
+  abilityType: __t.u8(),
+  get pos() {
+    return Vec3;
+  },
+  active: __t.bool(),
+  respawnAt: __t.timestamp(),
+  createdAt: __t.timestamp(),
+});
+export type AbilityPickup = __Infer<typeof AbilityPickup>;
+
+export const AbilityPickupEvent = __t.object("AbilityPickupEvent", {
+  id: __t.u64(),
+  player: __t.identity(),
+  abilityType: __t.u8(),
+  get pos() {
+    return Vec3;
+  },
+  createdAt: __t.timestamp(),
+});
+export type AbilityPickupEvent = __Infer<typeof AbilityPickupEvent>;
+
+export const AbilityTick = __t.object("AbilityTick", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type AbilityTick = __Infer<typeof AbilityTick>;
+
 export const ChatMessage = __t.object("ChatMessage", {
   id: __t.u64(),
   sender: __t.identity(),
@@ -181,6 +210,15 @@ export const PlayerAmmo = __t.object("PlayerAmmo", {
   ammo: __t.i32(),
 });
 export type PlayerAmmo = __Infer<typeof PlayerAmmo>;
+
+export const PlayerBuff = __t.object("PlayerBuff", {
+  id: __t.u64(),
+  identity: __t.identity(),
+  abilityType: __t.u8(),
+  expiresAt: __t.timestamp(),
+  createdAt: __t.timestamp(),
+});
+export type PlayerBuff = __Infer<typeof PlayerBuff>;
 
 export const PlayerFireState = __t.object("PlayerFireState", {
   identity: __t.identity(),
