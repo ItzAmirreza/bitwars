@@ -343,6 +343,9 @@ When implementing ANY new feature:
 - Editing files in `client/src/module_bindings/`
 - **Forgetting to add new tables to `db.ts` subscription list** — callbacks will silently never fire
 - Hardcoding a value that belongs in `game-constants.json`
+- Using `border-radius`, `backdrop-filter: blur()`, blur shadows, or smooth gradients (see `DESIGN.md`)
+- Using spheres/cylinders for 3D models or PBR materials — everything is `BoxGeometry` + `MeshLambertMaterial`
+- Adding full-width HUD background bars that obscure the game view
 - Duplicating weapon/vehicle data instead of using the registry
 - Updating vehicle prediction without preserving the `sim_tick` + `acked_input_seq` coherence contract
 - Reconciling local vehicle from stale cross-table snapshots (Entity tick must match Vehicle tick)
@@ -446,14 +449,28 @@ Read `server/CLAUDE.md` before modifying server code. Key points:
 
 ## Game Feel & Visual Style
 
+**READ `DESIGN.md` BEFORE MODIFYING ANY VISUAL ELEMENT.** It is the single source of truth for colors, fonts, borders, shadows, 3D model constraints, and anti-patterns.
+
+### Quick Reference (see DESIGN.md for full details)
+- **Aesthetic**: 8-bit pixel art — chunky borders, square corners, pixel fonts, hard shadows
+- **Fonts**: `var(--font-pixel)` for labels/headings, `var(--font-mono)` for numbers ONLY
+- **Borders**: 2-3px solid, never 1px, never rounded
+- **Shadows**: Hard offset (`Xpx Xpx 0`), never blur-based
+- **3D models**: All `BoxGeometry` + `MeshLambertMaterial` — no spheres, no PBR
+- **Particles**: Cubes via instanced mesh, not spheres or planes
+- **HUD**: No full-width background bars — individual floating panels only
+- **Chat**: `dir="auto"` for RTL support, Vazirmatn font for Persian
+
+### Systems
 - **Voxel world**: 16x16x16 chunks, RLE-compressed. Block types defined in `game-constants.json`
 - **Lighting**: Dynamic day/night cycle via `SkySystem`. Lanterns via `LanternSystem`
 - **Post-processing**: Bloom, color grading, damage vignette via `PostFX`
-- **VFX**: Particle-based effects via instanced meshes in `VFX.ts` (MAX_PARTICLES = 2000)
+- **VFX**: Particle-based cubes via instanced meshes in `VFX.ts` (MAX_PARTICLES = 2000)
 - **Audio**: 100% procedural spatial audio via `AudioSystem` + 7 sub-modules + ray-traced acoustics worker
 - **Screen shake**: Distance-attenuated, in `InfantryFireController`
 - **Physics debris**: Falling blocks via `PhysicsSystem` (MAX_FALLING = 500)
-- **Player models**: Box-based (body + head + nametag) via `RemotePlayerManager`
+- **Player models**: 8 box meshes (Minecraft-style) via `RemotePlayerManager`
+- **Weapon models**: 4-5 box meshes (first person), 3 box meshes (remote)
 
 **Performance budget**: Target 60fps. Use instanced rendering. Limit per-frame allocations. Cap physics objects.
 
