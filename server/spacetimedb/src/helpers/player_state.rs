@@ -9,7 +9,7 @@ use crate::helpers::terrain_cache::TerrainSampler;
 use crate::tables::*;
 use crate::types::*;
 use crate::weapons;
-use crate::worldgen::{AIR, WORLD_SIZE_X, WORLD_SIZE_Z};
+use crate::worldgen::{biome_height, get_biome, AIR, WORLD_SIZE_X, WORLD_SIZE_Z};
 
 /// Initialize weapon ammo + fire state for a player. Delegates to weapons module.
 pub fn init_weapon_state(ctx: &ReducerContext, identity: Identity) {
@@ -59,7 +59,7 @@ pub fn random_spawn_position(ctx: &ReducerContext, identity: &Identity) -> Vec3 
         let x = PLAYER_SPAWN_MARGIN + (rx % span_x as u64) as i32;
         let z = PLAYER_SPAWN_MARGIN + (rz % span_z as u64) as i32;
 
-        let Some(candidate) = spawn_candidate_position(ctx, &mut terrain, x, z) else {
+        let Some(candidate) = spawn_candidate_position(ctx, &mut terrain, world_seed, x, z) else {
             continue;
         };
 
@@ -83,13 +83,20 @@ fn identity_seed(identity: &Identity) -> u64 {
 fn spawn_candidate_position(
     ctx: &ReducerContext,
     terrain: &mut TerrainSampler,
+    world_seed: u64,
     x: i32,
     z: i32,
 ) -> Option<Vec3> {
+    let biome = get_biome(x, z, world_seed);
+    let terrain_floor_y = biome_height(biome, x, z, world_seed) as f32;
     let pos = Vec3 {
         x: x as f32 + 0.5,
-        y: terrain.ground_surface_height(ctx, x as f32 + 0.5, z as f32 + 0.5)
-            + 1.0
+        y: terrain.ground_surface_height_below(
+            ctx,
+            x as f32 + 0.5,
+            z as f32 + 0.5,
+            terrain_floor_y,
+        ) + 1.0
             + player_eye_height(),
         z: z as f32 + 0.5,
     };
