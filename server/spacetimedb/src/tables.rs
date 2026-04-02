@@ -312,6 +312,18 @@ pub struct ChatMessage {
     pub sent_at: Timestamp,
 }
 
+/// Server-side chat anti-spam state per player.
+#[table(accessor = chat_throttle)]
+pub struct ChatThrottle {
+    #[primary_key]
+    pub identity: Identity,
+    pub last_message_at: Timestamp,
+    pub last_message_text: String,
+    pub window_started_at: Timestamp,
+    pub messages_in_window: u8,
+    pub muted_until: Timestamp,
+}
+
 // ── Projectiles ──
 
 /// Server-authoritative grenade projectile that bounces and explodes.

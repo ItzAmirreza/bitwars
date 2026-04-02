@@ -48,6 +48,16 @@ export const ChatMessage = __t.object("ChatMessage", {
 });
 export type ChatMessage = __Infer<typeof ChatMessage>;
 
+export const ChatThrottle = __t.object("ChatThrottle", {
+  identity: __t.identity(),
+  lastMessageAt: __t.timestamp(),
+  lastMessageText: __t.string(),
+  windowStartedAt: __t.timestamp(),
+  messagesInWindow: __t.u8(),
+  mutedUntil: __t.timestamp(),
+});
+export type ChatThrottle = __Infer<typeof ChatThrottle>;
+
 export const DestroyedBlock = __t.object("DestroyedBlock", {
   x: __t.f32(),
   y: __t.f32(),

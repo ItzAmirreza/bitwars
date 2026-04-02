@@ -9,6 +9,13 @@ interface DisplayMessage {
 }
 
 const MAX_CHAT_MESSAGES = 80;
+// Keep these values aligned with server/spacetimedb/src/chat.rs.
+const CHAT_SEND_COOLDOWN_MS = 1_200;
+const CHAT_BURST_WINDOW_MS = 10_000;
+const CHAT_BURST_LIMIT = 5;
+const CHAT_BURST_LOCK_MS = 15_000;
+
+type ChatBlockMode = 'cooldown' | 'burst' | null;
 
 function getMessageTimestamp(sentAt: { toMillis?: () => bigint } | null | undefined): number {
   if (sentAt && typeof sentAt.toMillis === 'function') {
@@ -37,6 +44,23 @@ function mergeMessages(prev: DisplayMessage[], next: DisplayMessage[]): DisplayM
     .slice(-MAX_CHAT_MESSAGES);
 }
 
+function formatCooldownLabel(ms: number): string {
+  return `${(Math.max(ms, 100) / 1000).toFixed(1)}s`;
+}
+
+function parseServerCooldownMs(message: string): { durationMs: number; mode: ChatBlockMode } | null {
+  const match = message.match(/(\d+(?:\.\d+)?)s/i);
+  if (!match) return null;
+
+  const durationMs = Math.ceil(Number(match[1]) * 1000);
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return null;
+
+  return {
+    durationMs,
+    mode: /locked/i.test(message) ? 'burst' : 'cooldown',
+  };
+}
+
 /** Check whether a raw ChatMessage row should be shown to this client. */
 function isVisibleMessage(msg: any, localIdentity: string | null): boolean {
   // "[ADMIN]" messages are private admin command feedback — only the
@@ -51,8 +75,13 @@ function isVisibleMessage(msg: any, localIdentity: string | null): boolean {
 
 export function useChat(connection: DbConnection | null, localIdentity: string | null) {
   const [chatMessages, setChatMessages] = useState<DisplayMessage[]>([]);
-  const [chatDraft, setChatDraft] = useState('');
+  const [chatDraft, setChatDraftState] = useState('');
+  const [chatBlockedUntil, setChatBlockedUntil] = useState(0);
+  const [chatBlockMode, setChatBlockMode] = useState<ChatBlockMode>(null);
+  const [chatFeedbackText, setChatFeedbackText] = useState('');
   const localChatIdRef = useRef(-1);
+  const recentSendTimesRef = useRef<number[]>([]);
+  const [, setChatCooldownTick] = useState(0);
 
   const pushLocalSystemMessage = useCallback((text: string) => {
     const nextId = localChatIdRef.current;
@@ -70,20 +99,82 @@ export function useChat(connection: DbConnection | null, localIdentity: string |
     );
   }, []);
 
+  const setChatDraft = useCallback(
+    (value: string) => {
+      setChatDraftState(value);
+      if (chatBlockedUntil <= Date.now()) {
+        setChatFeedbackText('');
+      }
+    },
+    [chatBlockedUntil],
+  );
+
+  useEffect(() => {
+    if (chatBlockedUntil <= Date.now()) return;
+
+    const interval = window.setInterval(() => {
+      setChatCooldownTick((tick) => tick + 1);
+    }, 100);
+
+    return () => window.clearInterval(interval);
+  }, [chatBlockedUntil]);
+
+  useEffect(() => {
+    recentSendTimesRef.current = [];
+    setChatBlockedUntil(0);
+    setChatBlockMode(null);
+    setChatFeedbackText('');
+  }, [connection, localIdentity]);
+
+  const chatCooldownRemainingMs = Math.max(0, chatBlockedUntil - Date.now());
+  const chatStatusText = chatCooldownRemainingMs > 0
+    ? chatBlockMode === 'burst'
+      ? `Chat locked ${formatCooldownLabel(chatCooldownRemainingMs)}`
+      : `Slow mode ${formatCooldownLabel(chatCooldownRemainingMs)}`
+    : chatFeedbackText;
+
   const sendChatMessage = useCallback(
     async (text: string): Promise<boolean> => {
       if (!connection || !text.trim()) return false;
       const trimmed = text.trim();
+      const localRemainingMs = Math.max(0, chatBlockedUntil - Date.now());
+
+      if (localRemainingMs > 0) {
+        setChatFeedbackText(
+          chatBlockMode === 'burst'
+            ? `Chat locked for ${formatCooldownLabel(localRemainingMs)}.`
+            : `Slow mode: wait ${formatCooldownLabel(localRemainingMs)}.`,
+        );
+        return false;
+      }
 
       try {
         await connection.reducers.sendChat({ text: trimmed });
+        const sentAt = Date.now();
+        const recent = recentSendTimesRef.current.filter((ts) => sentAt - ts < CHAT_BURST_WINDOW_MS);
+        recent.push(sentAt);
+        recentSendTimesRef.current = recent;
+
+        const hitBurstLimit = recent.length >= CHAT_BURST_LIMIT;
+        setChatBlockedUntil(sentAt + (hitBurstLimit ? CHAT_BURST_LOCK_MS : CHAT_SEND_COOLDOWN_MS));
+        setChatBlockMode(hitBurstLimit ? 'burst' : 'cooldown');
+        setChatFeedbackText('');
         return true;
       } catch (error) {
-        pushLocalSystemMessage(error instanceof Error ? error.message : 'Failed to send chat message');
+        const message = error instanceof Error ? error.message : 'Failed to send chat message';
+        const parsedCooldown = parseServerCooldownMs(message);
+
+        if (parsedCooldown) {
+          setChatBlockedUntil((prev) => Math.max(prev, Date.now() + parsedCooldown.durationMs));
+          setChatBlockMode(parsedCooldown.mode);
+        }
+
+        setChatFeedbackText(message);
+        pushLocalSystemMessage(message);
         return false;
       }
     },
-    [connection, pushLocalSystemMessage],
+    [chatBlockMode, chatBlockedUntil, connection, pushLocalSystemMessage],
   );
 
   // Load chat messages from DB + subscribe to new ones
@@ -117,5 +208,7 @@ export function useChat(connection: DbConnection | null, localIdentity: string |
     setChatDraft,
     sendChatMessage,
     pushLocalSystemMessage,
+    chatCooldownRemainingMs,
+    chatStatusText,
   };
 }
