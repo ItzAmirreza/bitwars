@@ -119,6 +119,13 @@ export function useChat(connection: DbConnection | null, localIdentity: string |
     return () => window.clearInterval(interval);
   }, [chatBlockedUntil]);
 
+  useEffect(() => {
+    recentSendTimesRef.current = [];
+    setChatBlockedUntil(0);
+    setChatBlockMode(null);
+    setChatFeedbackText('');
+  }, [connection, localIdentity]);
+
   const chatCooldownRemainingMs = Math.max(0, chatBlockedUntil - Date.now());
   const chatStatusText = chatCooldownRemainingMs > 0
     ? chatBlockMode === 'burst'

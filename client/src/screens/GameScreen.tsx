@@ -219,11 +219,11 @@ export function GameScreen({ active }: GameScreenProps) {
 
   useEffect(() => {
     const container = canvasRef.current;
-    if (!container || engineRef.current) return;
+    if (!container || !connection || engineRef.current) return;
 
     let disposed = false;
     const engineInitFrame = requestAnimationFrame(() => {
-      if (disposed || engineRef.current) return;
+      if (disposed || !connection || engineRef.current) return;
       const engine = new Engine(container, connection, setState, null, null, activeRef.current);
       engine.setPlayerContext(identityRef.current, usernameRef.current || null);
       engine.updateSettings(settingsRef.current);

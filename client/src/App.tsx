@@ -165,10 +165,12 @@ function App() {
     return <LoadingScreen />;
   }
 
+  const showGameScreen = connection !== null;
+
   return (
     <div className="w-full h-full relative">
       <div className="absolute inset-0">
-        <GameScreen active={screen === 'game'} />
+        {showGameScreen && <GameScreen active={screen === 'game'} />}
       </div>
       {screen === 'login' && (
         <div className="absolute inset-0 z-10">
