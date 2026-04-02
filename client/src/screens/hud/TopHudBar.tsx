@@ -80,7 +80,9 @@ export interface TopHudBarProps {
   loadoutOpen: boolean;
   chatOpen: boolean;
   username: string | null;
+  roundTimerLabel: string;
   roundTimer: string;
+  roundTimerCritical: boolean;
   playerCount: number;
   fps: number;
   serverTps: number;
@@ -103,7 +105,7 @@ const hudBtnBase: React.CSSProperties = {
 
 export function TopHudBar({
   showSettings, setShowSettings, loadoutOpen, chatOpen, username,
-  roundTimer, playerCount, fps, serverTps, heading, locked, handleLeave, openLoadout,
+  roundTimerLabel, roundTimer, roundTimerCritical, playerCount, fps, serverTps, heading, locked, handleLeave, openLoadout,
 }: TopHudBarProps) {
   return (
     <div className="absolute top-0 left-0 right-0 z-10 pointer-events-none">
@@ -194,19 +196,19 @@ export function TopHudBar({
                 fontFamily: 'var(--font-pixel)', fontSize: '6px',
                 color: '#4a4e5e', letterSpacing: '0.2em',
               }}>
-                ROUND
+                {roundTimerLabel}
               </span>
               <div style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '22px',
                 fontWeight: 'bold',
-                color: roundTimer.startsWith('0:') ? '#ff2d78' : '#e8e8f0',
+                color: roundTimerCritical ? '#ff2d78' : '#e8e8f0',
                 letterSpacing: '0.08em',
                 lineHeight: '1',
                 padding: '4px 14px',
                 background: 'rgba(12,16,24,0.9)',
-                border: `2px solid ${roundTimer.startsWith('0:') ? '#ff2d78' : '#1a1e2e'}`,
-                animation: roundTimer.startsWith('0:') ? 'hud-critical-flash 1s ease-in-out infinite' : 'none',
+                border: `2px solid ${roundTimerCritical ? '#ff2d78' : '#1a1e2e'}`,
+                animation: roundTimerCritical ? 'hud-critical-flash 1s ease-in-out infinite' : 'none',
               }}>
                 {roundTimer}
               </div>

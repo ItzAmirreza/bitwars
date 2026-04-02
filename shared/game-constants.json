@@ -373,6 +373,12 @@
     "hitscanDotThresholdVehicle": 0.35
   },
 
+  "match": {
+    "roundDurationSecs": 600,
+    "intermissionSecs": 15,
+    "endingWarningSecs": 30
+  },
+
   "weather": [
     { "name": "Clear",    "cloudDensity": 0.1, "fogDensity": 0.6, "windSpeed": 0.1 },
     { "name": "Cloudy",   "cloudDensity": 0.5, "fogDensity": 0.8, "windSpeed": 0.3 },

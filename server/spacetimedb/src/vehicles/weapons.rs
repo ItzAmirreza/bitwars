@@ -6,6 +6,7 @@ use spacetimedb::{reducer, Identity, ReducerContext, Table};
 use crate::combat::*;
 use crate::constants;
 use crate::helpers::*;
+use crate::matchmaking::require_active_match;
 use crate::tables::*;
 use crate::types::*;
 use crate::weapons;
@@ -62,6 +63,7 @@ fn deduct_slot_ammo(vehicle: &Vehicle, slot: u8) -> (i32, i32, i32) {
 #[reducer]
 pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(), String> {
     let sender = ctx.sender();
+    require_active_match(ctx)?;
     let player = ctx
         .db
         .player()
@@ -369,6 +371,7 @@ pub fn vehicle_projectile_impact(
     source_vehicle_id: u64,
 ) -> Result<(), String> {
     let sender = ctx.sender();
+    require_active_match(ctx)?;
     let _player = ctx
         .db
         .player()
@@ -504,6 +507,7 @@ pub fn vehicle_projectile_impact(
 #[reducer]
 pub fn reload_vehicle_weapon(ctx: &ReducerContext) -> Result<(), String> {
     let sender = ctx.sender();
+    require_active_match(ctx)?;
     let player = ctx
         .db
         .player()

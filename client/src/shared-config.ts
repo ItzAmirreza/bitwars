@@ -18,6 +18,7 @@ export const ANTI_AIR = config.antiAir;
 export const GRENADE = config.grenade;
 export const VEHICLE_BLOCK_COLLISION = config.vehicleBlockCollision;
 export const COMBAT = config.combat;
+export const MATCH = config.match;
 export const WEATHER = config.weather;
 export const ABILITIES = config.abilities;
 
