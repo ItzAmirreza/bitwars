@@ -29,6 +29,7 @@ import type { GameSettings } from '../store';
 import { NetDiagnostics } from './NetDiagnostics';
 import { ChunkBoundaryViewer } from './ChunkBoundaryViewer';
 import type { HarnessMode } from './PerfHarness';
+import { buildPlayerMovementFlags } from './playerMovementFlags';
 
 const ENTITY_KIND_VEHICLE = ENTITY_KINDS.Vehicle;
 
@@ -841,6 +842,13 @@ export class Engine {
         `BOT-${i + 1}`,
         i % 5,
         botWeapon,
+        buildPlayerMovementFlags({
+          sprinting: true,
+          crouching: false,
+          sliding: false,
+          climbing: false,
+          grounded: true,
+        }),
       );
     }
   }
@@ -1734,6 +1742,7 @@ export class Engine {
           player.username,
           Number(player.characterPreset ?? 0),
           Number(player.currentWeapon ?? 0),
+          Number(player.movementFlags ?? 0),
         );
       } else {
         this.remotePlayers.removeOtherPlayer(id);
@@ -1753,6 +1762,7 @@ export class Engine {
           player.username,
           Number(player.characterPreset ?? 0),
           Number(player.currentWeapon ?? 0),
+          Number(player.movementFlags ?? 0),
         );
       }
     });
@@ -1776,6 +1786,7 @@ export class Engine {
           p.username,
           Number(p.characterPreset ?? 0),
           Number(p.currentWeapon ?? 0),
+          Number(p.movementFlags ?? 0),
         );
       }
     }
@@ -2515,6 +2526,15 @@ export class Engine {
       vel: { x: vel.x, y: vel.y, z: vel.z },
       rot: { yaw: sendYaw, pitch: sendPitch },
       weapon: this.weapons.currentWeapon,
+      movementFlags: this.mountedVehicleId === 0
+        ? buildPlayerMovementFlags({
+          sprinting: this.controls.isSprinting,
+          crouching: this.controls.isCrouching,
+          sliding: this.controls.isSliding,
+          climbing: this.controls.isClimbing,
+          grounded: this.controls.onGround,
+        })
+        : 0,
     });
     this.netDiag.recordPositionSent(sentPos);
 

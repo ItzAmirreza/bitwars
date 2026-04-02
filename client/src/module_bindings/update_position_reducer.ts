@@ -26,4 +26,5 @@ export default {
     return Rotation;
   },
   weapon: __t.u8(),
+  movementFlags: __t.u8(),
 };
