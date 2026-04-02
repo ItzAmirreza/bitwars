@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useGameStore } from '../store';
 import { menuAudio } from '../menuAudio';
 import { PixelArtBg } from './PixelArtBg';
-import { PrivacyPolicy } from './PrivacyPolicy';
+import { PrivacyPolicy, PixelDiscordIcon } from './PrivacyPolicy';
 
 // Small decorative pixel bar
 function PixelBar({ colors, height = 4 }: { colors: string[]; height?: number }) {
@@ -330,8 +330,10 @@ export function LobbyScreen() {
               fontFamily: 'var(--font-pixel)', fontSize: '7px',
               color: '#7c4dff', letterSpacing: '0.1em',
               textDecoration: 'none',
+              display: 'flex', alignItems: 'center', gap: '5px',
             }}
           >
+            <PixelDiscordIcon color="#7c4dff" size={2} />
             DISCORD
           </a>
           <span style={{ color: '#2a2e3e' }}>|</span>

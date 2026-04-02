@@ -1,6 +1,43 @@
 import { useEffect } from 'react';
 import { menuAudio } from '../menuAudio';
 
+// 9x8 pixel-art Discord logo — two "ears", wide body, dot eyes
+export function PixelDiscordIcon({ color = '#7c4dff', size = 1 }: { color?: string; size?: number }) {
+  // Each rect is 1×1 on the grid, scaled by size
+  const s = size;
+  // Pixel grid (9 wide × 8 tall):
+  //  Row 0:  .X.....X.   ears
+  //  Row 1:  .X.....X.
+  //  Row 2:  XXXXXXXXX   top of head
+  //  Row 3:  XXXXXXXXX
+  //  Row 4:  XX.XXX.XX   eyes
+  //  Row 5:  XXXXXXXXX
+  //  Row 6:  .XXXXXXX.   jaw narrowing
+  //  Row 7:  ..X...X..   feet/bumps
+  const pixels: [number, number][] = [
+    // Row 0-1: ears
+    [1,0],[1,1],  [7,0],[7,1],
+    // Row 2-3: top
+    [0,2],[1,2],[2,2],[3,2],[4,2],[5,2],[6,2],[7,2],[8,2],
+    [0,3],[1,3],[2,3],[3,3],[4,3],[5,3],[6,3],[7,3],[8,3],
+    // Row 4: eyes (skip 2,4 and 6,4)
+    [0,4],[1,4],[3,4],[4,4],[5,4],[7,4],[8,4],
+    // Row 5: full
+    [0,5],[1,5],[2,5],[3,5],[4,5],[5,5],[6,5],[7,5],[8,5],
+    // Row 6: narrowed
+    [1,6],[2,6],[3,6],[4,6],[5,6],[6,6],[7,6],
+    // Row 7: bumps
+    [2,7],[6,7],
+  ];
+  return (
+    <svg width={9 * s} height={8 * s} viewBox={`0 0 ${9 * s} ${8 * s}`} fill="none">
+      {pixels.map(([x, y]) => (
+        <rect key={`${x},${y}`} x={x * s} y={y * s} width={s} height={s} fill={color} />
+      ))}
+    </svg>
+  );
+}
+
 export function PrivacyPolicy({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
