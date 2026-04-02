@@ -14,12 +14,21 @@ export interface ChatOverlayProps {
   chatMessages: DisplayMessage[];
   chatDraft: string;
   setChatDraft: (v: string) => void;
-  sendChatMessage: (text: string) => Promise<void>;
+  sendChatMessage: (text: string) => Promise<boolean>;
+  chatCooldownRemainingMs: number;
+  chatStatusText: string;
   closeChat: () => void;
 }
 
 export function ChatOverlay({
-  chatOpen, chatMessages, chatDraft, setChatDraft, sendChatMessage, closeChat,
+  chatOpen,
+  chatMessages,
+  chatDraft,
+  setChatDraft,
+  sendChatMessage,
+  chatCooldownRemainingMs,
+  chatStatusText,
+  closeChat,
 }: ChatOverlayProps) {
   const chatInputRef = useRef<HTMLInputElement>(null);
   const chatListRef = useRef<HTMLDivElement>(null);
@@ -128,6 +137,26 @@ export function ChatOverlay({
 
       {chatOpen && (
         <div style={{ pointerEvents: 'auto' }}>
+          {(chatStatusText || chatDraft.length > 0) && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+                padding: '4px 6px',
+                background: 'rgba(12,16,24,0.92)',
+                borderTop: '2px solid rgba(255,107,53,0.55)',
+                color: chatCooldownRemainingMs > 0 ? '#ffd166' : '#9fb3c8',
+                fontFamily: "'Vazirmatn', var(--font-pixel), sans-serif",
+                fontSize: '8px',
+                lineHeight: '1.4',
+              }}
+            >
+              <span>{chatStatusText || 'Enter to send, Esc to close'}</span>
+              <span style={{ color: '#6e768a' }}>{`${chatDraft.trim().length}/200`}</span>
+            </div>
+          )}
           <input
             ref={chatInputRef}
             autoFocus
@@ -135,13 +164,20 @@ export function ChatOverlay({
             value={chatDraft}
             placeholder=""
             onChange={(e) => setChatDraft(e.currentTarget.value)}
-            onKeyDown={(e) => {
+            onKeyDown={async (e) => {
               e.stopPropagation();
               e.nativeEvent.stopImmediatePropagation();
               if (e.key === 'Enter') {
                 e.preventDefault();
-                if (chatDraft.trim()) void sendChatMessage(chatDraft);
-                closeChat();
+                if (!chatDraft.trim()) {
+                  closeChat();
+                  return;
+                }
+
+                const sent = await sendChatMessage(chatDraft);
+                if (sent) {
+                  closeChat();
+                }
               }
               if (e.key === 'Escape') {
                 e.preventDefault();
@@ -155,7 +191,7 @@ export function ChatOverlay({
               fontSize: '9px',
               background: 'rgba(12,16,24,0.9)',
               border: 'none',
-              borderTop: '2px solid #ff6b35',
+              borderTop: `2px solid ${chatCooldownRemainingMs > 0 ? '#ffd166' : '#ff6b35'}`,
               color: '#e8e8f0',
               padding: '6px 6px',
               outline: 'none',

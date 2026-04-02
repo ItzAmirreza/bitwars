@@ -11,8 +11,8 @@ use crate::environment::tick_environment;
 use crate::grenades::tick_grenades;
 use crate::map::reset_map;
 // tick_vehicles is in vehicles/mod.rs, re-exported
-use crate::vehicles::tick_vehicles;
 use crate::abilities::tick_abilities;
+use crate::vehicles::tick_vehicles;
 
 // ── Core Entities ──
 
@@ -310,6 +310,18 @@ pub struct ChatMessage {
     pub sender_name: String,
     pub text: String,
     pub sent_at: Timestamp,
+}
+
+/// Server-side chat anti-spam state per player.
+#[table(accessor = chat_throttle)]
+pub struct ChatThrottle {
+    #[primary_key]
+    pub identity: Identity,
+    pub last_message_at: Timestamp,
+    pub last_message_text: String,
+    pub window_started_at: Timestamp,
+    pub messages_in_window: u8,
+    pub muted_until: Timestamp,
 }
 
 // ── Projectiles ──

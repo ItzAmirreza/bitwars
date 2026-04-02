@@ -87,7 +87,15 @@ export function GameScreen({ active }: GameScreenProps) {
   );
 
   // ── Chat hook ──
-  const { chatMessages, chatDraft, setChatDraft, sendChatMessage, pushLocalSystemMessage } = useChat(activeConnection, identity);
+  const {
+    chatMessages,
+    chatDraft,
+    setChatDraft,
+    sendChatMessage,
+    pushLocalSystemMessage,
+    chatCooldownRemainingMs,
+    chatStatusText,
+  } = useChat(activeConnection, identity);
 
   // ── Chat state ──
   const [chatOpen, setChatOpen] = useState(false);
@@ -197,13 +205,14 @@ export function GameScreen({ active }: GameScreenProps) {
 
   const handleSendChatMessage = useCallback(
     async (text: string) => {
-      if (!text.trim()) return;
+      if (!text.trim()) return false;
       const trimmed = text.trim();
 
       const success = await sendChatMessage(trimmed);
       if (success && trimmed.toLowerCase() === '/fly') {
         engineRef.current?.toggleFly();
       }
+      return success;
     },
     [sendChatMessage],
   );
@@ -820,14 +829,16 @@ export function GameScreen({ active }: GameScreenProps) {
       )}
 
       {/* ═══ CHAT OVERLAY ═══ */}
-      <ChatOverlay
-        chatOpen={chatOpen}
-        chatMessages={chatMessages}
-        chatDraft={chatDraft}
-        setChatDraft={setChatDraft}
-        sendChatMessage={handleSendChatMessage}
-        closeChat={closeChat}
-      />
+        <ChatOverlay
+          chatOpen={chatOpen}
+          chatMessages={chatMessages}
+          chatDraft={chatDraft}
+          setChatDraft={setChatDraft}
+          sendChatMessage={handleSendChatMessage}
+          chatCooldownRemainingMs={chatCooldownRemainingMs}
+          chatStatusText={chatStatusText}
+          closeChat={closeChat}
+        />
 
       {/* ═══ BOTTOM HUD ═══ */}
       <BottomHud
