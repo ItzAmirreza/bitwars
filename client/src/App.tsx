@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useGameStore } from './store';
-import { connect } from './db';
+import { connect, resetConnection } from './db';
 import { LoginScreen } from './screens/LoginScreen';
 import { LobbyScreen } from './screens/LobbyScreen';
 import { GameScreen } from './screens/GameScreen';
@@ -83,13 +83,37 @@ function LoadingScreen() {
 }
 
 function App() {
-  const { screen, connected, setConnected, setIdentity, setConnection, setError } = useGameStore();
+  const [connectAttempt, setConnectAttempt] = useState(0);
+  const {
+    screen,
+    identity,
+    connected,
+    connection,
+    error,
+    setConnected,
+    setIdentity,
+    setConnection,
+    setError,
+    resetSession,
+  } = useGameStore();
+  const handlingSessionLossRef = useRef(false);
+
+  const handleSessionLoss = useCallback((message: string) => {
+    if (handlingSessionLossRef.current) return;
+
+    handlingSessionLossRef.current = true;
+    localStorage.removeItem('bitwars_token');
+    resetConnection();
+    resetSession(message);
+  }, [resetSession]);
 
   useEffect(() => {
-    if (connected) return;
+    if (connected || connection) return;
 
     connect(
       (conn, identity, _token) => {
+        handlingSessionLossRef.current = false;
+        setError(null);
         setIdentity(identity);
         setConnection(conn);
         setConnected(true);
@@ -98,10 +122,46 @@ function App() {
         setError(error.message);
         console.error('[BitWars] Connection error:', error);
       },
+      (error) => {
+        console.error('[BitWars] Session lost:', error);
+        handleSessionLoss(error.message);
+      },
     );
-  }, [connected, setConnected, setIdentity, setConnection, setError]);
 
-  if (!connected) {
+    const retryTimer = window.setTimeout(() => {
+      const state = useGameStore.getState();
+      if (!state.connected && !state.connection) {
+        setConnectAttempt((attempt) => attempt + 1);
+      }
+    }, 2000);
+
+    return () => window.clearTimeout(retryTimer);
+  }, [connected, connection, setConnected, setIdentity, setConnection, setError, handleSessionLoss, connectAttempt]);
+
+  useEffect(() => {
+    if (!connected || !connection || !identity || screen === 'login') return;
+
+    const checkLocalPlayer = () => {
+      let localPlayer: { online?: boolean } | null = null;
+
+      for (const row of connection.db.player.iter()) {
+        const player = row as { identity: { toHexString: () => string }; online?: boolean };
+        if (player.identity.toHexString() !== identity) continue;
+        localPlayer = player;
+        break;
+      }
+
+      if (!localPlayer || localPlayer.online === false) {
+        handleSessionLoss('Lost sync with the server. Please join again.');
+      }
+    };
+
+    checkLocalPlayer();
+    const interval = window.setInterval(checkLocalPlayer, 1000);
+    return () => window.clearInterval(interval);
+  }, [connected, connection, identity, screen, handleSessionLoss]);
+
+  if (!connected && !error) {
     return <LoadingScreen />;
   }
 
