@@ -2332,6 +2332,7 @@ export class Engine {
     if (!this.conn || this.mountedVehicleId !== 0) return;
     const pos = this.camera.position;
     const nearby = this.abilityPickups.getPickupsInRange(pos.x, pos.y, pos.z);
+    if (nearby.length > 0) this.sendPositionUpdate(true);
     for (const id of nearby) {
       this.abilityPickups.markCollectAttempt(id);
       this.conn.reducers.collectAbility({ pickupId: id });
@@ -2480,7 +2481,7 @@ export class Engine {
     return top >= 0 ? top + 1 : 0;
   }
 
-  private sendPositionUpdate(): void {
+  private sendPositionUpdate(force = false): void {
     if (!this.conn) return;
     if (this.health <= 0) return; // Dead — don't send position updates
     const now = performance.now();
@@ -2495,7 +2496,7 @@ export class Engine {
       || Math.abs(vel.y) > 0.5
       || this.mouseDown;
     const interval = isMounted ? 100 : isActive ? 33 : 100;
-    if (now - this.lastPositionUpdate < interval) return;
+    if (!force && now - this.lastPositionUpdate < interval) return;
     this.lastPositionUpdate = now;
 
     const mountedPose = this.vehicleManager.getMountedVehiclePoseRaw();
