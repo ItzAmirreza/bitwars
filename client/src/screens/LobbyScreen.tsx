@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useGameStore } from '../store';
 import { menuAudio } from '../menuAudio';
 import { PixelArtBg } from './PixelArtBg';
+import { PrivacyPolicy } from './PrivacyPolicy';
 
 // Small decorative pixel bar
 function PixelBar({ colors, height = 4 }: { colors: string[]; height?: number }) {
@@ -18,6 +19,7 @@ export function LobbyScreen() {
   const { username, connection, setScreen } = useGameStore();
   const settings = useGameStore((s) => s.settings);
   const [mounted, setMounted] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
 
   const players = connection
     ? Array.from(connection.db.player.iter()).filter((p: any) => p.online)
@@ -310,12 +312,41 @@ export function LobbyScreen() {
         position: 'relative', zIndex: 10,
         flexWrap: 'wrap', gap: '8px',
       }} className="anim-fade-in" >
-        <span style={{
-          fontFamily: 'var(--font-pixel)', fontSize: '7px',
-          color: '#3a3e4e', letterSpacing: '0.1em',
-        }}>
-          v0.1.0-ALPHA
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{
+            fontFamily: 'var(--font-pixel)', fontSize: '7px',
+            color: '#3a3e4e', letterSpacing: '0.1em',
+          }}>
+            v0.1.0-ALPHA
+          </span>
+          <span style={{ color: '#2a2e3e' }}>|</span>
+          <a
+            href="https://discord.gg/R9HEJBqJAX"
+            target="_blank"
+            rel="noopener noreferrer"
+            onMouseEnter={() => menuAudio.playUIHover()}
+            onClick={() => menuAudio.playUIClick()}
+            style={{
+              fontFamily: 'var(--font-pixel)', fontSize: '7px',
+              color: '#7c4dff', letterSpacing: '0.1em',
+              textDecoration: 'none',
+            }}
+          >
+            DISCORD
+          </a>
+          <span style={{ color: '#2a2e3e' }}>|</span>
+          <button
+            onClick={() => { menuAudio.playUIClick(); setShowPrivacy(true); }}
+            onMouseEnter={() => menuAudio.playUIHover()}
+            style={{
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              fontFamily: 'var(--font-pixel)', fontSize: '7px',
+              color: '#4a4e5e', letterSpacing: '0.1em',
+            }}
+          >
+            PRIVACY
+          </button>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{
             fontFamily: 'var(--font-pixel)', fontSize: '7px',
@@ -326,6 +357,8 @@ export function LobbyScreen() {
           <div style={{ width: '6px', height: '6px', background: '#76ff03' }} />
         </div>
       </footer>
+
+      {showPrivacy && <PrivacyPolicy onClose={() => setShowPrivacy(false)} />}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { useGameStore } from '../store';
 import { menuAudio } from '../menuAudio';
 import { CHARACTER_PRESETS, colorHex } from '../characterPresets';
 import { PixelArtBg } from './PixelArtBg';
+import { PrivacyPolicy } from './PrivacyPolicy';
 
 // 5x7 pixel soldier template
 // H=head, V=visor, B=body, W=vest, G=gun, L=leg(darker body)
@@ -88,6 +89,7 @@ export function LoginScreen() {
   const [focused, setFocused] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
   const {
     connection, setUsername, setScreen, setError,
     selectedCharacterPreset, setSelectedCharacterPreset,
@@ -402,18 +404,48 @@ export function LoginScreen() {
           ))}
         </div>
 
-        {/* Version */}
-        <div className="anim-fade-in" style={{ animationDelay: '0.8s', marginTop: '20px' }}>
-          <p style={{
-            fontFamily: 'var(--font-pixel)',
-            fontSize: '7px',
-            color: '#3a3e4e',
-            letterSpacing: '0.1em',
+        {/* Footer links */}
+        <div className="anim-fade-in" style={{
+          animationDelay: '0.8s', marginTop: '20px',
+          display: 'flex', alignItems: 'center', gap: '16px',
+        }}>
+          <span style={{
+            fontFamily: 'var(--font-pixel)', fontSize: '7px',
+            color: '#3a3e4e', letterSpacing: '0.1em',
           }}>
             v0.1.0 ALPHA
-          </p>
+          </span>
+          <span style={{ color: '#2a2e3e' }}>|</span>
+          <a
+            href="https://discord.gg/R9HEJBqJAX"
+            target="_blank"
+            rel="noopener noreferrer"
+            onMouseEnter={() => menuAudio.playUIHover()}
+            onClick={() => menuAudio.playUIClick()}
+            style={{
+              fontFamily: 'var(--font-pixel)', fontSize: '7px',
+              color: '#7c4dff', letterSpacing: '0.1em',
+              textDecoration: 'none',
+            }}
+          >
+            DISCORD
+          </a>
+          <span style={{ color: '#2a2e3e' }}>|</span>
+          <button
+            onClick={() => { menuAudio.playUIClick(); setShowPrivacy(true); }}
+            onMouseEnter={() => menuAudio.playUIHover()}
+            style={{
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              fontFamily: 'var(--font-pixel)', fontSize: '7px',
+              color: '#4a4e5e', letterSpacing: '0.1em',
+            }}
+          >
+            PRIVACY
+          </button>
         </div>
       </div>
+
+      {showPrivacy && <PrivacyPolicy onClose={() => setShowPrivacy(false)} />}
     </div>
   );
 }
