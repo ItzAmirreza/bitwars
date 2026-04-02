@@ -19,6 +19,12 @@ pub const SPAWN_POS: Vec3 = Vec3 {
     y: 20.0,
     z: WORLD_SIZE_Z as f32 / 2.0,
 };
+/// Not in shared JSON — server-only spawn config.
+pub const PLAYER_SPAWN_MARGIN: i32 = 20;
+/// Not in shared JSON — server-only spawn config.
+pub const PLAYER_SPAWN_ATTEMPTS: u64 = 128;
+/// Not in shared JSON — server-only spawn config.
+pub const PLAYER_SPAWN_MIN_SEPARATION: f32 = 12.0;
 
 /// Sourced from shared/game-constants.json → player.maxHealth
 pub fn max_health() -> i32 {
@@ -47,6 +53,14 @@ pub fn player_eye_height() -> f32 {
 /// Sourced from shared/game-constants.json → player.footRadius
 pub fn player_foot_radius() -> f32 {
     shared_config::config().player.foot_radius
+}
+/// Sourced from shared/game-constants.json → player.hitboxHalfWidth
+pub fn player_hitbox_half_width() -> f32 {
+    shared_config::config().player.hitbox_half_width
+}
+/// Sourced from shared/game-constants.json → player.hitboxHeight
+pub fn player_hitbox_height() -> f32 {
+    shared_config::config().player.hitbox_height
 }
 /// Sourced from shared/game-constants.json → player.numCharacterPresets
 pub fn num_character_presets() -> u8 {
@@ -353,15 +367,21 @@ pub fn aa_horiz_blend() -> f32 {
 
 /// Damage dealt to vehicle per block collided with.
 pub fn vehicle_collision_damage_per_block() -> i32 {
-    shared_config::config().vehicle_block_collision.damage_per_block
+    shared_config::config()
+        .vehicle_block_collision
+        .damage_per_block
 }
 /// Speed multiplier per block (0.92 = 8% speed loss per block).
 pub fn vehicle_collision_speed_retain() -> f32 {
-    shared_config::config().vehicle_block_collision.speed_retain_per_block
+    shared_config::config()
+        .vehicle_block_collision
+        .speed_retain_per_block
 }
 /// Minimum speed (blocks/sec) to trigger block collision.
 pub fn vehicle_collision_min_speed() -> f32 {
-    shared_config::config().vehicle_block_collision.min_speed_to_collide
+    shared_config::config()
+        .vehicle_block_collision
+        .min_speed_to_collide
 }
 /// Speed at which block-destruction capacity reaches its maximum.
 pub fn vehicle_collision_speed_destroy_reference() -> f32 {
@@ -377,11 +397,15 @@ pub fn vehicle_collision_min_destroy_fraction() -> f32 {
 }
 /// Max blocks destroyed per physics tick.
 pub fn vehicle_collision_max_blocks() -> usize {
-    shared_config::config().vehicle_block_collision.max_blocks_per_tick
+    shared_config::config()
+        .vehicle_block_collision
+        .max_blocks_per_tick
 }
 /// Scale factor applied to combat hitbox for collision volume.
 pub fn vehicle_collision_hitbox_scale() -> f32 {
-    shared_config::config().vehicle_block_collision.collision_hitbox_scale
+    shared_config::config()
+        .vehicle_block_collision
+        .collision_hitbox_scale
 }
 
 // ── Combat Validation ──
@@ -471,7 +495,9 @@ pub fn ability_type_shield() -> u8 {
     shared_config::config().abilities.types.shield
 }
 pub fn double_damage_duration_secs() -> u64 {
-    shared_config::config().abilities.double_damage_duration_secs
+    shared_config::config()
+        .abilities
+        .double_damage_duration_secs
 }
 pub fn double_damage_multiplier() -> f32 {
     shared_config::config().abilities.double_damage_multiplier

@@ -179,12 +179,8 @@ pub fn tick_helicopter(
     // ── Ground collision ──
     // After block collision: terrain cache is invalidated, so ground height
     // now reflects the hole the vehicle punched through.
-    let ground = terrain.helicopter_ground_rest_height_below(
-        ctx,
-        entity.pos.x,
-        entity.pos.z,
-        entity.pos.y,
-    );
+    let ground =
+        terrain.helicopter_ground_rest_height_below(ctx, entity.pos.x, entity.pos.z, entity.pos.y);
     let min_alt = ground + heli_min_altitude_from_ground();
     if entity.pos.y < min_alt {
         entity.pos.y = min_alt;

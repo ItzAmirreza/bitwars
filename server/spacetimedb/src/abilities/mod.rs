@@ -148,12 +148,7 @@ fn collect_pickup(ctx: &ReducerContext, pickup: AbilityPickup, player: &Player) 
             speed_boost_duration_secs(),
         );
     } else if ability_type == ability_type_shield() {
-        apply_buff(
-            ctx,
-            player.identity,
-            ability_type,
-            shield_duration_secs(),
-        );
+        apply_buff(ctx, player.identity, ability_type, shield_duration_secs());
     }
 
     // Mark pickup as inactive, set respawn time
@@ -164,15 +159,13 @@ fn collect_pickup(ctx: &ReducerContext, pickup: AbilityPickup, player: &Player) 
     });
 
     // Emit event for client VFX
-    ctx.db
-        .ability_pickup_event()
-        .insert(AbilityPickupEvent {
-            id: 0,
-            player: player.identity,
-            ability_type,
-            pos: pickup.pos.clone(),
-            created_at: ctx.timestamp,
-        });
+    ctx.db.ability_pickup_event().insert(AbilityPickupEvent {
+        id: 0,
+        player: player.identity,
+        ability_type,
+        pos: pickup.pos.clone(),
+        created_at: ctx.timestamp,
+    });
 }
 
 #[reducer]

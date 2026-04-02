@@ -81,47 +81,7 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
         });
     }
 
-    // Respawn ALL players (online AND offline) so no stale state persists
     let player_ids: Vec<Identity> = ctx.db.player().iter().map(|p| p.identity).collect();
-    for id in player_ids {
-        if let Some(p) = ctx.db.player().identity().find(id) {
-            let entity_id = ensure_player_entity(ctx, &p);
-            let loadout = normalize_or_create_player_loadout(ctx, &p.username);
-            let current_weapon = if weapon_in_loadout(&loadout, p.current_weapon) {
-                p.current_weapon
-            } else {
-                loadout.slot1
-            };
-            let p = dismount_player_internal(ctx, p, true);
-            let is_god = p.max_health >= god_mode_health();
-            let reset = Player {
-                entity_id,
-                health: if is_god {
-                    god_mode_health()
-                } else {
-                    max_health()
-                },
-                max_health: if is_god {
-                    god_mode_health()
-                } else {
-                    max_health()
-                },
-                pos: SPAWN_POS,
-                vel: ZERO_VEL,
-                kills: 0,
-                deaths: 0,
-                spawn_protected: true,
-                current_weapon,
-                mounted_vehicle_id: 0,
-                ..p
-            };
-            ctx.db.player().identity().update(reset.clone());
-            sync_player_entity(ctx, &reset);
-            // Reset ammo to max (not just init missing rows)
-            crate::weapons::reset_all_ammo(ctx, id);
-            init_movement_state(ctx, id, &SPAWN_POS);
-        }
-    }
 
     // Remove old vehicles
     let vehicle_entity_ids: Vec<u64> = ctx.db.vehicle().iter().map(|v| v.entity_id).collect();
@@ -154,6 +114,47 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
                     version: 1,
                 });
             }
+        }
+    }
+
+    // Respawn ALL players after the new terrain exists so spawn selection can sample it.
+    for id in player_ids {
+        if let Some(p) = ctx.db.player().identity().find(id) {
+            let entity_id = ensure_player_entity(ctx, &p);
+            let loadout = normalize_or_create_player_loadout(ctx, &p.username);
+            let current_weapon = if weapon_in_loadout(&loadout, p.current_weapon) {
+                p.current_weapon
+            } else {
+                loadout.slot1
+            };
+            let p = dismount_player_internal(ctx, p, true);
+            let is_god = p.max_health >= god_mode_health();
+            let spawn_pos = random_spawn_position(ctx, &id);
+            let reset = Player {
+                entity_id,
+                health: if is_god {
+                    god_mode_health()
+                } else {
+                    max_health()
+                },
+                max_health: if is_god {
+                    god_mode_health()
+                } else {
+                    max_health()
+                },
+                pos: spawn_pos.clone(),
+                vel: ZERO_VEL,
+                kills: 0,
+                deaths: 0,
+                spawn_protected: true,
+                current_weapon,
+                mounted_vehicle_id: 0,
+                ..p
+            };
+            ctx.db.player().identity().update(reset.clone());
+            sync_player_entity(ctx, &reset);
+            crate::weapons::reset_all_ammo(ctx, id);
+            init_movement_state(ctx, id, &spawn_pos);
         }
     }
 

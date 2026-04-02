@@ -5,11 +5,11 @@ use std::time::Duration;
 
 use spacetimedb::{reducer, ReducerContext, ScheduleAt, Table};
 
+use crate::abilities;
 use crate::constants::*;
 use crate::helpers::*;
 use crate::tables::*;
 use crate::types::*;
-use crate::abilities;
 use crate::vehicles::{spawn_aa_at_outposts, spawn_jets_at_airstrips, spawn_sandbox_helicopters};
 
 use crate::worldgen::{self, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
@@ -137,10 +137,11 @@ pub fn client_connected(ctx: &ReducerContext) {
             loadout.slot1
         };
         let character_preset = normalize_character_preset(player.character_preset);
+        let spawn_pos = random_spawn_position(ctx, &sender);
 
         ctx.db.player().identity().update(Player {
             online: true,
-            pos: SPAWN_POS,
+            pos: spawn_pos.clone(),
             vel: ZERO_VEL,
             health: max_health(),
             spawn_protected: true,
@@ -155,7 +156,7 @@ pub fn client_connected(ctx: &ReducerContext) {
         }
         // Reset ammo to max on reconnect (player gets a fresh start)
         crate::weapons::reset_all_ammo(ctx, sender);
-        init_movement_state(ctx, sender, &SPAWN_POS);
+        init_movement_state(ctx, sender, &spawn_pos);
         log::info!("Player reconnected: {:?}", sender);
     }
 }

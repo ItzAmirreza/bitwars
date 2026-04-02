@@ -113,13 +113,14 @@ pub fn set_username(
             yaw: 0.0,
             pitch: 0.0,
         };
-        let entity_id = create_player_entity(ctx, &SPAWN_POS, &ZERO_VEL, &base_rot);
+        let spawn_pos = random_spawn_position(ctx, &sender);
+        let entity_id = create_player_entity(ctx, &spawn_pos, &ZERO_VEL, &base_rot);
         ctx.db.player().insert(Player {
             identity: sender,
             entity_id,
             username,
             character_preset,
-            pos: SPAWN_POS,
+            pos: spawn_pos.clone(),
             vel: ZERO_VEL,
             rot: base_rot,
             health: max_health(),
@@ -136,7 +137,9 @@ pub fn set_username(
         init_weapon_state(ctx, sender);
     }
 
-    init_movement_state(ctx, sender, &SPAWN_POS);
+    if let Some(updated) = ctx.db.player().identity().find(sender) {
+        init_movement_state(ctx, sender, &updated.pos);
+    }
     if let Some(updated) = ctx.db.player().identity().find(sender) {
         sync_player_entity(ctx, &updated);
     }
@@ -315,10 +318,11 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
     };
 
     let player = dismount_player_internal(ctx, player, true);
+    let spawn_pos = random_spawn_position(ctx, &sender);
 
     let respawned = Player {
         health: max_health(),
-        pos: SPAWN_POS,
+        pos: spawn_pos.clone(),
         vel: ZERO_VEL,
         spawn_protected: true,
         current_weapon: respawn_weapon,
@@ -334,6 +338,6 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
     weapons::reset_all_ammo(ctx, sender);
     crate::abilities::clear_buffs(ctx, sender);
 
-    init_movement_state(ctx, sender, &SPAWN_POS);
+    init_movement_state(ctx, sender, &spawn_pos);
     Ok(())
 }
