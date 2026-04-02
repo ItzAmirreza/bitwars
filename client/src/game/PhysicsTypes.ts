@@ -54,6 +54,10 @@ export interface FallingBlock {
   initialAngVel: number;
   gravityScale: number;
   lifetimeMs: number;
+  airDrag: number;
+  restitution: number;
+  maxBounces: number;
+  impactCount: number;
 }
 
 export interface SettledDebris {
@@ -140,6 +144,10 @@ export class FallingBlockPool {
     fb.initialAngVel = 0;
     fb.gravityScale = 1;
     fb.lifetimeMs = 0;
+    fb.airDrag = 0.988;
+    fb.restitution = 0.14;
+    fb.maxBounces = 0;
+    fb.impactCount = 0;
     return fb;
   }
 

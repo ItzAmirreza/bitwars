@@ -111,11 +111,13 @@ export class PhysicsSystem {
 
       fb.age += dt;
 
-      // Gravity with weight-based air resistance
-      const drag = 1.0 - (0.02 / fb.weight);
-      fb.vy += GRAVITY * dt;
+      // Use time-scaled drag on every axis so debris arcs stay ballistic across frame rates.
+      const dragPer60Hz = THREE.MathUtils.clamp(fb.airDrag, 0.84, 0.995);
+      const drag = Math.pow(dragPer60Hz, dt * 60);
       fb.vx *= drag;
+      fb.vy *= drag;
       fb.vz *= drag;
+      fb.vy += GRAVITY * dt;
 
       // Apply velocity
       fb.x += fb.vx * dt;
@@ -164,6 +166,7 @@ export class PhysicsSystem {
       if (hitNegZ) { fb.vz = Math.max(fb.vz, Math.abs(fb.vz) * 0.3); fb.z += 0.05; }
 
       if (hitFloor) {
+        if (this.tryBounceDebris(fb, by)) continue;
         landedX += fb.x;
         landedY += fb.y;
         landedZ += fb.z;
@@ -179,7 +182,8 @@ export class PhysicsSystem {
       }
 
       // Despawn if fell below world or aged out
-      if (fb.y < -20 || fb.age > 10) {
+      const maxAgeSec = fb.lifetimeMs > 0 ? fb.lifetimeMs / 1000 : 10;
+      if (fb.y < -20 || fb.age > maxAgeSec) {
         this.pool.release(fb);
         this.falling[i] = this.falling[this.falling.length - 1];
         this.falling.pop();
@@ -291,6 +295,11 @@ export class PhysicsSystem {
       mini.settleLifetimeMs = SETTLED_DEBRIS_LIFETIME_MS;
       const baseWeight = getBlockMat(mini.blockType).weight;
       mini.weight = baseWeight * (0.16 + miniScale * miniScale * miniScale * 0.9);
+      mini.airDrag = THREE.MathUtils.lerp(0.91, 0.95, miniScale);
+      mini.restitution = 0.06;
+      mini.maxBounces = 0;
+      mini.impactCount = 0;
+      mini.lifetimeMs = Math.round(THREE.MathUtils.lerp(1200, 2600, miniScale));
 
       mini.x = fb.x + (Math.random() - 0.5) * 0.22;
       mini.y = fb.y - 0.35 + Math.random() * 0.08;
@@ -305,6 +314,31 @@ export class PhysicsSystem {
       mini.rotSpeedZ = (Math.random() - 0.5) * 16;
       this.falling.push(mini);
     }
+  }
+
+  private tryBounceDebris(fb: FallingBlock, floorY: number): boolean {
+    if (fb.impactCount >= fb.maxBounces) return false;
+
+    const downwardSpeed = -fb.vy;
+    const lateralSpeed = Math.hypot(fb.vx, fb.vz);
+    const impactSpeed = Math.hypot(lateralSpeed, downwardSpeed);
+    if (downwardSpeed < 3.6 || impactSpeed < 5.5) return false;
+
+    const topY = Math.max(0, floorY + 1);
+    const halfHeight = 0.425 * fb.scale;
+    const mat = getBlockMat(fb.blockType);
+    const tangentialDamping = THREE.MathUtils.clamp(0.58 - mat.friction * 0.18, 0.34, 0.7);
+
+    fb.y = topY + halfHeight;
+    fb.vy = downwardSpeed * fb.restitution;
+    fb.vx *= tangentialDamping;
+    fb.vz *= tangentialDamping;
+    fb.rotSpeedX *= 0.72;
+    fb.rotSpeedZ *= 0.72;
+    fb.impactCount++;
+
+    if (fb.vy < 1.2 && Math.hypot(fb.vx, fb.vz) < 1.1) return false;
+    return true;
   }
 
   private trySettleDebris(fb: FallingBlock, floorY: number, nowMs: number): boolean {
