@@ -25,6 +25,7 @@ pub struct Player {
     pub entity_id: u64,
     pub username: String,
     pub character_preset: u8,
+    pub movement_flags: u8,
     pub pos: Vec3,
     pub vel: Vec3,
     pub rot: Rotation,

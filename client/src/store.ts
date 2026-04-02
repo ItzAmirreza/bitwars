@@ -67,7 +67,7 @@ interface GameStore {
 
   setScreen: (screen: Screen) => void;
   setUsername: (username: string) => void;
-  setIdentity: (identity: string) => void;
+  setIdentity: (identity: string | null) => void;
   setConnected: (connected: boolean) => void;
   setConnection: (conn: DbConnection | null) => void;
   setError: (error: string | null) => void;
@@ -75,6 +75,7 @@ interface GameStore {
   resetSettings: () => void;
   setShowSettings: (show: boolean) => void;
   setSelectedCharacterPreset: (preset: number) => void;
+  resetSession: (error?: string | null) => void;
 }
 
 export const useGameStore = create<GameStore>((set) => ({
@@ -110,6 +111,15 @@ export const useGameStore = create<GameStore>((set) => ({
     saveCharacterPreset(normalized);
     set({ selectedCharacterPreset: normalized });
   },
+  resetSession: (error = null) => set({
+    screen: 'login',
+    username: '',
+    identity: null,
+    connected: false,
+    connection: null,
+    error,
+    showSettings: false,
+  }),
 }));
 
 export { DEFAULT_SETTINGS };

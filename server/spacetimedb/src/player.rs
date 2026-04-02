@@ -121,6 +121,7 @@ pub fn set_username(
             username,
             character_preset,
             pos: spawn_pos.clone(),
+            movement_flags: 0,
             vel: ZERO_VEL,
             rot: base_rot,
             health: max_health(),
@@ -153,6 +154,7 @@ pub fn update_position(
     vel: Vec3,
     rot: Rotation,
     weapon: u8,
+    movement_flags: u8,
 ) -> Result<(), String> {
     let sender = ctx.sender();
     let player = ctx
@@ -192,6 +194,7 @@ pub fn update_position(
 
         if let Some(vehicle_entity) = ctx.db.entity().id().find(&player.mounted_vehicle_id) {
             let mounted = Player {
+                movement_flags: 0,
                 pos: Vec3 {
                     x: vehicle_entity.pos.x,
                     y: vehicle_entity.pos.y + heli_pilot_seat_height(),
@@ -238,6 +241,7 @@ pub fn update_position(
         vel,
         rot,
         current_weapon: selected_weapon,
+        movement_flags,
         spawn_protected,
         ..player
     };
