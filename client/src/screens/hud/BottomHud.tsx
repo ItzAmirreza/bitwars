@@ -181,27 +181,6 @@ export function BottomHud({
                 }}>
                   {health}
                 </span>
-                {/* Armor/shield placeholder */}
-                <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '2px',
-                  opacity: 0.3,
-                  marginLeft: 'auto',
-                }}>
-                  <svg width="16" height="18" viewBox="0 0 16 18" fill="none">
-                    <path d="M8 1 L14 4 L14 10 Q14 15 8 17 Q2 15 2 10 L2 4 Z" stroke="var(--c-muted)" strokeWidth="1.5" fill="none" />
-                  </svg>
-                  <span style={{
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '8px',
-                    color: 'var(--c-muted2)',
-                    letterSpacing: '0.1em',
-                  }}>
-                    --
-                  </span>
-                </div>
               </div>
               {/* Segmented health bar (10 segments) */}
               <div style={{ display: 'flex', gap: '2px', height: '4px', marginTop: '8px' }}>
