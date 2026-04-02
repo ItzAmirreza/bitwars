@@ -6,6 +6,7 @@ const SPACETIMEDB_URI = import.meta.env.VITE_SPACETIMEDB_URI || 'wss://maincloud
 const MODULE_NAME = import.meta.env.VITE_MODULE_NAME || 'bitwars';
 let connection: DbConnection | null = null;
 let connecting = false;
+let activeSessionId = 0;
 let sessionLossHandler: ((error: Error) => void) | null = null;
 let baselineSubscription: { unsubscribe: () => void; isEnded: () => boolean } | null = null;
 let worldChunkSubscription: { unsubscribe: () => void; isEnded: () => boolean } | null = null;
@@ -95,6 +96,7 @@ function buildWorldChunkAoiQuery(cx: number, cz: number, radius: number): string
 
 function setWorldChunkSubscription(centerCx: number, centerCz: number, radius: number, force: boolean): void {
   if (!connection) return;
+  const sessionId = activeSessionId;
 
   const clampedCx = clampChunkX(centerCx);
   const clampedCz = clampChunkZ(centerCz);
@@ -137,6 +139,7 @@ function setWorldChunkSubscription(centerCx: number, centerCz: number, radius: n
       }
     })
     .onError((_ctx: ErrorContext) => {
+      if (sessionId !== activeSessionId) return;
       console.error('[BitWars] world_chunk AOI subscription error');
       notifySessionLoss('Lost world sync with the server. Please join again.');
     })
@@ -167,6 +170,8 @@ export function connect(
 ): void {
   if (connection || connecting) return;
 
+  const sessionId = activeSessionId + 1;
+  activeSessionId = sessionId;
   connecting = true;
   sessionLossHandler = onDisconnect ?? null;
   const token = localStorage.getItem('bitwars_token') || undefined;
@@ -177,6 +182,7 @@ export function connect(
       .withDatabaseName(MODULE_NAME)
       .withToken(token)
       .onConnect((_connInstance, identity, token) => {
+        if (sessionId !== activeSessionId) return;
         console.log('[BitWars] Connected:', identity.toHexString());
         localStorage.setItem('bitwars_token', token);
         connection = conn;
@@ -184,10 +190,12 @@ export function connect(
 
         baselineSubscription = conn.subscriptionBuilder()
           .onApplied((_subCtx: SubscriptionEventContext) => {
+            if (sessionId !== activeSessionId) return;
             console.log('[BitWars] Subscriptions applied');
             onConnect(conn, identity.toHexString(), token);
           })
           .onError((_ctx: ErrorContext) => {
+            if (sessionId !== activeSessionId) return;
             console.error('[BitWars] Subscription error');
             notifySessionLoss('Lost sync with the server. Please join again.');
           })
@@ -220,11 +228,13 @@ export function connect(
         setWorldChunkSubscription(DEFAULT_WORLD_CHUNK_CX, DEFAULT_WORLD_CHUNK_CZ, WORLD_CHUNK_AOI_DEFAULT_RADIUS, true);
       })
       .onConnectError((_ctx: ErrorContext, err: Error) => {
+        if (sessionId !== activeSessionId) return;
         console.error('[BitWars] Connection error:', err);
         clearConnectionState();
         onError(err);
       })
       .onDisconnect((_ctx: ErrorContext) => {
+        if (sessionId !== activeSessionId) return;
         console.log('[BitWars] Disconnected');
         const handler = sessionLossHandler;
         clearConnectionState();
@@ -234,6 +244,7 @@ export function connect(
 
     void conn;
   } catch (error) {
+    if (sessionId !== activeSessionId) return;
     connecting = false;
     onError(error instanceof Error ? error : new Error('Failed to create SpacetimeDB connection'));
   }
