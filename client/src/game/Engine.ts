@@ -87,6 +87,14 @@ export interface EngineState {
   nearVehicle: boolean;
   nearVehicleName: string | null;
   activeBuffs: ActiveBuff[];
+  damageIndicators: DamageIndicatorState[];
+}
+
+export interface DamageIndicatorState {
+  id: number;
+  angle: number;
+  opacity: number;
+  intensity: number;
 }
 
 export class Engine {
@@ -206,6 +214,20 @@ export class Engine {
   private deaths = 0;
   private hitMarkerTimer = 0;
   private hitMarkerType: 'block' | 'player' | 'none' = 'none';
+  private recentDamageSources: Array<{
+    position: THREE.Vector3;
+    timestamp: number;
+    ttl: number;
+    match: number;
+  }> = [];
+  private damageIndicators: Array<{
+    id: number;
+    sourcePosition: THREE.Vector3;
+    age: number;
+    lifetime: number;
+    intensity: number;
+  }> = [];
+  private nextDamageIndicatorId = 1;
   private lastWeaponIndex = 0;
   private prevKills = 0;
   private prevDeaths = 0;
@@ -1712,6 +1734,7 @@ export class Engine {
           }
         }
         if (player.health < oldHealth) {
+          this.triggerDamageIndicator(oldHealth - player.health);
           const dmgRatio = (oldHealth - player.health) / 100;
           this.postfx.triggerDamage(0.3 + dmgRatio * 0.7);
           this.audio.playDamage(this.localAudioSource(-0.2));
@@ -1720,6 +1743,8 @@ export class Engine {
         // Respawn: health went from 0 to positive — play respawn audio
         if (oldHealth <= 0 && player.health > 0) {
           this.audio.playRespawn(this.localAudioSource(-0.2));
+          this.recentDamageSources.length = 0;
+          this.damageIndicators.length = 0;
         }
         return;
       }
@@ -1843,6 +1868,16 @@ export class Engine {
         const vw = VEHICLE_WEAPONS[vehWeaponIdx];
         if (!vw) return;
 
+        if (vw.projectileSpeed <= 0 || vehWeaponIdx === 2) {
+          this.registerIncomingShotCandidate(
+            origin,
+            dir,
+            vw.maxRange,
+            shot.hasHit ? shot.hitPos : null,
+            firedAtPerf ?? performance.now(),
+          );
+        }
+
         this.playRemoteWeaponAudio(weaponIdx, origin, dir);
 
         if (vw.projectileSpeed > 0) {
@@ -1887,6 +1922,16 @@ export class Engine {
       // Infantry weapons
       const w = WEAPONS[weaponIdx];
       if (!w) return;
+
+      if (!isFinite(w.projectile.speed)) {
+        this.registerIncomingShotCandidate(
+          origin,
+          dir,
+          w.range,
+          shot.hasHit ? shot.hitPos : null,
+          firedAtPerf ?? performance.now(),
+        );
+      }
 
       this.playRemoteWeaponAudio(weaponIdx, origin, dir);
 
@@ -1943,6 +1988,8 @@ export class Engine {
         // Skip if we are the originator (we already played local VFX) —
         // EXCEPT for grenades (weapon 4) which are server-authoritative and have no local VFX
         if (originId === this.localIdentity && weaponIdx !== 4) return;
+
+        this.registerExplosionDamageCandidate(x, y, z, radius);
 
         // VFX: explosion particles + impact
         this.vfx.emitExplosion(x, y, z, radius);
@@ -2139,6 +2186,8 @@ export class Engine {
         // ── Physics debris + VFX ──
         this.physics.clearAll();
         this.vfx.clearAll();
+        this.recentDamageSources.length = 0;
+        this.damageIndicators.length = 0;
 
         // ── Weapons: clear predictions + fire cooldown ──
         this.weapons.clearPendingDestructions();
@@ -2877,6 +2926,18 @@ export class Engine {
       if (this.hitMarkerTimer <= 0) this.hitMarkerType = 'none';
     }
 
+    if (this.damageIndicators.length > 0) {
+      this.damageIndicators = this.damageIndicators
+        .map((indicator) => ({
+          ...indicator,
+          age: indicator.age + delta,
+          intensity: Math.max(0.45, indicator.intensity - delta * 0.2),
+        }))
+        .filter((indicator) => indicator.age < indicator.lifetime);
+    }
+
+    this.pruneRecentDamageSources();
+
     // Kill/Death sound detection
     if (this.kills > this.prevKills) {
       this.audio.playKillConfirm();
@@ -3072,6 +3133,179 @@ export class Engine {
       nearVehicle,
       nearVehicleName,
       activeBuffs: this.getActiveBuffs(),
+      damageIndicators: this.buildDamageIndicatorHudState(),
+    });
+  }
+
+  private getDamageReferencePosition(): THREE.Vector3 {
+    const mountedPose = this.mountedVehicleId !== 0 ? this.vehicleManager.getMountedVehiclePose() : null;
+    if (mountedPose) {
+      return new THREE.Vector3(mountedPose.x, mountedPose.y + 1.5, mountedPose.z);
+    }
+    return this.camera.position.clone();
+  }
+
+  private registerIncomingShotCandidate(
+    origin: THREE.Vector3,
+    direction: THREE.Vector3,
+    maxRange: number,
+    hitPos: { x: number; y: number; z: number } | null,
+    timestamp: number,
+  ): void {
+    const localPos = this.getDamageReferencePosition();
+    const dirLenSq = direction.lengthSq();
+    if (dirLenSq <= 0.0001) return;
+
+    let match = 0;
+    if (hitPos) {
+      const hitDistance = localPos.distanceTo(new THREE.Vector3(hitPos.x, hitPos.y, hitPos.z));
+      if (hitDistance <= 3.5) {
+        match = Math.max(match, 1 - hitDistance / 3.5);
+      }
+    }
+
+    const dirNorm = direction.clone().normalize();
+    const toLocal = localPos.clone().sub(origin);
+    const alongRay = toLocal.dot(dirNorm);
+    if (alongRay >= -2 && alongRay <= maxRange + 6) {
+      const closestPoint = origin.clone().addScaledVector(dirNorm, Math.max(0, alongRay));
+      const missDistance = closestPoint.distanceTo(localPos);
+      if (missDistance <= 4) {
+        match = Math.max(match, 1 - missDistance / 4);
+      }
+    }
+
+    if (match <= 0.05) return;
+    this.rememberDamageSource(origin, timestamp, match, 0.45);
+  }
+
+  private registerExplosionDamageCandidate(x: number, y: number, z: number, radius: number): void {
+    const localPos = this.getDamageReferencePosition();
+    const source = new THREE.Vector3(x, y, z);
+    const maxDistance = radius * 4 + 8;
+    const distance = source.distanceTo(localPos);
+    if (distance > maxDistance) return;
+    const match = 1 - distance / maxDistance;
+    this.rememberDamageSource(source, performance.now(), match, 0.7);
+  }
+
+  private rememberDamageSource(
+    position: THREE.Vector3,
+    timestamp: number,
+    match: number,
+    ttl: number,
+  ): void {
+    const now = performance.now();
+    this.recentDamageSources.push({
+      position: position.clone(),
+      timestamp: Math.min(timestamp, now),
+      ttl,
+      match: THREE.MathUtils.clamp(match, 0, 1),
+    });
+    this.pruneRecentDamageSources(now);
+    if (this.recentDamageSources.length > 20) {
+      this.recentDamageSources.splice(0, this.recentDamageSources.length - 20);
+    }
+  }
+
+  private pruneRecentDamageSources(now = performance.now()): void {
+    this.recentDamageSources = this.recentDamageSources.filter(
+      (source) => now - source.timestamp <= source.ttl * 1000,
+    );
+  }
+
+  private triggerDamageIndicator(damageAmount: number): void {
+    if (damageAmount <= 0) return;
+
+    const now = performance.now();
+    this.pruneRecentDamageSources(now);
+    let bestIndex = -1;
+    let bestScore = 0;
+
+    for (let i = 0; i < this.recentDamageSources.length; i++) {
+      const source = this.recentDamageSources[i]!;
+      const freshness = THREE.MathUtils.clamp(1 - (now - source.timestamp) / (source.ttl * 1000), 0, 1);
+      const score = source.match * 0.75 + freshness * 0.25;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    if (bestIndex < 0) return;
+
+    const [source] = this.recentDamageSources.splice(bestIndex, 1);
+    if (!source) return;
+
+    const intensity = THREE.MathUtils.clamp(0.45 + damageAmount / 45, 0.45, 1);
+    this.addDamageIndicator(source.position, intensity);
+  }
+
+  private addDamageIndicator(sourcePosition: THREE.Vector3, intensity: number): void {
+    const localPos = this.getDamageReferencePosition();
+    const targetAngle = this.computeDamageIndicatorAngle(sourcePosition, localPos);
+    const existing = this.damageIndicators.find((indicator) => {
+      const indicatorAngle = this.computeDamageIndicatorAngle(indicator.sourcePosition, localPos);
+      return this.getWrappedAngleDelta(indicatorAngle, targetAngle) <= 18;
+    });
+
+    if (existing) {
+      existing.sourcePosition.copy(sourcePosition);
+      existing.age = 0;
+      existing.lifetime = Math.max(existing.lifetime, 1.15);
+      existing.intensity = Math.max(existing.intensity, intensity);
+      return;
+    }
+
+    this.damageIndicators.push({
+      id: this.nextDamageIndicatorId++,
+      sourcePosition: sourcePosition.clone(),
+      age: 0,
+      lifetime: 1.15,
+      intensity,
+    });
+    if (this.damageIndicators.length > 4) {
+      this.damageIndicators.shift();
+    }
+  }
+
+  private computeDamageIndicatorAngle(sourcePosition: THREE.Vector3, localPos = this.getDamageReferencePosition()): number {
+    const toSource = sourcePosition.clone().sub(localPos);
+    toSource.y = 0;
+    if (toSource.lengthSq() <= 0.0001) {
+      return 180;
+    }
+    toSource.normalize();
+
+    const forward = this.camera.getWorldDirection(new THREE.Vector3());
+    forward.y = 0;
+    if (forward.lengthSq() <= 0.0001) {
+      forward.set(0, 0, -1);
+    } else {
+      forward.normalize();
+    }
+    const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize();
+    return THREE.MathUtils.radToDeg(Math.atan2(toSource.dot(right), toSource.dot(forward)));
+  }
+
+  private getWrappedAngleDelta(a: number, b: number): number {
+    const raw = Math.abs(a - b) % 360;
+    return raw > 180 ? 360 - raw : raw;
+  }
+
+  private buildDamageIndicatorHudState(): DamageIndicatorState[] {
+    if (this.damageIndicators.length === 0) return [];
+
+    const localPos = this.getDamageReferencePosition();
+    return this.damageIndicators.map((indicator) => {
+      const remaining = THREE.MathUtils.clamp(1 - indicator.age / indicator.lifetime, 0, 1);
+      const pulse = 0.9 + Math.sin((1 - remaining) * Math.PI * 5) * 0.1 * remaining;
+      return {
+        id: indicator.id,
+        angle: this.computeDamageIndicatorAngle(indicator.sourcePosition, localPos),
+        opacity: THREE.MathUtils.clamp(remaining * (0.4 + indicator.intensity * 0.6), 0, 1),
+        intensity: THREE.MathUtils.clamp(indicator.intensity * pulse, 0.45, 1.2),
+      };
     });
   }
 
