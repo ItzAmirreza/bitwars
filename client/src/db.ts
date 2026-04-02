@@ -6,6 +6,7 @@ const SPACETIMEDB_URI = import.meta.env.VITE_SPACETIMEDB_URI || 'wss://maincloud
 const MODULE_NAME = import.meta.env.VITE_MODULE_NAME || 'bitwars';
 let connection: DbConnection | null = null;
 let connecting = false;
+let sessionLossHandler: ((error: Error) => void) | null = null;
 let baselineSubscription: { unsubscribe: () => void; isEnded: () => boolean } | null = null;
 let worldChunkSubscription: { unsubscribe: () => void; isEnded: () => boolean } | null = null;
 let worldChunkSubscriptionPending: { unsubscribe: () => void; isEnded: () => boolean } | null = null;
@@ -26,6 +27,49 @@ function disposeSubscription(handle: { unsubscribe: () => void; isEnded: () => b
   if (!handle) return;
   if (!handle.isEnded()) {
     handle.unsubscribe();
+  }
+}
+
+function clearConnectionState(): void {
+  disposeSubscription(baselineSubscription);
+  baselineSubscription = null;
+  disposeSubscription(worldChunkSubscription);
+  worldChunkSubscription = null;
+  disposeSubscription(worldChunkSubscriptionPending);
+  worldChunkSubscriptionPending = null;
+  queuedWorldChunkTarget = null;
+  worldChunkCenterCx = DEFAULT_WORLD_CHUNK_CX;
+  worldChunkCenterCz = DEFAULT_WORLD_CHUNK_CZ;
+  worldChunkRadius = WORLD_CHUNK_AOI_DEFAULT_RADIUS;
+  connection = null;
+  connecting = false;
+  sessionLossHandler = null;
+}
+
+function notifySessionLoss(message: string): void {
+  const handler = sessionLossHandler;
+  resetConnection();
+  handler?.(new Error(message));
+}
+
+export function resetConnection(): void {
+  const active = connection as (DbConnection & {
+    disconnect?: () => void;
+    close?: () => void;
+  }) | null;
+
+  clearConnectionState();
+
+  try {
+    active?.disconnect?.();
+  } catch {
+    // Ignore explicit disconnect failures; local state is already torn down.
+  }
+
+  try {
+    active?.close?.();
+  } catch {
+    // Ignore close failures for the same reason.
   }
 }
 
@@ -94,6 +138,7 @@ function setWorldChunkSubscription(centerCx: number, centerCz: number, radius: n
     })
     .onError((_ctx: ErrorContext) => {
       console.error('[BitWars] world_chunk AOI subscription error');
+      notifySessionLoss('Lost world sync with the server. Please join again.');
     })
     .subscribe([
       query,
@@ -118,10 +163,12 @@ export function updateWorldChunkSubscriptionAoi(centerCx: number, centerCz: numb
 export function connect(
   onConnect: (conn: DbConnection, identity: string, token: string) => void,
   onError: (error: Error) => void,
+  onDisconnect?: (error: Error) => void,
 ): void {
   if (connection || connecting) return;
 
   connecting = true;
+  sessionLossHandler = onDisconnect ?? null;
   const token = localStorage.getItem('bitwars_token') || undefined;
 
   try {
@@ -142,6 +189,7 @@ export function connect(
           })
           .onError((_ctx: ErrorContext) => {
             console.error('[BitWars] Subscription error');
+            notifySessionLoss('Lost sync with the server. Please join again.');
           })
           .subscribe([
             "SELECT * FROM player",
@@ -173,30 +221,14 @@ export function connect(
       })
       .onConnectError((_ctx: ErrorContext, err: Error) => {
         console.error('[BitWars] Connection error:', err);
-        connecting = false;
-        disposeSubscription(baselineSubscription);
-        baselineSubscription = null;
-        disposeSubscription(worldChunkSubscription);
-        worldChunkSubscription = null;
-        disposeSubscription(worldChunkSubscriptionPending);
-        worldChunkSubscriptionPending = null;
-        queuedWorldChunkTarget = null;
+        clearConnectionState();
         onError(err);
       })
       .onDisconnect((_ctx: ErrorContext) => {
         console.log('[BitWars] Disconnected');
-        disposeSubscription(baselineSubscription);
-        baselineSubscription = null;
-        disposeSubscription(worldChunkSubscription);
-        worldChunkSubscription = null;
-        disposeSubscription(worldChunkSubscriptionPending);
-        worldChunkSubscriptionPending = null;
-        queuedWorldChunkTarget = null;
-        worldChunkCenterCx = DEFAULT_WORLD_CHUNK_CX;
-        worldChunkCenterCz = DEFAULT_WORLD_CHUNK_CZ;
-        worldChunkRadius = WORLD_CHUNK_AOI_DEFAULT_RADIUS;
-        connection = null;
-        connecting = false;
+        const handler = sessionLossHandler;
+        clearConnectionState();
+        handler?.(new Error('Disconnected from the server. Please join again.'));
       })
       .build();
 
