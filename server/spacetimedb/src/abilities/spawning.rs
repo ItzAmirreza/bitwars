@@ -7,7 +7,10 @@ use crate::constants::*;
 use crate::helpers::*;
 use crate::tables::*;
 use crate::types::*;
-use crate::worldgen::{WORLD_SIZE_X, WORLD_SIZE_Z};
+use crate::worldgen::{
+    self, AIR, ASPHALT, BRICK, CONCRETE, DARK_CONCRETE, DIRT, GRASS, METAL, RUBBLE,
+    SAND, SNOW, STONE, WORLD_SIZE_X, WORLD_SIZE_Z,
+};
 
 /// Spawn initial ability pickups scattered across the map.
 /// Uses deterministic hash-based RNG from the world seed.
@@ -31,8 +34,8 @@ pub fn spawn_initial_ability_pickups(ctx: &ReducerContext, seed: u64) {
         let x = margin + (rx % span_x as u64) as i32;
         let z = margin + (rz % span_z as u64) as i32;
 
-        // Find ground Y at this position
-        let Some(y) = find_surface_y(ctx, x, z) else {
+        // Find open ground-level surface at this position.
+        let Some(y) = find_surface_y(ctx, seed, x, z) else {
             continue;
         };
 
@@ -57,37 +60,37 @@ pub fn spawn_initial_ability_pickups(ctx: &ReducerContext, seed: u64) {
     log::info!("Spawned {} ability pickups", spawned);
 }
 
-/// Find the surface Y at a given XZ position by scanning chunks.
-fn find_surface_y(ctx: &ReducerContext, x: i32, z: i32) -> Option<i32> {
-    use crate::worldgen::{self, WORLD_SIZE_Y};
+/// Find a walkable ground-level surface with open headroom at a given XZ.
+fn find_surface_y(ctx: &ReducerContext, seed: u64, x: i32, z: i32) -> Option<i32> {
+    let biome = worldgen::get_biome(x, z, seed);
+    let surface_y = worldgen::biome_height(biome, x, z, seed);
+    let surface_bt = get_block_type(ctx, x, surface_y, z)?;
+    if !is_walkable_surface(surface_bt) {
+        return None;
+    }
 
-    let chunk_size = 16;
-    let cx = (x / chunk_size) as u8;
-    let cz = (z / chunk_size) as u8;
-    let local_x = (x % chunk_size) as usize;
-    let local_z = (z % chunk_size) as usize;
-
-    // Scan from top down to find first solid block
-    let num_cy = (WORLD_SIZE_Y / chunk_size as usize) as u8;
-    for cy in (0..num_cy).rev() {
-        let chunk_id = worldgen::pack_chunk_id(cx, cy, cz);
-        let Some(chunk) = ctx.db.world_chunk().chunk_id().find(&chunk_id) else {
-            continue;
-        };
-
-        let mut blocks = [0u8; 4096];
-        worldgen::rle_decode(&chunk.data, &mut blocks);
-        // Scan local Y from top (15) down
-        for local_y in (0..chunk_size as usize).rev() {
-            let idx = local_y * chunk_size as usize * chunk_size as usize
-                + local_z * chunk_size as usize
-                + local_x;
-            if idx < blocks.len() && blocks[idx] != 0 {
-                let world_y = cy as i32 * chunk_size + local_y as i32;
-                return Some(world_y);
-            }
+    for clearance_y in (surface_y + 1)..=(surface_y + 3) {
+        if !matches!(get_block_type(ctx, x, clearance_y, z), Some(AIR)) {
+            return None;
         }
     }
 
-    None
+    Some(surface_y)
+}
+
+fn is_walkable_surface(block_type: u8) -> bool {
+    matches!(
+        block_type,
+        CONCRETE
+            | DARK_CONCRETE
+            | ASPHALT
+            | BRICK
+            | METAL
+            | RUBBLE
+            | DIRT
+            | SAND
+            | GRASS
+            | STONE
+            | SNOW
+    )
 }
