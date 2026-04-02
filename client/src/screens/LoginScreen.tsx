@@ -11,6 +11,7 @@ import {
   type AuthProvider,
 } from "../auth";
 import { resetConnection } from "../db";
+import { PrivacyPolicy, PixelDiscordIcon } from "./PrivacyPolicy";
 
 // 5x7 pixel soldier template
 // H=head, V=visor, B=body, W=vest, G=gun, L=leg(darker body)
@@ -184,6 +185,7 @@ export function LoginScreen() {
   const [focused, setFocused] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
   const {
     connection,
     setUsername,
@@ -767,12 +769,18 @@ export function LoginScreen() {
           ))}
         </div>
 
-        {/* Version */}
+        {/* Footer links */}
         <div
           className="anim-fade-in"
-          style={{ animationDelay: "0.8s", marginTop: "20px" }}
+          style={{
+            animationDelay: "0.8s",
+            marginTop: "20px",
+            display: "flex",
+            alignItems: "center",
+            gap: "16px",
+          }}
         >
-          <p
+          <span
             style={{
               fontFamily: "var(--font-pixel)",
               fontSize: "7px",
@@ -781,9 +789,52 @@ export function LoginScreen() {
             }}
           >
             v0.1.0 ALPHA
-          </p>
+          </span>
+          <span style={{ color: "#2a2e3e" }}>|</span>
+          <a
+            href="https://discord.gg/R9HEJBqJAX"
+            target="_blank"
+            rel="noopener noreferrer"
+            onMouseEnter={() => menuAudio.playUIHover()}
+            onClick={() => menuAudio.playUIClick()}
+            style={{
+              fontFamily: "var(--font-pixel)",
+              fontSize: "7px",
+              color: "#7c4dff",
+              letterSpacing: "0.1em",
+              textDecoration: "none",
+              display: "flex",
+              alignItems: "center",
+              gap: "5px",
+            }}
+          >
+            <PixelDiscordIcon color="#7c4dff" size={2} />
+            DISCORD
+          </a>
+          <span style={{ color: "#2a2e3e" }}>|</span>
+          <button
+            onClick={() => {
+              menuAudio.playUIClick();
+              setShowPrivacy(true);
+            }}
+            onMouseEnter={() => menuAudio.playUIHover()}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              fontFamily: "var(--font-pixel)",
+              fontSize: "7px",
+              color: "#4a4e5e",
+              letterSpacing: "0.1em",
+            }}
+          >
+            PRIVACY
+          </button>
         </div>
       </div>
+
+      {showPrivacy && <PrivacyPolicy onClose={() => setShowPrivacy(false)} />}
     </div>
   );
 }

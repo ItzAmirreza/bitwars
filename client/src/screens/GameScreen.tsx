@@ -15,8 +15,10 @@ import { Crosshair } from './hud/Crosshair';
 import { ChatOverlay } from './hud/ChatOverlay';
 import { DeathScreen } from './hud/DeathScreen';
 import { BuffIndicators } from './hud/BuffIndicators';
+import { MatchVictoryOverlay } from './hud/MatchVictoryOverlay';
 import { useKillTracking } from './hooks/useKillTracking';
 import { useChat } from './hooks/useChat';
+import { useMatchSession } from './hooks/useMatchSession';
 
 interface GameScreenProps {
   active: boolean;
@@ -103,7 +105,6 @@ export function GameScreen({ active }: GameScreenProps) {
   const [loadoutDraft, setLoadoutDraft] = useState<[number, number, number]>([0, 1, 2]);
   const [activeLoadoutSlot, setActiveLoadoutSlot] = useState(0);
   const [savingLoadout, setSavingLoadout] = useState(false);
-  const [roundTimer, setRoundTimer] = useState('');
   const [showPerfPanel, setShowPerfPanel] = useState(false);
   const [perfRunning, setPerfRunning] = useState(false);
   const [perfProgress, setPerfProgress] = useState(0);
@@ -114,31 +115,7 @@ export function GameScreen({ active }: GameScreenProps) {
 
   const perfHarnessRef = useRef<PerfHarness | null>(null);
   const perfTickerRef = useRef<number | null>(null);
-
-  // Round timer countdown from WorldConfig
-  useEffect(() => {
-    if (!connection) return;
-    const db = connection.db as any;
-    if (!db.world_config) return;
-
-    const update = () => {
-      for (const config of db.world_config.iter()) {
-        const startMs = typeof config.roundStart?.toMillis === 'function'
-          ? Number(config.roundStart.toMillis()) : 0;
-        if (startMs === 0) { setRoundTimer(''); return; }
-        const elapsed = (Date.now() - startMs) / 1000;
-        const remaining = Math.max(0, 1800 - elapsed);
-        const m = Math.floor(remaining / 60);
-        const s = Math.floor(remaining % 60);
-        setRoundTimer(`${m}:${s.toString().padStart(2, '0')}`);
-        return;
-      }
-    };
-
-    update();
-    const interval = setInterval(update, 1000);
-    return () => clearInterval(interval);
-  }, [connection]);
+  const matchSession = useMatchSession(activeConnection, identity);
 
   const closeLoadout = useCallback(() => {
     setLoadoutOpen(false);
@@ -615,6 +592,32 @@ export function GameScreen({ active }: GameScreenProps) {
         username={username}
       />
 
+      {matchSession.showEndingWarning && state.locked && (
+        <div className="absolute top-20 left-1/2 z-20 pointer-events-none" style={{ transform: 'translateX(-50%)' }}>
+          <div
+            style={{
+              fontFamily: 'var(--font-pixel)',
+              fontSize: '9px',
+              letterSpacing: '0.16em',
+              color: '#ff2d78',
+              border: '2px solid #ff2d78',
+              background: 'rgba(12,16,24,0.9)',
+              padding: '8px 14px',
+              animation: 'hud-critical-flash 1s ease-in-out infinite',
+            }}
+          >
+            {matchSession.endingWarningText}
+          </div>
+        </div>
+      )}
+
+      {matchSession.result && (
+        <MatchVictoryOverlay
+          result={matchSession.result}
+          nextRoundTimer={matchSession.intermissionTimerText}
+        />
+      )}
+
       {/* ═══ TOP HUD BAR ═══ */}
       <TopHudBar
         showSettings={showSettings}
@@ -622,7 +625,9 @@ export function GameScreen({ active }: GameScreenProps) {
         loadoutOpen={loadoutOpen}
         chatOpen={chatOpen}
         username={username}
-        roundTimer={roundTimer}
+        roundTimerLabel={matchSession.timerLabel}
+        roundTimer={matchSession.timerText}
+        roundTimerCritical={matchSession.timerCritical}
         playerCount={state.playerCount}
         fps={state.fps}
         serverTps={state.serverTps}
@@ -633,7 +638,7 @@ export function GameScreen({ active }: GameScreenProps) {
       />
 
       {/* ═══ CROSSHAIR + HIT MARKER ═══ */}
-      {state.locked && !chatOpen && !loadoutOpen && (
+      {state.locked && !chatOpen && !loadoutOpen && !matchSession.weaponsDisabled && (
         <Crosshair
           hitMarker={state.hitMarker}
           hitMarkerType={state.hitMarkerType}

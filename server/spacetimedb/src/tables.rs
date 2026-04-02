@@ -10,6 +10,7 @@ use crate::cleanup::{cleanup_detach_events, cleanup_shots_scheduled, tick_health
 use crate::environment::tick_environment;
 use crate::grenades::tick_grenades;
 use crate::map::reset_map;
+use crate::matchmaking::tick_match;
 // tick_vehicles is in vehicles/mod.rs, re-exported
 use crate::abilities::tick_abilities;
 use crate::vehicles::tick_vehicles;
@@ -239,6 +240,18 @@ pub struct WorldConfig {
     pub round_start: Timestamp,
 }
 
+/// Current match round / intermission state.
+#[table(accessor = match_state, public)]
+pub struct MatchState {
+    #[primary_key]
+    pub id: u32,
+    pub round_number: u32,
+    pub state: u8,
+    pub phase_started_at: Timestamp,
+    pub phase_ends_at: Timestamp,
+    pub time_remaining_secs: u32,
+}
+
 /// Server-authoritative world environment: time of day + weather.
 #[table(accessor = world_environment, public)]
 pub struct WorldEnvironment {
@@ -357,6 +370,26 @@ pub struct ChatThrottle {
     pub muted_until: Timestamp,
 }
 
+/// Final standings captured when a round ends.
+#[table(
+    accessor = match_result,
+    public,
+    index(accessor = idx_match_result_round, btree(columns = [round_number]))
+)]
+pub struct MatchResult {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub round_number: u32,
+    pub winner_name: String,
+    pub winner_kills: u32,
+    pub player_identities: Vec<Identity>,
+    pub player_names: Vec<String>,
+    pub player_kills: Vec<u32>,
+    pub player_deaths: Vec<u32>,
+    pub created_at: Timestamp,
+}
+
 // ── Projectiles ──
 
 /// Server-authoritative grenade projectile that bounces and explodes.
@@ -401,6 +434,14 @@ pub struct EnvironmentTick {
 
 #[table(accessor = map_reset_timer, scheduled(reset_map))]
 pub struct MapResetTimer {
+    #[primary_key]
+    #[auto_inc]
+    pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+}
+
+#[table(accessor = match_tick, scheduled(tick_match))]
+pub struct MatchTick {
     #[primary_key]
     #[auto_inc]
     pub scheduled_id: u64,

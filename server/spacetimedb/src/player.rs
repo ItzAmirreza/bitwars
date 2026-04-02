@@ -6,6 +6,7 @@ use spacetimedb::{reducer, ReducerContext, Table};
 use crate::admin::is_admin;
 use crate::constants::*;
 use crate::helpers::*;
+use crate::matchmaking::{current_match_state, start_round, MATCH_STATE_WAITING};
 use crate::tables::*;
 use crate::types::*;
 use crate::weapons;
@@ -99,6 +100,12 @@ pub fn set_username(
     }
     if let Some(updated) = ctx.db.player().identity().find(sender) {
         sync_player_entity(ctx, &updated);
+    }
+    if current_match_state(ctx)
+        .map(|state| state.state == MATCH_STATE_WAITING)
+        .unwrap_or(false)
+    {
+        start_round(ctx, 1);
     }
     Ok(())
 }

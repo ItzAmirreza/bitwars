@@ -64,6 +64,8 @@ import EntityRow from "./entity_table";
 import ExplosionEventRow from "./explosion_event_table";
 import GrenadeProjectileRow from "./grenade_projectile_table";
 import KillEventRow from "./kill_event_table";
+import MatchResultRow from "./match_result_table";
+import MatchStateRow from "./match_state_table";
 import PlayerRow from "./player_table";
 import PlayerAmmoRow from "./player_ammo_table";
 import PlayerBuffRow from "./player_buff_table";
@@ -171,6 +173,31 @@ const tablesSchema = __schema({
       { name: 'kill_event_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, KillEventRow),
+  match_result: __table({
+    name: 'match_result',
+    indexes: [
+      { accessor: 'id', name: 'match_result_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'idx_match_result_round', name: 'match_result_round_number_idx_btree', algorithm: 'btree', columns: [
+        'roundNumber',
+      ] },
+    ],
+    constraints: [
+      { name: 'match_result_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, MatchResultRow),
+  match_state: __table({
+    name: 'match_state',
+    indexes: [
+      { accessor: 'id', name: 'match_state_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'match_state_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, MatchStateRow),
   player: __table({
     name: 'player',
     indexes: [

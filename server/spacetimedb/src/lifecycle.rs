@@ -8,6 +8,7 @@ use spacetimedb::{reducer, ReducerContext, ScheduleAt, Table};
 use crate::abilities;
 use crate::constants::*;
 use crate::helpers::*;
+use crate::matchmaking::{schedule_next_match_tick, set_waiting_match_state};
 use crate::tables::*;
 use crate::types::*;
 use crate::vehicles::{spawn_aa_at_outposts, spawn_jets_at_airstrips, spawn_sandbox_helicopters};
@@ -26,6 +27,7 @@ pub fn init(ctx: &ReducerContext) {
         round_number: 1,
         round_start: ctx.timestamp,
     });
+    set_waiting_match_state(ctx);
 
     // Pregenerate entire world
     let mut chunk_count = 0u32;
@@ -62,11 +64,6 @@ pub fn init(ctx: &ReducerContext) {
         scheduled_id: 0,
         scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(3)),
     });
-    ctx.db.map_reset_timer().insert(MapResetTimer {
-        scheduled_id: 0,
-        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(1800)),
-    });
-
     // Initialize world environment
     let initial_time = ((seed % 2400) as f32) / 100.0;
     let initial_weather = ((seed / 2400) % NUM_WEATHER_TYPES as u64) as u8;
@@ -105,6 +102,7 @@ pub fn init(ctx: &ReducerContext) {
             ctx.timestamp + Duration::from_millis(grenade_tick_interval_ms()),
         ),
     });
+    schedule_next_match_tick(ctx);
 
     spawn_sandbox_helicopters(ctx);
     spawn_jets_at_airstrips(ctx, seed);

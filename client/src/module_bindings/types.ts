@@ -193,6 +193,35 @@ export const MapResetTimer = __t.object("MapResetTimer", {
 });
 export type MapResetTimer = __Infer<typeof MapResetTimer>;
 
+export const MatchResult = __t.object("MatchResult", {
+  id: __t.u64(),
+  roundNumber: __t.u32(),
+  winnerName: __t.string(),
+  winnerKills: __t.u32(),
+  playerIdentities: __t.array(__t.identity()),
+  playerNames: __t.array(__t.string()),
+  playerKills: __t.array(__t.u32()),
+  playerDeaths: __t.array(__t.u32()),
+  createdAt: __t.timestamp(),
+});
+export type MatchResult = __Infer<typeof MatchResult>;
+
+export const MatchState = __t.object("MatchState", {
+  id: __t.u32(),
+  roundNumber: __t.u32(),
+  state: __t.u8(),
+  phaseStartedAt: __t.timestamp(),
+  phaseEndsAt: __t.timestamp(),
+  timeRemainingSecs: __t.u32(),
+});
+export type MatchState = __Infer<typeof MatchState>;
+
+export const MatchTick = __t.object("MatchTick", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type MatchTick = __Infer<typeof MatchTick>;
+
 export const Player = __t.object("Player", {
   identity: __t.identity(),
   profileId: __t.u64(),

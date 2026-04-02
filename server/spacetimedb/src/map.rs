@@ -1,14 +1,12 @@
 // ── Map Management ──
 // Map reset, chunk requests.
 
-use std::time::Duration;
-
-use spacetimedb::{reducer, Identity, ReducerContext, ScheduleAt, Table};
+use spacetimedb::{reducer, ReducerContext, Table};
 
 use crate::constants::*;
 use crate::helpers::*;
+use crate::matchmaking::{reset_players_for_new_round, start_round};
 use crate::tables::*;
-use crate::types::*;
 use crate::vehicles::{spawn_aa_at_outposts, spawn_jets_at_airstrips, spawn_sandbox_helicopters};
 
 use crate::worldgen::{self, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
@@ -81,8 +79,6 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
         });
     }
 
-    let player_ids: Vec<Identity> = ctx.db.player().iter().map(|p| p.identity).collect();
-
     // Remove old vehicles
     let vehicle_entity_ids: Vec<u64> = ctx.db.vehicle().iter().map(|v| v.entity_id).collect();
     for id in vehicle_entity_ids {
@@ -118,46 +114,7 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
     }
 
     // Respawn ALL players after the new terrain exists so spawn selection can sample it.
-    for id in player_ids {
-        if let Some(p) = ctx.db.player().identity().find(id) {
-            let entity_id = ensure_player_entity(ctx, &p);
-            let loadout = normalize_or_create_player_loadout(ctx, p.profile_id);
-            let current_weapon = if weapon_in_loadout(&loadout, p.current_weapon) {
-                p.current_weapon
-            } else {
-                loadout.slot1
-            };
-            let p = dismount_player_internal(ctx, p, true);
-            let is_god = p.max_health >= god_mode_health();
-            let spawn_pos = random_spawn_position(ctx, &id);
-            let reset = Player {
-                entity_id,
-                health: if is_god {
-                    god_mode_health()
-                } else {
-                    max_health()
-                },
-                max_health: if is_god {
-                    god_mode_health()
-                } else {
-                    max_health()
-                },
-                pos: spawn_pos.clone(),
-                vel: ZERO_VEL,
-                kills: 0,
-                deaths: 0,
-                current_streak: 0,
-                spawn_protected: true,
-                current_weapon,
-                mounted_vehicle_id: 0,
-                ..p
-            };
-            ctx.db.player().identity().update(reset.clone());
-            sync_player_entity(ctx, &reset);
-            crate::weapons::reset_all_ammo(ctx, id);
-            init_movement_state(ctx, id, &spawn_pos);
-        }
-    }
+    reset_players_for_new_round(ctx);
 
     spawn_sandbox_helicopters(ctx);
     spawn_jets_at_airstrips(ctx, new_seed);
@@ -196,10 +153,15 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
         ctx.db.vehicle_destroy_event().id().delete(&id);
     }
 
-    ctx.db.map_reset_timer().insert(MapResetTimer {
-        scheduled_id: 0,
-        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(1800)),
-    });
+    start_round(
+        ctx,
+        ctx.db
+            .world_config()
+            .id()
+            .find(1)
+            .map(|cfg| cfg.round_number)
+            .unwrap_or(1),
+    );
 
     ctx.db.chat_message().insert(ChatMessage {
         id: 0,

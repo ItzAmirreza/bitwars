@@ -8,6 +8,7 @@ use spacetimedb::{reducer, Identity, ReducerContext, Table};
 use crate::combat::damage::*;
 use crate::constants::*;
 use crate::helpers::*;
+use crate::matchmaking::require_active_match;
 use crate::tables::*;
 use crate::types::*;
 use crate::weapons;
@@ -29,6 +30,7 @@ pub fn fire_weapon(
         .identity()
         .find(sender)
         .ok_or("Not registered")?;
+    require_active_match(ctx)?;
 
     if weapon >= weapons::num_weapons() {
         return Err("Invalid weapon".to_string());
@@ -224,6 +226,7 @@ pub fn fire_weapon(
 #[reducer]
 pub fn reload_weapon(ctx: &ReducerContext) -> Result<(), String> {
     let sender = ctx.sender();
+    require_active_match(ctx)?;
     let player = ctx
         .db
         .player()

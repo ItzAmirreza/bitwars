@@ -53,6 +53,7 @@ pub mod grenades;
 pub mod helpers;
 pub mod lifecycle;
 pub mod map;
+pub mod matchmaking;
 pub mod player;
 pub mod shared_config;
 pub mod tables;
