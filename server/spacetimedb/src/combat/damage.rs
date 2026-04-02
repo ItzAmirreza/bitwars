@@ -173,7 +173,14 @@ pub fn apply_hitscan_vehicle_damage(
         }
         let attack_mult = crate::abilities::damage_multiplier(ctx, sender);
         let effective_damage = ((damage as f32) * attack_mult) as i32;
-        apply_vehicle_damage(ctx, sender, target_vehicle_id, effective_damage, weapon, hit_pos);
+        apply_vehicle_damage(
+            ctx,
+            sender,
+            target_vehicle_id,
+            effective_damage,
+            weapon,
+            hit_pos,
+        );
     }
 
     first_hit_pos

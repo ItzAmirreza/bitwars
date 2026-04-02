@@ -53,6 +53,16 @@ impl TerrainSampler {
         self.surface_height(ctx, x, z)
     }
 
+    pub fn ground_surface_height_below(
+        &mut self,
+        ctx: &ReducerContext,
+        x: f32,
+        z: f32,
+        max_y: f32,
+    ) -> f32 {
+        self.surface_height_below(ctx, x, z, max_y)
+    }
+
     fn surface_height(&mut self, ctx: &ReducerContext, x: f32, z: f32) -> f32 {
         let sx = x.floor() as i32;
         let sz = z.floor() as i32;
@@ -100,14 +110,21 @@ impl TerrainSampler {
     /// Invalidate cached surface heights for all columns overlapping the given block range.
     /// Call this after destroying blocks so subsequent ground-height queries see the updated terrain.
     pub fn invalidate_surface_range(&mut self, min_x: i32, max_x: i32, min_z: i32, max_z: i32) {
-        self.surface_cache.retain(|&(sx, sz), _| {
-            sx < min_x || sx > max_x || sz < min_z || sz > max_z
-        });
+        self.surface_cache
+            .retain(|&(sx, sz), _| sx < min_x || sx > max_x || sz < min_z || sz > max_z);
     }
 
     /// Invalidate the cached chunk data for all chunks overlapping the given block range.
     /// Call this after `destroy_blocks_in_world` so subsequent block queries see updated data.
-    pub fn invalidate_chunk_range(&mut self, min_x: i32, max_x: i32, min_y: i32, max_y: i32, min_z: i32, max_z: i32) {
+    pub fn invalidate_chunk_range(
+        &mut self,
+        min_x: i32,
+        max_x: i32,
+        min_y: i32,
+        max_y: i32,
+        min_z: i32,
+        max_z: i32,
+    ) {
         // Compute chunk coordinate ranges
         let cx_min = (min_x.max(0) as usize) / CHUNK_SIZE;
         let cx_max = (max_x.max(0) as usize) / CHUNK_SIZE;

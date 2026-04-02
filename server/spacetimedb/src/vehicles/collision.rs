@@ -21,9 +21,8 @@ pub fn check_vehicle_block_collision(
     terrain: &mut TerrainSampler,
 ) -> (u32, bool) {
     // Compute speed
-    let speed_sq = entity.vel.x * entity.vel.x
-        + entity.vel.y * entity.vel.y
-        + entity.vel.z * entity.vel.z;
+    let speed_sq =
+        entity.vel.x * entity.vel.x + entity.vel.y * entity.vel.y + entity.vel.z * entity.vel.z;
     let min_speed = vehicle_collision_min_speed();
     if speed_sq < min_speed * min_speed {
         return (0, false);
@@ -113,11 +112,7 @@ pub fn check_vehicle_block_collision(
 
 /// Handle vehicle destruction caused by block collision.
 /// Mirrors the destruction path in apply_vehicle_damage but uses local data.
-fn destroy_vehicle_from_collision(
-    ctx: &ReducerContext,
-    vehicle: &Vehicle,
-    entity: &Entity,
-) {
+fn destroy_vehicle_from_collision(ctx: &ReducerContext, vehicle: &Vehicle, entity: &Entity) {
     let vehicle_id = vehicle.entity_id;
 
     // Clear input queue

@@ -372,16 +372,17 @@ pub fn process_admin_command(
             for id in target_ids {
                 if let Some(target) = ctx.db.player().identity().find(id) {
                     let target = dismount_player_internal(ctx, target, true);
+                    let spawn_pos = random_spawn_position(ctx, &id);
                     let respawned = Player {
                         health: max_health(),
-                        pos: SPAWN_POS,
+                        pos: spawn_pos.clone(),
                         vel: ZERO_VEL,
                         spawn_protected: true,
                         ..target
                     };
                     ctx.db.player().identity().update(respawned.clone());
                     sync_player_entity(ctx, &respawned);
-                    init_movement_state(ctx, id, &SPAWN_POS);
+                    init_movement_state(ctx, id, &spawn_pos);
                 }
             }
             insert_system_message(ctx, &format!("Respawned {} players", count));

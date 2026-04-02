@@ -11,8 +11,8 @@ use crate::environment::tick_environment;
 use crate::grenades::tick_grenades;
 use crate::map::reset_map;
 // tick_vehicles is in vehicles/mod.rs, re-exported
-use crate::vehicles::tick_vehicles;
 use crate::abilities::tick_abilities;
+use crate::vehicles::tick_vehicles;
 
 // ── Core Entities ──
 
