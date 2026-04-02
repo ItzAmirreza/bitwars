@@ -3284,7 +3284,7 @@ export class Engine {
     } else {
       forward.normalize();
     }
-    const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize();
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
     return THREE.MathUtils.radToDeg(Math.atan2(toSource.dot(right), toSource.dot(forward)));
   }
 
