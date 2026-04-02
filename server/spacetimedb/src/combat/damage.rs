@@ -241,16 +241,23 @@ pub fn apply_splash_vehicle_damage(
 /// Resolve a kill: increment stats and emit kill event.
 pub fn resolve_kill(ctx: &ReducerContext, killer: Identity, victim: Identity, weapon: u8) {
     if let Some(attacker) = ctx.db.player().identity().find(killer) {
+        let next_streak = attacker.current_streak + 1;
+        let attacker_profile_id = attacker.profile_id;
         ctx.db.player().identity().update(Player {
             kills: attacker.kills + 1,
+            current_streak: next_streak,
             ..attacker
         });
+        record_profile_kill(ctx, attacker_profile_id, next_streak);
     }
     if let Some(dead) = ctx.db.player().identity().find(victim) {
+        let dead_profile_id = dead.profile_id;
         ctx.db.player().identity().update(Player {
             deaths: dead.deaths + 1,
+            current_streak: 0,
             ..dead
         });
+        record_profile_death(ctx, dead_profile_id);
     }
     emit_kill_event(ctx, killer, victim, weapon);
 }

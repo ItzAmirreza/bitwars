@@ -33,7 +33,7 @@ pub fn fire_weapon(
     if weapon >= weapons::num_weapons() {
         return Err("Invalid weapon".to_string());
     }
-    let loadout = normalize_or_create_player_loadout(ctx, &player.username);
+    let loadout = normalize_or_create_player_loadout(ctx, player.profile_id);
     if !weapon_in_loadout(&loadout, weapon) {
         return Err("Weapon not in loadout".to_string());
     }

@@ -128,9 +128,10 @@ pub fn init(ctx: &ReducerContext) {
 #[reducer(client_connected)]
 pub fn client_connected(ctx: &ReducerContext) {
     let sender = ctx.sender();
+    let profile = ensure_player_profile(ctx, sender);
     if let Some(player) = ctx.db.player().identity().find(sender) {
         let entity_id = ensure_player_entity(ctx, &player);
-        let loadout = normalize_or_create_player_loadout(ctx, &player.username);
+        let loadout = normalize_or_create_player_loadout(ctx, profile.profile_id);
         let current_weapon = if weapon_in_loadout(&loadout, player.current_weapon) {
             player.current_weapon
         } else {
@@ -140,15 +141,19 @@ pub fn client_connected(ctx: &ReducerContext) {
         let spawn_pos = random_spawn_position(ctx, &sender);
 
         ctx.db.player().identity().update(Player {
+            profile_id: profile.profile_id,
+            username: profile.display_name.clone(),
             online: true,
             pos: spawn_pos.clone(),
             vel: ZERO_VEL,
             health: max_health(),
             spawn_protected: true,
             current_weapon,
+            current_streak: 0,
             character_preset,
             entity_id,
             mounted_vehicle_id: 0,
+            session_started_at: ctx.timestamp,
             ..player
         });
         if let Some(updated) = ctx.db.player().identity().find(sender) {
@@ -158,7 +163,47 @@ pub fn client_connected(ctx: &ReducerContext) {
         crate::weapons::reset_all_ammo(ctx, sender);
         init_movement_state(ctx, sender, &spawn_pos);
         log::info!("Player reconnected: {:?}", sender);
+    } else if !profile.display_name.trim().is_empty() {
+        let base_rot = Rotation {
+            yaw: 0.0,
+            pitch: 0.0,
+        };
+        let spawn_pos = random_spawn_position(ctx, &sender);
+        let entity_id = create_player_entity(ctx, &spawn_pos, &ZERO_VEL, &base_rot);
+        let loadout = normalize_or_create_player_loadout(ctx, profile.profile_id);
+
+        ctx.db.player().insert(Player {
+            identity: sender,
+            profile_id: profile.profile_id,
+            entity_id,
+            username: profile.display_name.clone(),
+            character_preset: 0,
+            pos: spawn_pos.clone(),
+            movement_flags: 0,
+            vel: ZERO_VEL,
+            rot: base_rot,
+            health: max_health(),
+            max_health: max_health(),
+            current_weapon: loadout.slot1,
+            kills: 0,
+            deaths: 0,
+            current_streak: 0,
+            spawn_protected: true,
+            online: true,
+            mounted_vehicle_id: 0,
+            joined_at: ctx.timestamp,
+            session_started_at: ctx.timestamp,
+            last_damage_time: ctx.timestamp,
+        });
+        init_weapon_state(ctx, sender);
+        init_movement_state(ctx, sender, &spawn_pos);
+        if let Some(created) = ctx.db.player().identity().find(sender) {
+            sync_player_entity(ctx, &created);
+        }
+        log::info!("Player resumed from profile: {:?}", sender);
     }
+
+    touch_player_profile(ctx, profile.profile_id);
 }
 
 #[reducer(client_disconnected)]
@@ -166,8 +211,10 @@ pub fn client_disconnected(ctx: &ReducerContext) {
     let sender = ctx.sender();
     if let Some(player) = ctx.db.player().identity().find(sender) {
         let disconnected = dismount_player_internal(ctx, player, true);
+        close_player_session(ctx, &disconnected);
         let disconnected = Player {
             online: false,
+            current_streak: 0,
             ..disconnected
         };
         ctx.db.player().identity().update(disconnected.clone());

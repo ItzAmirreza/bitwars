@@ -121,7 +121,7 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
     for id in player_ids {
         if let Some(p) = ctx.db.player().identity().find(id) {
             let entity_id = ensure_player_entity(ctx, &p);
-            let loadout = normalize_or_create_player_loadout(ctx, &p.username);
+            let loadout = normalize_or_create_player_loadout(ctx, p.profile_id);
             let current_weapon = if weapon_in_loadout(&loadout, p.current_weapon) {
                 p.current_weapon
             } else {
@@ -146,6 +146,7 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
                 vel: ZERO_VEL,
                 kills: 0,
                 deaths: 0,
+                current_streak: 0,
                 spawn_protected: true,
                 current_weapon,
                 mounted_vehicle_id: 0,

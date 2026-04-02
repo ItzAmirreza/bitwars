@@ -154,10 +154,12 @@ pub fn process_admin_command(
             let killed = Player {
                 health: 0,
                 deaths: target.deaths + 1,
+                current_streak: 0,
                 last_damage_time: ctx.timestamp,
                 ..target
             };
             ctx.db.player().identity().update(killed.clone());
+            record_profile_death(ctx, killed.profile_id);
             sync_player_entity(ctx, &killed);
             insert_system_message(ctx, &format!("Killed {}", target_name));
             Ok(())
@@ -349,10 +351,12 @@ pub fn process_admin_command(
                     let killed = Player {
                         health: 0,
                         deaths: target.deaths + 1,
+                        current_streak: 0,
                         last_damage_time: ctx.timestamp,
                         ..target
                     };
                     ctx.db.player().identity().update(killed.clone());
+                    record_profile_death(ctx, killed.profile_id);
                     sync_player_entity(ctx, &killed);
                 }
             }

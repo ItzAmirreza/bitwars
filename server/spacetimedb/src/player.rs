@@ -10,37 +10,6 @@ use crate::tables::*;
 use crate::types::*;
 use crate::weapons;
 
-fn make_stale_username(ctx: &ReducerContext, old_username: &str) -> String {
-    let base = old_username.trim();
-    let mut suffix: u32 = 1;
-
-    loop {
-        let candidate = if suffix == 1 {
-            format!("{}_stale", base)
-        } else {
-            format!("{}_stale{}", base, suffix)
-        };
-
-        let taken_by_player = ctx
-            .db
-            .player()
-            .iter()
-            .any(|p| p.username.eq_ignore_ascii_case(&candidate));
-        let taken_by_loadout = ctx
-            .db
-            .player_loadout()
-            .username()
-            .find(&candidate)
-            .is_some();
-
-        if !taken_by_player && !taken_by_loadout {
-            return candidate;
-        }
-
-        suffix += 1;
-    }
-}
-
 #[reducer]
 pub fn set_username(
     ctx: &ReducerContext,
@@ -54,44 +23,21 @@ pub fn set_username(
     let character_preset = normalize_character_preset(character_preset);
 
     let sender = ctx.sender();
-    let conflicting_players: Vec<Player> = ctx
-        .db
-        .player()
-        .iter()
-        .filter(|p| p.identity != sender && p.username.eq_ignore_ascii_case(&username))
-        .collect();
-
-    for conflicting in conflicting_players {
-        if conflicting.online {
+    let profile = ensure_player_profile(ctx, sender);
+    if let Some(conflicting_profile) = find_profile_by_display_name(ctx, &username) {
+        if conflicting_profile.profile_id != profile.profile_id {
             return Err("Username already taken".to_string());
         }
-
-        let stale_username = make_stale_username(ctx, &conflicting.username);
-
-        if let Some(loadout) = ctx
-            .db
-            .player_loadout()
-            .username()
-            .find(&conflicting.username)
-        {
-            ctx.db
-                .player_loadout()
-                .username()
-                .delete(&conflicting.username);
-            ctx.db.player_loadout().insert(PlayerLoadout {
-                username: stale_username.clone(),
-                ..loadout
-            });
-        }
-
-        ctx.db.player().identity().update(Player {
-            username: stale_username,
-            online: false,
-            ..conflicting
-        });
     }
 
-    let loadout = normalize_or_create_player_loadout(ctx, &username);
+    let profile = PlayerProfile {
+        display_name: username.clone(),
+        last_seen_at: ctx.timestamp,
+        ..profile
+    };
+    ctx.db.player_profile().profile_id().update(profile.clone());
+
+    let loadout = normalize_or_create_player_loadout(ctx, profile.profile_id);
 
     if let Some(player) = ctx.db.player().identity().find(sender) {
         let entity_id = ensure_player_entity(ctx, &player);
@@ -102,6 +48,7 @@ pub fn set_username(
         };
 
         ctx.db.player().identity().update(Player {
+            profile_id: profile.profile_id,
             username,
             current_weapon,
             character_preset,
@@ -117,6 +64,7 @@ pub fn set_username(
         let entity_id = create_player_entity(ctx, &spawn_pos, &ZERO_VEL, &base_rot);
         ctx.db.player().insert(Player {
             identity: sender,
+            profile_id: profile.profile_id,
             entity_id,
             username,
             character_preset,
@@ -129,10 +77,12 @@ pub fn set_username(
             current_weapon: loadout.slot1,
             kills: 0,
             deaths: 0,
+            current_streak: 0,
             spawn_protected: true,
             online: true,
             mounted_vehicle_id: 0,
             joined_at: ctx.timestamp,
+            session_started_at: ctx.timestamp,
             last_damage_time: ctx.timestamp,
         });
         init_weapon_state(ctx, sender);
@@ -164,7 +114,7 @@ pub fn update_position(
         .find(sender)
         .ok_or("Not registered")?;
 
-    let loadout = normalize_or_create_player_loadout(ctx, &player.username);
+    let loadout = normalize_or_create_player_loadout(ctx, player.profile_id);
     let selected_weapon = if weapon_in_loadout(&loadout, weapon) {
         weapon
     } else {
@@ -264,28 +214,33 @@ pub fn set_loadout(ctx: &ReducerContext, slot1: u8, slot2: u8, slot3: u8) -> Res
         .identity()
         .find(sender)
         .ok_or("Not registered")?;
-    if player.username.trim().is_empty() {
+    if player.username.trim().is_empty() || player.profile_id == 0 {
         return Err("Set username first".to_string());
     }
 
-    let username = player.username.clone();
     let updated = PlayerLoadout {
-        username: username.clone(),
+        profile_id: player.profile_id,
         slot1,
         slot2,
         slot3,
         updated_at: ctx.timestamp,
     };
 
-    if ctx.db.player_loadout().username().find(&username).is_some() {
-        ctx.db.player_loadout().username().update(updated);
+    if ctx
+        .db
+        .player_loadout()
+        .profile_id()
+        .find(player.profile_id)
+        .is_some()
+    {
+        ctx.db.player_loadout().profile_id().update(updated);
     } else {
         ctx.db.player_loadout().insert(updated);
     }
 
     if !weapon_in_loadout(
         &PlayerLoadout {
-            username,
+            profile_id: player.profile_id,
             slot1,
             slot2,
             slot3,
@@ -314,7 +269,7 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
         .find(sender)
         .ok_or("Not registered")?;
 
-    let loadout = normalize_or_create_player_loadout(ctx, &player.username);
+    let loadout = normalize_or_create_player_loadout(ctx, player.profile_id);
     let respawn_weapon = if weapon_in_loadout(&loadout, player.current_weapon) {
         player.current_weapon
     } else {

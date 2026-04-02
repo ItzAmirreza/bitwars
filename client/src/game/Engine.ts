@@ -1,41 +1,68 @@
-import * as THREE from 'three';
-import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, BLOCK_COLORS, BlockType, type ChunkApplyBudget } from './VoxelWorld';
-import { FPSControls } from './FPSControls';
-import { WeaponSystem, WEAPONS } from './Weapons';
-import { AudioSystem } from './AudioSystem';
-import { VFX } from './VFX';
-import { WeaponModel } from './WeaponModel';
-import { PostFX } from './PostFX';
-import { PhysicsSystem } from './PhysicsSystem';
-import { ProjectileManager } from './ProjectileManager';
-import { SkySystem } from './SkySystem';
-import { LanternSystem } from './LanternSystem';
-import type { LanternContext } from './LanternSystem';
-import { ChunkStreamer, ACTIVE_CHUNK_RADIUS, CHUNK_STREAM_INTERVAL_FRAMES, CHUNK_REBUILD_BUDGET_MOVING, CHUNK_REBUILD_BUDGET_IDLE, CHUNK_REBUILD_BUDGET_BOOTSTRAP } from './ChunkStreamer';
-import { generateDeterministicPerfChunk, perfSceneSpawnPoint } from './PerfWorldScene';
-import { RemotePlayerManager, disposeObjectMaterials } from './RemotePlayerManager';
-import VehicleManager, { VEHICLE_WEAPONS } from './vehicles/VehicleManager';
-import type { VehicleEngineContext } from './vehicles/VehicleManager';
-import { InfantryFireController } from './InfantryFireController';
-import type { InfantryFireContext } from './InfantryFireController';
-import { VehicleFireController } from './VehicleFireController';
-import type { VehicleFireContext } from './VehicleFireController';
-import { ENTITY_KINDS, VEHICLE_TYPES, ANTI_AIR, ABILITIES } from '../shared-config';
-import { GRENADE } from '../shared-config';
-import { AbilityPickupManager } from './AbilityPickupManager';
-import type { ActiveBuff } from '../screens/hud/BuffIndicators';
-import type { DbConnection } from '../module_bindings';
-import type { GameSettings } from '../store';
-import { NetDiagnostics } from './NetDiagnostics';
-import { ChunkBoundaryViewer } from './ChunkBoundaryViewer';
-import type { HarnessMode } from './PerfHarness';
-import { buildPlayerMovementFlags } from './playerMovementFlags';
+import * as THREE from "three";
+import {
+  VoxelWorld,
+  WORLD_X,
+  WORLD_Y,
+  WORLD_Z,
+  CHUNK,
+  packChunkId,
+  BLOCK_COLORS,
+  BlockType,
+  type ChunkApplyBudget,
+} from "./VoxelWorld";
+import { FPSControls } from "./FPSControls";
+import { WeaponSystem, WEAPONS } from "./Weapons";
+import { AudioSystem } from "./AudioSystem";
+import { VFX } from "./VFX";
+import { WeaponModel } from "./WeaponModel";
+import { PostFX } from "./PostFX";
+import { PhysicsSystem } from "./PhysicsSystem";
+import { ProjectileManager } from "./ProjectileManager";
+import { SkySystem } from "./SkySystem";
+import { LanternSystem } from "./LanternSystem";
+import type { LanternContext } from "./LanternSystem";
+import {
+  ChunkStreamer,
+  ACTIVE_CHUNK_RADIUS,
+  CHUNK_STREAM_INTERVAL_FRAMES,
+  CHUNK_REBUILD_BUDGET_MOVING,
+  CHUNK_REBUILD_BUDGET_IDLE,
+  CHUNK_REBUILD_BUDGET_BOOTSTRAP,
+} from "./ChunkStreamer";
+import {
+  generateDeterministicPerfChunk,
+  perfSceneSpawnPoint,
+} from "./PerfWorldScene";
+import {
+  RemotePlayerManager,
+  disposeObjectMaterials,
+} from "./RemotePlayerManager";
+import VehicleManager, { VEHICLE_WEAPONS } from "./vehicles/VehicleManager";
+import type { VehicleEngineContext } from "./vehicles/VehicleManager";
+import { InfantryFireController } from "./InfantryFireController";
+import type { InfantryFireContext } from "./InfantryFireController";
+import { VehicleFireController } from "./VehicleFireController";
+import type { VehicleFireContext } from "./VehicleFireController";
+import {
+  ENTITY_KINDS,
+  VEHICLE_TYPES,
+  ANTI_AIR,
+  ABILITIES,
+} from "../shared-config";
+import { GRENADE } from "../shared-config";
+import { AbilityPickupManager } from "./AbilityPickupManager";
+import type { ActiveBuff } from "../screens/hud/BuffIndicators";
+import type { DbConnection } from "../module_bindings";
+import type { GameSettings } from "../store";
+import { NetDiagnostics } from "./NetDiagnostics";
+import { ChunkBoundaryViewer } from "./ChunkBoundaryViewer";
+import type { HarnessMode } from "./PerfHarness";
+import { buildPlayerMovementFlags } from "./playerMovementFlags";
 
 const ENTITY_KIND_VEHICLE = ENTITY_KINDS.Vehicle;
 
-
 export interface DynamicLightOptions {
-  type?: 'point' | 'spot';
+  type?: "point" | "spot";
   position: THREE.Vector3 | { x: number; y: number; z: number };
   color?: THREE.ColorRepresentation;
   intensity: number;
@@ -46,7 +73,7 @@ export interface DynamicLightOptions {
   direction?: THREE.Vector3 | { x: number; y: number; z: number };
   angle?: number;
   penumbra?: number;
-  kind?: 'generic' | 'lantern' | 'helicopter';
+  kind?: "generic" | "lantern" | "helicopter";
 }
 
 export interface EngineState {
@@ -64,7 +91,7 @@ export interface EngineState {
   kills: number;
   deaths: number;
   hitMarker: boolean;
-  hitMarkerType: 'block' | 'player' | 'none';
+  hitMarkerType: "block" | "player" | "none";
   timeOfDay: string;
   weather: string;
   heading: number;
@@ -81,10 +108,15 @@ export interface EngineState {
   vehicleAmmo: number;
   vehicleMaxAmmo: number;
   vehicleSpeed: number;
-  vehicleThrottle: number;   // 0..1 for jet throttle
+  vehicleThrottle: number; // 0..1 for jet throttle
   vehicleReloading: boolean;
   vehicleWeaponSlots: { name: string; color: string }[];
-  aaTargets: { screenX: number; screenY: number; distance: number; name: string }[];
+  aaTargets: {
+    screenX: number;
+    screenY: number;
+    distance: number;
+    name: string;
+  }[];
   nearVehicle: boolean;
   nearVehicleName: string | null;
   activeBuffs: ActiveBuff[];
@@ -116,14 +148,17 @@ export class Engine {
   private projectileManager: ProjectileManager;
 
   // Server-authoritative grenade visuals (from GrenadeProjectile table)
-  private grenadeVisuals: Map<bigint, {
-    mesh: THREE.Mesh;
-    light: THREE.PointLight | null;
-    pos: THREE.Vector3;   // last known server position
-    vel: THREE.Vector3;   // last known server velocity
-    lastUpdateTime: number; // performance.now() of last server update
-    trailTimer: number;    // accumulated time since last trail particle
-  }> = new Map();
+  private grenadeVisuals: Map<
+    bigint,
+    {
+      mesh: THREE.Mesh;
+      light: THREE.PointLight | null;
+      pos: THREE.Vector3; // last known server position
+      vel: THREE.Vector3; // last known server velocity
+      lastUpdateTime: number; // performance.now() of last server update
+      trailTimer: number; // accumulated time since last trail particle
+    }
+  > = new Map();
 
   // Local-predicted grenade ghosts for instant shooter feedback.
   private predictedGrenadeGhosts: Array<{
@@ -146,14 +181,17 @@ export class Engine {
   private sky: SkySystem;
 
   // Dynamic runtime lights (gameplay/cinematics)
-  private dynamicLights = new Map<string, {
-    light: THREE.PointLight | THREE.SpotLight;
-    target?: THREE.Object3D;
-    ttl: number | null;
-    kind: 'generic' | 'lantern' | 'helicopter';
-    baseIntensity: number;
-    phase: number;
-  }>();
+  private dynamicLights = new Map<
+    string,
+    {
+      light: THREE.PointLight | THREE.SpotLight;
+      target?: THREE.Object3D;
+      ttl: number | null;
+      kind: "generic" | "lantern" | "helicopter";
+      baseIntensity: number;
+      phase: number;
+    }
+  >();
   private dynamicLightSeq = 0;
   private lanterns = new LanternSystem();
   private abilityPickups!: AbilityPickupManager;
@@ -189,14 +227,20 @@ export class Engine {
   private active = false;
   private animationRunning = false;
   private sandboxMotionEnabled = false;
-  private sandboxMotionMode: HarnessMode = 'idle';
+  private sandboxMotionMode: HarnessMode = "idle";
   private sandboxMotionTime = 0;
   private sandboxPhaseTime = 0;
   private sandboxTeleportsDone = 0;
   private sandboxExplosionPulse = 0;
   private readonly sandboxRemoteIds = [
-    'perf-bot-1', 'perf-bot-2', 'perf-bot-3', 'perf-bot-4',
-    'perf-bot-5', 'perf-bot-6', 'perf-bot-7', 'perf-bot-8',
+    "perf-bot-1",
+    "perf-bot-2",
+    "perf-bot-3",
+    "perf-bot-4",
+    "perf-bot-5",
+    "perf-bot-6",
+    "perf-bot-7",
+    "perf-bot-8",
   ];
   private perfBenchmarkSceneEnabled = false;
   private sandboxRngState = 0x12345678;
@@ -205,7 +249,11 @@ export class Engine {
   private sandboxBotMuzzleTimer = 0;
   private sandboxDamagePulseTimer = 0;
   private sandboxBlockBreakCount = 0;
-  __perfLastState: { frameMs: number; cpuFrameMs: number; playerCount: number } = { frameMs: 0, cpuFrameMs: 0, playerCount: 1 };
+  __perfLastState: {
+    frameMs: number;
+    cpuFrameMs: number;
+    playerCount: number;
+  } = { frameMs: 0, cpuFrameMs: 0, playerCount: 1 };
   private lastPositionUpdate = 0;
   private remotePlayers!: RemotePlayerManager;
   private localIdentity: string | null = null;
@@ -214,7 +262,7 @@ export class Engine {
   private kills = 0;
   private deaths = 0;
   private hitMarkerTimer = 0;
-  private hitMarkerType: 'block' | 'player' | 'none' = 'none';
+  private hitMarkerType: "block" | "player" | "none" = "none";
   private recentDamageSources: Array<{
     position: THREE.Vector3;
     timestamp: number;
@@ -247,7 +295,7 @@ export class Engine {
   private chunkStreamer!: ChunkStreamer;
 
   // Adaptive graphics scaling
-  private graphicsQuality: GameSettings['graphicsQuality'] = 'high';
+  private graphicsQuality: GameSettings["graphicsQuality"] = "high";
   private userShadowsEnabled = true;
   private userPostFxEnabled = true;
   private adaptiveTier = 0;
@@ -295,7 +343,10 @@ export class Engine {
     const h = container.clientHeight;
 
     // ── Renderer ──
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: "high-performance",
+    });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
     this.renderer.shadowMap.enabled = true;
@@ -342,7 +393,13 @@ export class Engine {
     this.scene.add(this.moon.target);
 
     // ── Sky system (procedural sky, dynamic lighting, weather) ──
-    this.sky = new SkySystem(this.scene, this.sun, this.moon, this.hemiLight, this.ambientLight);
+    this.sky = new SkySystem(
+      this.scene,
+      this.sun,
+      this.moon,
+      this.hemiLight,
+      this.ambientLight,
+    );
     this.loadEnvironmentFromServer();
 
     // ── Voxel world (250×48×250) ──
@@ -356,12 +413,23 @@ export class Engine {
       localIdentity: this.localIdentity,
       scene: this.scene,
       onChunkLoaded: (cx, cy, cz, decoded) => {
-        this.lanterns.syncLanternLightsForChunk(cx, cy, cz, this.getLanternContext(), decoded);
+        this.lanterns.syncLanternLightsForChunk(
+          cx,
+          cy,
+          cz,
+          this.getLanternContext(),
+          decoded,
+        );
         this.audio?.sendChunkToWorker(packChunkId(cx, cy, cz), decoded);
       },
-      onChunkUnloading: (chunkId) => this.lanterns.clearLanternLightsForChunk(chunkId, this.getLanternContext()),
+      onChunkUnloading: (chunkId) =>
+        this.lanterns.clearLanternLightsForChunk(
+          chunkId,
+          this.getLanternContext(),
+        ),
       perfSceneEnabled: () => this.perfBenchmarkSceneEnabled,
-      getPerfSceneChunkData: (cx, cy, cz) => generateDeterministicPerfChunk(cx, cy, cz),
+      getPerfSceneChunkData: (cx, cy, cz) =>
+        generateDeterministicPerfChunk(cx, cy, cz),
     });
     this.chunkStreamer.loadWorldFromServer();
     this.world.setRebuildAnchor(
@@ -372,7 +440,8 @@ export class Engine {
     this.world.rebuildDirtyChunks(this.scene, this.bootstrapChunkApplyBudget);
 
     // ── Spawn at world center ──
-    const spawnX = WORLD_X / 2, spawnZ = WORLD_Z / 2;
+    const spawnX = WORLD_X / 2,
+      spawnZ = WORLD_Z / 2;
     const spawnY = this.getGroundHeight(spawnX, spawnZ) + 2;
     this.camera.position.set(spawnX, spawnY, spawnZ);
 
@@ -380,7 +449,11 @@ export class Engine {
     this.controls = new FPSControls(this.camera, container, WORLD_X, WORLD_Z);
 
     // ── Remote players ──
-    this.remotePlayers = new RemotePlayerManager({ scene: this.scene, camera: this.camera, localIdentity: this.localIdentity });
+    this.remotePlayers = new RemotePlayerManager({
+      scene: this.scene,
+      camera: this.camera,
+      localIdentity: this.localIdentity,
+    });
 
     // ── Ability pickups ──
     this.abilityPickups = new AbilityPickupManager(this.scene);
@@ -391,21 +464,37 @@ export class Engine {
 
     // ── Audio ──
     this.audio = new AudioSystem();
-    this.audio.setOcclusionSampler((x: number, y: number, z: number) => this.world.getBlock(x, y, z) !== 0);
-    this.audio.setListenerPose(this.camera.position, { x: 0, y: 0, z: -1 }, { x: 0, y: 1, z: 0 });
+    this.audio.setOcclusionSampler(
+      (x: number, y: number, z: number) => this.world.getBlock(x, y, z) !== 0,
+    );
+    this.audio.setListenerPose(
+      this.camera.position,
+      { x: 0, y: 0, z: -1 },
+      { x: 0, y: 1, z: 0 },
+    );
     this.audio.initRayTracer();
 
     // ── VFX ──
     this.vfx = new VFX(this.scene, this.camera);
 
     // ── Physics ──
-    this.physics = new PhysicsSystem(this.scene, this.world, this.vfx, this.audio);
+    this.physics = new PhysicsSystem(
+      this.scene,
+      this.world,
+      this.vfx,
+      this.audio,
+    );
 
     // ── Projectiles ──
     // NOTE: infantryFire is initialized after this, but the callback is only called
     // at runtime (not during construction), so the reference is valid by then.
     this.projectileManager = new ProjectileManager(
-      this.scene, this.world, this.weapons, this.vfx, this.audio, this.camera,
+      this.scene,
+      this.world,
+      this.weapons,
+      this.vfx,
+      this.audio,
+      this.camera,
       this.remotePlayers.otherPlayers,
       (impact) => this.infantryFire.handleProjectileImpact(impact),
     );
@@ -424,24 +513,30 @@ export class Engine {
     this.applyGraphicsTier(true);
 
     // ── Vehicle manager ──
-    this.vehicleManager = new VehicleManager(this as unknown as VehicleEngineContext);
+    this.vehicleManager = new VehicleManager(
+      this as unknown as VehicleEngineContext,
+    );
     this.weapons.setVehicles(this.vehicleManager.vehicles);
 
     // ── Fire controllers ──
-    this.infantryFire = new InfantryFireController(this as unknown as InfantryFireContext);
-    this.vehicleFire = new VehicleFireController(this as unknown as VehicleFireContext);
+    this.infantryFire = new InfantryFireController(
+      this as unknown as InfantryFireContext,
+    );
+    this.vehicleFire = new VehicleFireController(
+      this as unknown as VehicleFireContext,
+    );
 
     // ── Server sync ──
     this.setupServerListeners();
 
     // ── Input ──
-    container.addEventListener('mousedown', this.onMouseDown);
-    container.addEventListener('mouseup', this.onMouseUp);
-    container.addEventListener('contextmenu', this.onContextMenu);
-    document.addEventListener('keydown', this.onKeyDown);
-    document.addEventListener('mousemove', this.onVehicleMouseMove);
-    document.addEventListener('wheel', this.onVehicleWheel, { passive: true });
-    window.addEventListener('resize', this.onResize);
+    container.addEventListener("mousedown", this.onMouseDown);
+    container.addEventListener("mouseup", this.onMouseUp);
+    container.addEventListener("contextmenu", this.onContextMenu);
+    document.addEventListener("keydown", this.onKeyDown);
+    document.addEventListener("mousemove", this.onVehicleMouseMove);
+    document.addEventListener("wheel", this.onVehicleWheel, { passive: true });
+    window.addEventListener("resize", this.onResize);
 
     this.setActive(startActive);
   }
@@ -450,14 +545,18 @@ export class Engine {
     this.chunkBoundaryViewer.toggle();
   }
 
-  setPlayerContext(localIdentity: string | null, username: string | null): void {
-    const usernameChanged = this.username !== username;
+  setPlayerContext(
+    localIdentity: string | null,
+    username: string | null,
+  ): void {
+    const contextChanged =
+      this.localIdentity !== localIdentity || this.username !== username;
     this.localIdentity = localIdentity;
     this.username = username;
 
-    // When username becomes available (or changes), re-check persisted loadout rows
-    // so preloaded engines created before login still pick up the correct loadout.
-    if (!usernameChanged || !this.conn) return;
+    // When the local player context changes, re-check persisted loadout rows so
+    // preloaded engines can pick up the correct profile-bound loadout.
+    if (!contextChanged || !this.conn) return;
     const db = this.conn.db as any;
     if (!db.player_loadout?.iter) return;
     for (const row of db.player_loadout.iter()) {
@@ -526,15 +625,33 @@ export class Engine {
   }
 
   private applyGraphicsTier(force = false): void {
-    const baseDpr = this.graphicsQuality === 'low' ? 1 : this.graphicsQuality === 'medium' ? 1.5 : 2;
-    const baseShadowMap = this.graphicsQuality === 'low' ? 512 : this.graphicsQuality === 'medium' ? 1024 : 2048;
-    const baseCastRadius = this.graphicsQuality === 'low' ? 4 : this.graphicsQuality === 'medium' ? 6 : 8;
+    const baseDpr =
+      this.graphicsQuality === "low"
+        ? 1
+        : this.graphicsQuality === "medium"
+          ? 1.5
+          : 2;
+    const baseShadowMap =
+      this.graphicsQuality === "low"
+        ? 512
+        : this.graphicsQuality === "medium"
+          ? 1024
+          : 2048;
+    const baseCastRadius =
+      this.graphicsQuality === "low"
+        ? 4
+        : this.graphicsQuality === "medium"
+          ? 6
+          : 8;
 
     const dprScale = [1.0, 0.9, 0.78, 0.66][this.adaptiveTier] ?? 1.0;
     const shadowScale = [1.0, 0.75, 0.5, 0.25][this.adaptiveTier] ?? 1.0;
     const budgetScale = [1.0, 0.85, 0.7, 0.55][this.adaptiveTier] ?? 1.0;
 
-    const wantedDpr = Math.max(0.6, Math.min(window.devicePixelRatio, baseDpr * dprScale));
+    const wantedDpr = Math.max(
+      0.6,
+      Math.min(window.devicePixelRatio, baseDpr * dprScale),
+    );
     const shadowMapSize = this.roundShadowMapSize(baseShadowMap * shadowScale);
     const shadowsActive = this.userShadowsEnabled && this.adaptiveTier < 3;
     const postFxActive = this.userPostFxEnabled && this.adaptiveTier < 2;
@@ -542,15 +659,42 @@ export class Engine {
     this.currentShadowCastRadiusChunks = shadowsActive
       ? Math.max(2, baseCastRadius - this.adaptiveTier)
       : 0;
-    this.currentRebuildBudgetMoving = Math.max(4, Math.round(CHUNK_REBUILD_BUDGET_MOVING * budgetScale));
-    this.currentRebuildBudgetIdle = Math.max(8, Math.round(CHUNK_REBUILD_BUDGET_IDLE * budgetScale));
+    this.currentRebuildBudgetMoving = Math.max(
+      4,
+      Math.round(CHUNK_REBUILD_BUDGET_MOVING * budgetScale),
+    );
+    this.currentRebuildBudgetIdle = Math.max(
+      8,
+      Math.round(CHUNK_REBUILD_BUDGET_IDLE * budgetScale),
+    );
     const applyBudgetScale = [1.0, 0.9, 0.76, 0.62][this.adaptiveTier] ?? 1.0;
-    const baseApplyMoving = this.graphicsQuality === 'low' ? 1.05 : this.graphicsQuality === 'medium' ? 1.2 : 1.35;
-    const baseApplyIdle = this.graphicsQuality === 'low' ? 1.55 : this.graphicsQuality === 'medium' ? 1.85 : 2.15;
-    this.currentMeshApplyBudgetMsMoving = Math.max(0.5, baseApplyMoving * applyBudgetScale);
-    this.currentMeshApplyBudgetMsIdle = Math.max(0.8, baseApplyIdle * applyBudgetScale);
+    const baseApplyMoving =
+      this.graphicsQuality === "low"
+        ? 1.05
+        : this.graphicsQuality === "medium"
+          ? 1.2
+          : 1.35;
+    const baseApplyIdle =
+      this.graphicsQuality === "low"
+        ? 1.55
+        : this.graphicsQuality === "medium"
+          ? 1.85
+          : 2.15;
+    this.currentMeshApplyBudgetMsMoving = Math.max(
+      0.5,
+      baseApplyMoving * applyBudgetScale,
+    );
+    this.currentMeshApplyBudgetMsIdle = Math.max(
+      0.8,
+      baseApplyIdle * applyBudgetScale,
+    );
 
-    const nextStreamInterval = this.adaptiveTier >= 3 ? 4 : this.adaptiveTier >= 2 ? 3 : CHUNK_STREAM_INTERVAL_FRAMES;
+    const nextStreamInterval =
+      this.adaptiveTier >= 3
+        ? 4
+        : this.adaptiveTier >= 2
+          ? 3
+          : CHUNK_STREAM_INTERVAL_FRAMES;
     if (force || this.currentChunkStreamIntervalFrames !== nextStreamInterval) {
       this.currentChunkStreamIntervalFrames = nextStreamInterval;
       this.chunkStreamer.chunkLoadFrame = 0;
@@ -591,7 +735,12 @@ export class Engine {
     const elapsed = this.adaptiveSampleTimer;
     this.adaptiveSampleTimer = 0;
 
-    const targetMs = this.graphicsQuality === 'low' ? 22 : this.graphicsQuality === 'medium' ? 18.5 : 16.7;
+    const targetMs =
+      this.graphicsQuality === "low"
+        ? 22
+        : this.graphicsQuality === "medium"
+          ? 18.5
+          : 16.7;
     const hardPressure = this.adaptiveFrameMsEma > targetMs + 8;
     const pressure = this.adaptiveFrameMsEma > targetMs + 3;
     const relief = this.adaptiveFrameMsEma < targetMs - 2.2;
@@ -606,8 +755,14 @@ export class Engine {
       this.adaptiveReliefTime += elapsed;
       this.adaptivePressureTime = 0;
     } else {
-      this.adaptivePressureTime = Math.max(0, this.adaptivePressureTime - elapsed * 0.5);
-      this.adaptiveReliefTime = Math.max(0, this.adaptiveReliefTime - elapsed * 0.5);
+      this.adaptivePressureTime = Math.max(
+        0,
+        this.adaptivePressureTime - elapsed * 0.5,
+      );
+      this.adaptiveReliefTime = Math.max(
+        0,
+        this.adaptiveReliefTime - elapsed * 0.5,
+      );
     }
 
     if (this.adaptivePressureTime >= 1.2 && this.adaptiveTier < 3) {
@@ -651,9 +806,10 @@ export class Engine {
       return;
     }
 
-    if (!(this.chatOpen || this.loadoutMenuOpen)
-      && this.relockAfterOverlay
-      && !this.controls.locked
+    if (
+      !(this.chatOpen || this.loadoutMenuOpen) &&
+      this.relockAfterOverlay &&
+      !this.controls.locked
     ) {
       this.controls.lock();
     }
@@ -683,9 +839,10 @@ export class Engine {
       return;
     }
 
-    if (!(this.chatOpen || this.loadoutMenuOpen)
-      && this.relockAfterOverlay
-      && !this.controls.locked
+    if (
+      !(this.chatOpen || this.loadoutMenuOpen) &&
+      this.relockAfterOverlay &&
+      !this.controls.locked
     ) {
       this.controls.lock();
     }
@@ -699,7 +856,10 @@ export class Engine {
     return this.weapons.loadout;
   }
 
-  setLoadout(loadout: [number, number, number], preferredWeapon?: number): boolean {
+  setLoadout(
+    loadout: [number, number, number],
+    preferredWeapon?: number,
+  ): boolean {
     const changed = this.weapons.setLoadout(loadout, preferredWeapon);
     if (!changed) return false;
 
@@ -734,7 +894,12 @@ export class Engine {
       this.sandboxExplosionPulse = 0;
       this.sandboxBotMuzzleTimer = 0;
       this.sandboxDamagePulseTimer = 0;
-      this.sandboxRngState = mode === 'combat-chaos' ? 0x4f1bbcdc : mode === 'mixed-teleport' ? 0x6d2b79f5 : 0x12345678;
+      this.sandboxRngState =
+        mode === "combat-chaos"
+          ? 0x4f1bbcdc
+          : mode === "mixed-teleport"
+            ? 0x6d2b79f5
+            : 0x12345678;
       this.removeSandboxRemotePlayers();
     }
 
@@ -816,7 +981,13 @@ export class Engine {
     this.orientSandboxLookToward(spawn.x + 12, spawn.y, spawn.z + 10);
 
     this.perfEnvironmentPhase = -1;
-    this.sky.setEnvironment({ timeOfDay: 9.5, weather: 0, windSpeed: 0.2, cloudDensity: 0.2, fogDensity: 0.65 });
+    this.sky.setEnvironment({
+      timeOfDay: 9.5,
+      weather: 0,
+      windSpeed: 0.2,
+      cloudDensity: 0.2,
+      fogDensity: 0.65,
+    });
     this.sandboxWeaponCycleTimer = 0;
     this.sandboxBotMuzzleTimer = 0;
     this.sandboxDamagePulseTimer = 0;
@@ -829,7 +1000,8 @@ export class Engine {
   }
 
   private sandboxRand(): number {
-    this.sandboxRngState = (Math.imul(this.sandboxRngState, 1664525) + 1013904223) >>> 0;
+    this.sandboxRngState =
+      (Math.imul(this.sandboxRngState, 1664525) + 1013904223) >>> 0;
     return this.sandboxRngState / 4294967296;
   }
 
@@ -838,7 +1010,8 @@ export class Engine {
   }
 
   private removeSandboxRemotePlayers(): void {
-    for (const id of this.sandboxRemoteIds) this.remotePlayers.removeOtherPlayer(id);
+    for (const id of this.sandboxRemoteIds)
+      this.remotePlayers.removeOtherPlayer(id);
   }
 
   private ensureSandboxRemotePlayers(time: number): void {
@@ -848,7 +1021,9 @@ export class Engine {
     for (let i = 0; i < this.sandboxRemoteIds.length; i++) {
       const id = this.sandboxRemoteIds[i]!;
       const ring = 12 + i * 2.8;
-      const angle = time * (0.35 + i * 0.1) + i * (Math.PI * 2 / this.sandboxRemoteIds.length);
+      const angle =
+        time * (0.35 + i * 0.1) +
+        i * ((Math.PI * 2) / this.sandboxRemoteIds.length);
       const x = base.x + Math.cos(angle) * ring;
       const z = base.z + Math.sin(angle) * ring;
       const y = this.getGroundHeight(x, z) + 1.7;
@@ -893,12 +1068,19 @@ export class Engine {
       this.vfx.emitImpact(cx, cy, cz);
 
       // Screen shake (distance-attenuated)
-      const dist = this.camera.position.distanceTo(new THREE.Vector3(cx, cy, cz));
+      const dist = this.camera.position.distanceTo(
+        new THREE.Vector3(cx, cy, cz),
+      );
       const shakeIntensity = Math.max(0, 1 - dist / 40) * (radius / 4) * 0.4;
       if (shakeIntensity > 0.02) this.vfx.shake(shakeIntensity);
 
       // Destroy actual blocks within explosion radius and collect debris
-      const destroyedBlocks: { x: number; y: number; z: number; blockType: number }[] = [];
+      const destroyedBlocks: {
+        x: number;
+        y: number;
+        z: number;
+        blockType: number;
+      }[] = [];
       const intRadius = Math.ceil(radius);
       const bx = Math.floor(cx);
       const by = Math.floor(cy);
@@ -907,7 +1089,9 @@ export class Engine {
         for (let dy = -intRadius; dy <= intRadius; dy++) {
           for (let dz = -intRadius; dz <= intRadius; dz++) {
             if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
-            const wx = bx + dx, wy = by + dy, wz = bz + dz;
+            const wx = bx + dx,
+              wy = by + dy,
+              wz = bz + dz;
             const bt = this.world.getBlock(wx, wy, wz);
             if (bt !== 0 && bt !== BlockType.Bedrock) {
               destroyedBlocks.push({ x: wx, y: wy, z: wz, blockType: bt });
@@ -920,7 +1104,14 @@ export class Engine {
 
       // Physics debris from destroyed blocks
       if (destroyedBlocks.length > 0) {
-        this.physics.spawnExplosionDebris(destroyedBlocks, cx, cy, cz, radius, radius * 2.5);
+        this.physics.spawnExplosionDebris(
+          destroyedBlocks,
+          cx,
+          cy,
+          cz,
+          radius,
+          radius * 2.5,
+        );
         this.physics.applyExplosionForce(cx, cy, cz, radius * 1.5, radius * 2);
         // Block debris VFX particles for first N blocks
         const vfxCount = Math.min(destroyedBlocks.length, 6);
@@ -938,7 +1129,9 @@ export class Engine {
     this.sandboxBotMuzzleTimer -= delta;
     if (this.sandboxBotMuzzleTimer <= 0) {
       this.sandboxBotMuzzleTimer = 0.08;
-      const botIdx = Math.floor(this.sandboxRand() * this.sandboxRemoteIds.length);
+      const botIdx = Math.floor(
+        this.sandboxRand() * this.sandboxRemoteIds.length,
+      );
       const id = this.sandboxRemoteIds[botIdx]!;
       const botGroup = this.remotePlayers.otherPlayers.get(id);
       if (botGroup) {
@@ -962,18 +1155,28 @@ export class Engine {
 
     // ── Diverse projectile spam: cycle RPG (2) and grenade launcher (4) ──
     for (let i = 0; i < 2; i++) {
-      const origin = this.camera.position.clone().add(new THREE.Vector3(
-        (this.sandboxRand() - 0.5) * 2,
-        -0.2 + this.sandboxRand() * 0.6,
-        (this.sandboxRand() - 0.5) * 2,
-      ));
+      const origin = this.camera.position
+        .clone()
+        .add(
+          new THREE.Vector3(
+            (this.sandboxRand() - 0.5) * 2,
+            -0.2 + this.sandboxRand() * 0.6,
+            (this.sandboxRand() - 0.5) * 2,
+          ),
+        );
       const dir = new THREE.Vector3(
         (this.sandboxRand() - 0.5) * 0.5,
         -0.05 + this.sandboxRand() * 0.25,
         -1,
       ).normalize();
       const weaponIdx = (i + this.sandboxTeleportsDone) % 2 === 0 ? 2 : 4;
-      this.projectileManager.spawnRemote(weaponIdx, origin, dir, performance.now(), this.sandboxRemoteIds[i % this.sandboxRemoteIds.length]!);
+      this.projectileManager.spawnRemote(
+        weaponIdx,
+        origin,
+        dir,
+        performance.now(),
+        this.sandboxRemoteIds[i % this.sandboxRemoteIds.length]!,
+      );
     }
 
     // ── Damage vignette pulse (every 3s, simulates taking damage) ──
@@ -985,14 +1188,18 @@ export class Engine {
     }
   }
 
-  private orientSandboxLookToward(targetX: number, targetY: number, targetZ: number): void {
+  private orientSandboxLookToward(
+    targetX: number,
+    targetY: number,
+    targetZ: number,
+  ): void {
     const dx = targetX - this.camera.position.x;
     const dy = targetY - this.camera.position.y;
     const dz = targetZ - this.camera.position.z;
     const yaw = Math.atan2(-dx, -dz);
     const horiz = Math.max(0.0001, Math.sqrt(dx * dx + dz * dz));
     const pitch = Math.max(-1.1, Math.min(1.1, Math.atan2(dy, horiz)));
-    const e = new THREE.Euler(pitch, yaw, 0, 'YXZ');
+    const e = new THREE.Euler(pitch, yaw, 0, "YXZ");
     this.camera.quaternion.setFromEuler(e);
     this.vehicleManager.vehiclePilotYaw = yaw;
     this.vehicleManager.vehiclePilotPitch = pitch;
@@ -1038,11 +1245,11 @@ export class Engine {
     if (this.sandboxWeaponCycleTimer <= 0) {
       this.sandboxWeaponCycleTimer = 5.0;
       const loadouts: [number, number, number][] = [
-        [0, 1, 2],  // Rifle, Shotgun, RPG
-        [3, 4, 0],  // Machine Gun, Grenade Launcher, Rifle
-        [1, 2, 3],  // Shotgun, RPG, Machine Gun
-        [4, 0, 1],  // Grenade Launcher, Rifle, Shotgun
-        [2, 3, 4],  // RPG, Machine Gun, Grenade Launcher
+        [0, 1, 2], // Rifle, Shotgun, RPG
+        [3, 4, 0], // Machine Gun, Grenade Launcher, Rifle
+        [1, 2, 3], // Shotgun, RPG, Machine Gun
+        [4, 0, 1], // Grenade Launcher, Rifle, Shotgun
+        [2, 3, 4], // RPG, Machine Gun, Grenade Launcher
       ];
       const cycle = Math.floor(this.sandboxMotionTime / 5) % loadouts.length;
       const targetLoadout = loadouts[cycle]!;
@@ -1055,11 +1262,46 @@ export class Engine {
     const envPhase = Math.floor(this.sandboxMotionTime / 13) % 5;
     if (envPhase !== this.perfEnvironmentPhase) {
       this.perfEnvironmentPhase = envPhase;
-      if (envPhase === 0) this.sky.setEnvironment({ timeOfDay: 9.5, weather: 0, windSpeed: 0.2, cloudDensity: 0.2, fogDensity: 0.65 });
-      else if (envPhase === 1) this.sky.setEnvironment({ timeOfDay: 13.5, weather: 1, windSpeed: 0.25, cloudDensity: 0.45, fogDensity: 0.72 });
-      else if (envPhase === 2) this.sky.setEnvironment({ timeOfDay: 18.7, weather: 2, windSpeed: 0.35, cloudDensity: 0.74, fogDensity: 0.88 });
-      else if (envPhase === 3) this.sky.setEnvironment({ timeOfDay: 22.4, weather: 3, windSpeed: 0.5, cloudDensity: 0.95, fogDensity: 1.08 });
-      else this.sky.setEnvironment({ timeOfDay: 4.5, weather: 4, windSpeed: 0.6, cloudDensity: 1.0, fogDensity: 1.2 });
+      if (envPhase === 0)
+        this.sky.setEnvironment({
+          timeOfDay: 9.5,
+          weather: 0,
+          windSpeed: 0.2,
+          cloudDensity: 0.2,
+          fogDensity: 0.65,
+        });
+      else if (envPhase === 1)
+        this.sky.setEnvironment({
+          timeOfDay: 13.5,
+          weather: 1,
+          windSpeed: 0.25,
+          cloudDensity: 0.45,
+          fogDensity: 0.72,
+        });
+      else if (envPhase === 2)
+        this.sky.setEnvironment({
+          timeOfDay: 18.7,
+          weather: 2,
+          windSpeed: 0.35,
+          cloudDensity: 0.74,
+          fogDensity: 0.88,
+        });
+      else if (envPhase === 3)
+        this.sky.setEnvironment({
+          timeOfDay: 22.4,
+          weather: 3,
+          windSpeed: 0.5,
+          cloudDensity: 0.95,
+          fogDensity: 1.08,
+        });
+      else
+        this.sky.setEnvironment({
+          timeOfDay: 4.5,
+          weather: 4,
+          windSpeed: 0.6,
+          cloudDensity: 1.0,
+          fogDensity: 1.2,
+        });
     }
 
     // NOTE: Vehicle mount/dismount cycling has been removed.
@@ -1082,7 +1324,11 @@ export class Engine {
       this.health = 100;
     }
 
-    if (this.mountedVehicleId !== 0 || this.health <= 0 || !this.controls.inputEnabled) {
+    if (
+      this.mountedVehicleId !== 0 ||
+      this.health <= 0 ||
+      !this.controls.inputEnabled
+    ) {
       return;
     }
     if (!this.perfBenchmarkSceneEnabled) return;
@@ -1091,7 +1337,7 @@ export class Engine {
     let fwd = false;
     let sprint = false;
 
-    if (this.sandboxMotionMode === 'chunk-hop') {
+    if (this.sandboxMotionMode === "chunk-hop") {
       if (this.sandboxPhaseTime > 3.5 || this.sandboxTeleportsDone === 0) {
         this.sandboxPhaseTime = 0;
         this.sandboxTeleportsDone++;
@@ -1101,7 +1347,7 @@ export class Engine {
       // Walk forward between teleports to stress chunk streaming under movement
       fwd = true;
       sprint = true;
-    } else if (this.sandboxMotionMode === 'combat-chaos') {
+    } else if (this.sandboxMotionMode === "combat-chaos") {
       if (this.sandboxPhaseTime > 2.4 || this.sandboxTeleportsDone === 0) {
         this.sandboxPhaseTime = 0;
         this.sandboxTeleportsDone++;
@@ -1109,13 +1355,16 @@ export class Engine {
         const centerZ = WORLD_Z * 0.5;
         const ring = 48;
         const ang = this.sandboxTeleportsDone * 1.3;
-        this.teleportSandboxCamera(centerX + Math.cos(ang) * ring, centerZ + Math.sin(ang) * ring);
+        this.teleportSandboxCamera(
+          centerX + Math.cos(ang) * ring,
+          centerZ + Math.sin(ang) * ring,
+        );
       }
       // Walk forward between teleports to generate footsteps, head bob, and sprint FOV
       fwd = true;
       sprint = true;
       this.emitSandboxChaos(delta);
-    } else if (this.sandboxMotionMode === 'mixed-teleport') {
+    } else if (this.sandboxMotionMode === "mixed-teleport") {
       if (this.sandboxPhaseTime > 2.8 || this.sandboxTeleportsDone === 0) {
         this.sandboxPhaseTime = 0;
         this.sandboxTeleportsDone++;
@@ -1136,7 +1385,7 @@ export class Engine {
     this.controls.ePressed = false;
     this.controls.setSandboxSprint?.(sprint);
 
-    if (this.sandboxMotionMode === 'idle') {
+    if (this.sandboxMotionMode === "idle") {
       this.removeSandboxRemotePlayers();
     }
   }
@@ -1148,14 +1397,14 @@ export class Engine {
     if (!this.active) return;
     if (this.sandboxMotionEnabled) return;
     if (this.chatOpen || this.loadoutMenuOpen) return;
-    if (e.code === 'KeyF') {
+    if (e.code === "KeyF") {
       if (this.mountedVehicleId !== 0) {
         this.vehicleManager.resetLocalPilotSmoothing();
       }
       if (this.conn) this.conn.reducers.interactVehicle({});
       return;
     }
-    if (e.code === 'KeyR') {
+    if (e.code === "KeyR") {
       if (this.mountedVehicleId !== 0) {
         this.startVehicleReload();
         return;
@@ -1165,17 +1414,22 @@ export class Engine {
       // Server-authoritative reload
       if (this.conn) this.conn.reducers.reloadWeapon({});
     }
-    if (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3') {
+    if (e.code === "Digit1" || e.code === "Digit2" || e.code === "Digit3") {
       if (this.mountedVehicleId !== 0) {
         // Vehicle weapon switching: 1/2/3
         const slot = parseInt(e.code.charAt(5), 10) - 1;
         const vTypeId = this.vehicleManager.getMountedVehicleType()?.typeId;
         const maxSlots = vTypeId === 1 ? 3 : vTypeId === 2 ? 1 : 2; // jet=3, AA=1, heli=2
-        if (slot >= 0 && slot < maxSlots && slot !== this.vehicleManager.vehicleWeaponIndex) {
+        if (
+          slot >= 0 &&
+          slot < maxSlots &&
+          slot !== this.vehicleManager.vehicleWeaponIndex
+        ) {
           this.vehicleManager.vehicleWeaponIndex = slot;
           this.audio.playSwitch(this.localAudioSource(-0.1));
           // Sync to server
-          if (this.conn) this.conn.reducers.switchVehicleWeapon({ weaponIndex: slot });
+          if (this.conn)
+            this.conn.reducers.switchVehicleWeapon({ weaponIndex: slot });
         }
         return;
       }
@@ -1188,12 +1442,22 @@ export class Engine {
   private onVehicleMouseMove = (event: MouseEvent): void => {
     if (!this.active) return;
     if (this.mountedVehicleId === 0 || !this.controls.locked) return;
-    this.vehicleManager.vehiclePilotYaw -= event.movementX * this.controls.sensitivity;
-    this.vehicleManager.vehiclePilotPitch -= event.movementY * this.controls.sensitivity;
-    this.vehicleManager.vehiclePilotPitch = Math.max(this.vehicleManager.PILOT_PITCH_MIN, Math.min(this.vehicleManager.PILOT_PITCH_MAX, this.vehicleManager.vehiclePilotPitch));
+    this.vehicleManager.vehiclePilotYaw -=
+      event.movementX * this.controls.sensitivity;
+    this.vehicleManager.vehiclePilotPitch -=
+      event.movementY * this.controls.sensitivity;
+    this.vehicleManager.vehiclePilotPitch = Math.max(
+      this.vehicleManager.PILOT_PITCH_MIN,
+      Math.min(
+        this.vehicleManager.PILOT_PITCH_MAX,
+        this.vehicleManager.vehiclePilotPitch,
+      ),
+    );
     // Wrap to [-PI, PI]
-    if (this.vehicleManager.vehiclePilotYaw > Math.PI) this.vehicleManager.vehiclePilotYaw -= Math.PI * 2;
-    if (this.vehicleManager.vehiclePilotYaw < -Math.PI) this.vehicleManager.vehiclePilotYaw += Math.PI * 2;
+    if (this.vehicleManager.vehiclePilotYaw > Math.PI)
+      this.vehicleManager.vehiclePilotYaw -= Math.PI * 2;
+    if (this.vehicleManager.vehiclePilotYaw < -Math.PI)
+      this.vehicleManager.vehiclePilotYaw += Math.PI * 2;
   };
   private onVehicleWheel = (e: WheelEvent): void => {
     if (!this.active) return;
@@ -1202,26 +1466,34 @@ export class Engine {
     const ZOOM_MAX = 30;
     const ZOOM_STEP = 2;
     if (e.deltaY > 0) {
-      this.vehicleManager.vehicleCameraDistance = Math.min(ZOOM_MAX, this.vehicleManager.vehicleCameraDistance + ZOOM_STEP);
+      this.vehicleManager.vehicleCameraDistance = Math.min(
+        ZOOM_MAX,
+        this.vehicleManager.vehicleCameraDistance + ZOOM_STEP,
+      );
     } else if (e.deltaY < 0) {
-      this.vehicleManager.vehicleCameraDistance = Math.max(ZOOM_MIN, this.vehicleManager.vehicleCameraDistance - ZOOM_STEP);
+      this.vehicleManager.vehicleCameraDistance = Math.max(
+        ZOOM_MIN,
+        this.vehicleManager.vehicleCameraDistance - ZOOM_STEP,
+      );
     }
   };
 
-  private toVec3(v: THREE.Vector3 | { x: number; y: number; z: number }): THREE.Vector3 {
+  private toVec3(
+    v: THREE.Vector3 | { x: number; y: number; z: number },
+  ): THREE.Vector3 {
     return v instanceof THREE.Vector3 ? v : new THREE.Vector3(v.x, v.y, v.z);
   }
 
   /** Runtime light source API for gameplay objects and cinematics. Returns light id. */
   addDynamicLight(options: DynamicLightOptions): string {
     const id = `dyn-${++this.dynamicLightSeq}`;
-    const type = options.type ?? 'point';
+    const type = options.type ?? "point";
     const color = options.color ?? 0xffffff;
     const decay = options.decay ?? 2;
-    const kind = options.kind ?? 'generic';
+    const kind = options.kind ?? "generic";
     const phase = Math.random() * Math.PI * 2;
 
-    if (type === 'spot') {
+    if (type === "spot") {
       const light = new THREE.SpotLight(
         color,
         options.intensity,
@@ -1233,7 +1505,9 @@ export class Engine {
       light.castShadow = options.castShadow ?? false;
       light.position.copy(this.toVec3(options.position));
       const target = new THREE.Object3D();
-      const direction = this.toVec3(options.direction ?? { x: 0, y: -1, z: 0 }).normalize();
+      const direction = this.toVec3(
+        options.direction ?? { x: 0, y: -1, z: 0 },
+      ).normalize();
       target.position.copy(light.position).add(direction);
       light.target = target;
       this.scene.add(target);
@@ -1249,7 +1523,12 @@ export class Engine {
       return id;
     }
 
-    const light = new THREE.PointLight(color, options.intensity, options.distance, decay);
+    const light = new THREE.PointLight(
+      color,
+      options.intensity,
+      options.distance,
+      decay,
+    );
     light.castShadow = options.castShadow ?? false;
     light.position.copy(this.toVec3(options.position));
     this.scene.add(light);
@@ -1298,7 +1577,8 @@ export class Engine {
     this.scene.remove(entry.light);
     if (entry.target) {
       this.scene.remove(entry.target);
-      if (entry.light instanceof THREE.SpotLight) entry.light.target = entry.light;
+      if (entry.light instanceof THREE.SpotLight)
+        entry.light.target = entry.light;
     }
     entry.light.dispose();
     this.dynamicLights.delete(id);
@@ -1311,7 +1591,10 @@ export class Engine {
       world: this.world,
       sky: this.sky,
       elapsedTime: this.elapsedTime,
-      dynamicLights: this.dynamicLights as Map<string, { light: THREE.PointLight | THREE.SpotLight; kind: string }>,
+      dynamicLights: this.dynamicLights as Map<
+        string,
+        { light: THREE.PointLight | THREE.SpotLight; kind: string }
+      >,
       addDynamicLight: (opts) => this.addDynamicLight(opts),
       removeDynamicLight: (id) => this.removeDynamicLight(id),
       updateDynamicLight: (id, patch) => this.updateDynamicLight(id, patch),
@@ -1321,17 +1604,22 @@ export class Engine {
   private updateDynamicLights(delta: number): void {
     const ctx = this.getLanternContext();
     const sunVisibility = this.sky.getSunVisibility();
-    const lanternVisibility = this.lanterns.getLanternVisibilityFromSun(sunVisibility);
+    const lanternVisibility =
+      this.lanterns.getLanternVisibilityFromSun(sunVisibility);
 
     // Lantern refresh (timer + proximity-based light placement)
     this.lanterns.update(delta, ctx);
 
     // Per-light updates: lantern flicker + TTL expiry
     for (const [id, entry] of this.dynamicLights) {
-      if (entry.kind === 'lantern') {
+      if (entry.kind === "lantern") {
         entry.light.intensity = this.lanterns.getLanternFlickerIntensity(
-          entry.baseIntensity, entry.phase, lanternVisibility,
-          this.elapsedTime, delta, entry.light.intensity,
+          entry.baseIntensity,
+          entry.phase,
+          lanternVisibility,
+          this.elapsedTime,
+          delta,
+          entry.light.intensity,
         );
       }
 
@@ -1341,7 +1629,11 @@ export class Engine {
     }
   }
 
-  private playRemoteWeaponAudio(weaponIdx: number, origin: THREE.Vector3, direction: THREE.Vector3): void {
+  private playRemoteWeaponAudio(
+    weaponIdx: number,
+    origin: THREE.Vector3,
+    direction: THREE.Vector3,
+  ): void {
     const spatial = {
       position: { x: origin.x, y: origin.y, z: origin.z },
       direction: { x: direction.x, y: direction.y, z: direction.z },
@@ -1354,13 +1646,19 @@ export class Engine {
     else if (weaponIdx === 4) this.audio.playGrenadeLaunch(spatial);
     else if (weaponIdx === 5) this.audio.playSniper(spatial);
     // Vehicle weapons (100+ namespace)
-    else if (weaponIdx === 100) this.audio.playVehicleMinigun(spatial); // Minigun
-    else if (weaponIdx === 101) this.audio.playVehicleRocket(spatial);  // Rockets
-    else if (weaponIdx === 102) this.audio.playKineticPenetratorFire(spatial); // Kinetic Penetrator
-    else if (weaponIdx === 103) this.audio.playCarpetBombDrop(spatial);   // Carpet Bomb
-    else if (weaponIdx === 104) this.audio.playVehicleMinigun(spatial);   // Autocannon
-    else if (weaponIdx === 105) this.audio.playVehicleRocket(spatial);    // SAM Missile
-    else if (weaponIdx === 106) this.audio.playVehicleRocket(spatial);    // Air Missile
+    else if (weaponIdx === 100)
+      this.audio.playVehicleMinigun(spatial); // Minigun
+    else if (weaponIdx === 101)
+      this.audio.playVehicleRocket(spatial); // Rockets
+    else if (weaponIdx === 102)
+      this.audio.playKineticPenetratorFire(spatial); // Kinetic Penetrator
+    else if (weaponIdx === 103)
+      this.audio.playCarpetBombDrop(spatial); // Carpet Bomb
+    else if (weaponIdx === 104)
+      this.audio.playVehicleMinigun(spatial); // Autocannon
+    else if (weaponIdx === 105)
+      this.audio.playVehicleRocket(spatial); // SAM Missile
+    else if (weaponIdx === 106) this.audio.playVehicleRocket(spatial); // Air Missile
   }
 
   private localAudioSource(heightOffset = 0): {
@@ -1416,9 +1714,23 @@ export class Engine {
     return undefined;
   }
 
+  private getLocalProfileId(): number | undefined {
+    if (!this.conn || !this.localIdentity) return undefined;
+
+    for (const row of this.conn.db.player.iter()) {
+      const player = row as any;
+      if (player.identity.toHexString() !== this.localIdentity) continue;
+      const profileId = Number(player.profileId);
+      return Number.isFinite(profileId) ? profileId : undefined;
+    }
+
+    return undefined;
+  }
+
   private applyLoadoutRow(row: any): void {
-    if (!this.username) return;
-    if (row.username !== this.username) return;
+    const localProfileId = this.getLocalProfileId();
+    if (localProfileId === undefined) return;
+    if (Number(row.profileId) !== localProfileId) return;
 
     const slot1 = Number(row.slot1);
     const slot2 = Number(row.slot2);
@@ -1450,16 +1762,22 @@ export class Engine {
 
   /** Apply local camera feedback from explosions based on proximity and blast strength */
   applyExplosionCameraEffects(
-    cx: number, cy: number, cz: number,
-    radius: number, damage: number,
+    cx: number,
+    cy: number,
+    cz: number,
+    radius: number,
+    damage: number,
   ): void {
     this.infantryFire.applyExplosionCameraEffects(cx, cy, cz, radius, damage);
   }
 
   /** Apply explosion knockback to the local player based on distance from blast center */
   private applyExplosionKnockback(
-    cx: number, cy: number, cz: number,
-    radius: number, damage: number,
+    cx: number,
+    cy: number,
+    cz: number,
+    radius: number,
+    damage: number,
   ): void {
     this.infantryFire.applyExplosionKnockback(cx, cy, cz, radius, damage);
   }
@@ -1512,7 +1830,9 @@ export class Engine {
 
     // New chunks arriving (lazy generation or subscription change)
     this.conn.db.world_chunk.onInsert((_ctx: unknown, chunk: any) => {
-      const cx = chunk.cx as number, cy = chunk.cy as number, cz = chunk.cz as number;
+      const cx = chunk.cx as number,
+        cy = chunk.cy as number,
+        cz = chunk.cz as number;
       const id = packChunkId(cx, cy, cz);
 
       // Skip chunks that are far from the player (triggered by other players' requests)
@@ -1525,11 +1845,20 @@ export class Engine {
         return;
       }
 
-      const data = chunk.data instanceof Uint8Array ? chunk.data : new Uint8Array(chunk.data);
+      const data =
+        chunk.data instanceof Uint8Array
+          ? chunk.data
+          : new Uint8Array(chunk.data);
       const decoded = VoxelWorld.rleDecodeChunk(data);
       this.world.loadChunk(cx, cy, cz, decoded);
       this.vehicleManager.reconcileCollisionPendingForChunk(cx, cy, cz);
-      this.lanterns.syncLanternLightsForChunk(cx, cy, cz, this.getLanternContext(), decoded);
+      this.lanterns.syncLanternLightsForChunk(
+        cx,
+        cy,
+        cz,
+        this.getLanternContext(),
+        decoded,
+      );
       this.audio.sendChunkToWorker(id, decoded);
       this.chunkStreamer.pendingChunkRequests.delete(id);
       this.chunkStreamer.queuedChunkRequests.delete(id);
@@ -1538,7 +1867,9 @@ export class Engine {
 
     // Chunk deletion (map reset)
     this.conn.db.world_chunk.onDelete((_ctx: unknown, chunk: any) => {
-      const cx = chunk.cx as number, cy = chunk.cy as number, cz = chunk.cz as number;
+      const cx = chunk.cx as number,
+        cy = chunk.cy as number,
+        cz = chunk.cz as number;
       const id = packChunkId(cx, cy, cz);
       this.chunkStreamer.pendingChunkRequests.delete(id);
       this.chunkStreamer.queuedChunkRequests.delete(id);
@@ -1549,52 +1880,71 @@ export class Engine {
     });
 
     // World chunk updates (block destruction synced via chunk data)
-    this.conn.db.world_chunk.onUpdate((_ctx: unknown, old: unknown, chunk: any) => {
-      const cx = chunk.cx as number, cy = chunk.cy as number, cz = chunk.cz as number;
-      const id = packChunkId(cx, cy, cz);
+    this.conn.db.world_chunk.onUpdate(
+      (_ctx: unknown, old: unknown, chunk: any) => {
+        const cx = chunk.cx as number,
+          cy = chunk.cy as number,
+          cz = chunk.cz as number;
+        const id = packChunkId(cx, cy, cz);
 
-      const [anchorCx, anchorCz] = this.chunkStreamer.getLoadAnchorChunk();
-      const dx = cx - anchorCx;
-      const dz = cz - anchorCz;
-      const chunkIsNear = dx * dx + dz * dz <= ACTIVE_CHUNK_RADIUS * ACTIVE_CHUNK_RADIUS;
-      if (!chunkIsNear && !this.world.isChunkLoaded(cx, cy, cz)) {
-        this.chunkStreamer.pendingChunkRequests.delete(id);
-        return;
-      }
+        const [anchorCx, anchorCz] = this.chunkStreamer.getLoadAnchorChunk();
+        const dx = cx - anchorCx;
+        const dz = cz - anchorCz;
+        const chunkIsNear =
+          dx * dx + dz * dz <= ACTIVE_CHUNK_RADIUS * ACTIVE_CHUNK_RADIUS;
+        if (!chunkIsNear && !this.world.isChunkLoaded(cx, cy, cz)) {
+          this.chunkStreamer.pendingChunkRequests.delete(id);
+          return;
+        }
 
-      const newData = chunk.data instanceof Uint8Array ? chunk.data : new Uint8Array(chunk.data);
-      const newDecoded = VoxelWorld.rleDecodeChunk(newData);
+        const newData =
+          chunk.data instanceof Uint8Array
+            ? chunk.data
+            : new Uint8Array(chunk.data);
+        const newDecoded = VoxelWorld.rleDecodeChunk(newData);
 
-      // Decode old chunk to find which blocks changed from solid→air
-      const oldChunk = old as any;
-      const oldData = oldChunk.data instanceof Uint8Array ? oldChunk.data : new Uint8Array(oldChunk.data);
-      const oldDecoded = VoxelWorld.rleDecodeChunk(oldData);
+        // Decode old chunk to find which blocks changed from solid→air
+        const oldChunk = old as any;
+        const oldData =
+          oldChunk.data instanceof Uint8Array
+            ? oldChunk.data
+            : new Uint8Array(oldChunk.data);
+        const oldDecoded = VoxelWorld.rleDecodeChunk(oldData);
 
-      for (let lz = 0; lz < 16; lz++) {
-        for (let ly = 0; ly < 16; ly++) {
-          for (let lx = 0; lx < 16; lx++) {
-            const localIdx = lx + ly * 16 + lz * 16 * 16;
-            if (oldDecoded[localIdx] !== 0 && newDecoded[localIdx] === 0) {
-              const gx = cx * 16 + lx, gy = cy * 16 + ly, gz = cz * 16 + lz;
-              const key = `${gx},${gy},${gz}`;
-              // Only emit VFX if this wasn't a client-predicted destruction
-              if (!this.weapons.isPendingDestruction(key)) {
-                this.vfx.emitImpact(gx, gy, gz);
+        for (let lz = 0; lz < 16; lz++) {
+          for (let ly = 0; ly < 16; ly++) {
+            for (let lx = 0; lx < 16; lx++) {
+              const localIdx = lx + ly * 16 + lz * 16 * 16;
+              if (oldDecoded[localIdx] !== 0 && newDecoded[localIdx] === 0) {
+                const gx = cx * 16 + lx,
+                  gy = cy * 16 + ly,
+                  gz = cz * 16 + lz;
+                const key = `${gx},${gy},${gz}`;
+                // Only emit VFX if this wasn't a client-predicted destruction
+                if (!this.weapons.isPendingDestruction(key)) {
+                  this.vfx.emitImpact(gx, gy, gz);
+                }
+                this.weapons.confirmDestruction(key);
               }
-              this.weapons.confirmDestruction(key);
             }
           }
         }
-      }
 
-      // Apply authoritative chunk data (naturally corrects any rejected predictions)
-      this.world.loadChunk(cx, cy, cz, newDecoded);
-      // Reconcile collision-pending blocks so prediction reads authoritative voxel data
-      this.vehicleManager.reconcileCollisionPendingForChunk(cx, cy, cz);
-      this.lanterns.syncLanternLightsForChunk(cx, cy, cz, this.getLanternContext(), newDecoded);
-      this.audio.sendChunkToWorker(id, newDecoded);
-      this.chunkStreamer.pendingChunkRequests.delete(id);
-    });
+        // Apply authoritative chunk data (naturally corrects any rejected predictions)
+        this.world.loadChunk(cx, cy, cz, newDecoded);
+        // Reconcile collision-pending blocks so prediction reads authoritative voxel data
+        this.vehicleManager.reconcileCollisionPendingForChunk(cx, cy, cz);
+        this.lanterns.syncLanternLightsForChunk(
+          cx,
+          cy,
+          cz,
+          this.getLanternContext(),
+          newDecoded,
+        );
+        this.audio.sendChunkToWorker(id, newDecoded);
+        this.chunkStreamer.pendingChunkRequests.delete(id);
+      },
+    );
   }
 
   private setupStructuralListeners(): void {
@@ -1602,9 +1952,10 @@ export class Engine {
 
     // DetachEvent: server-authoritative structural collapse → spawn falling blocks
     this.conn.db.detach_event.onInsert((_ctx: unknown, event: any) => {
-      const createdAtMs = (event.createdAt && typeof event.createdAt.toMillis === 'function')
-        ? Number(event.createdAt.toMillis())
-        : Date.now();
+      const createdAtMs =
+        event.createdAt && typeof event.createdAt.toMillis === "function"
+          ? Number(event.createdAt.toMillis())
+          : Date.now();
 
       this.physics.spawnFromDetachEvent({
         eventId: Number(event.id ?? 0),
@@ -1652,127 +2003,153 @@ export class Engine {
     if (!this.conn) return;
 
     // Player tracking
-    this.conn.db.player.onUpdate((_ctx: unknown, _old: unknown, player: any) => {
-      const id = player.identity.toHexString();
+    this.conn.db.player.onUpdate(
+      (_ctx: unknown, _old: unknown, player: any) => {
+        const id = player.identity.toHexString();
 
-      if (this.localIdentity && id === this.localIdentity) {
-        const wasMounted = this.mountedVehicleId !== 0;
-        const serverWeapon = Number(player.currentWeapon);
-        const localSwitchAgeMs = performance.now() - this.lastLocalWeaponSwitchAt;
-        if (
-          Number.isInteger(serverWeapon)
-          && localSwitchAgeMs > 180
-          && this.weapons.setCurrentWeapon(serverWeapon)
-        ) {
-          this.weaponModel.switchWeapon(serverWeapon);
-          this.lastWeaponIndex = serverWeapon;
-        }
-
-        // Server reconciliation for local player:
-        // When MOUNTED: camera is driven by vehicle mesh in syncMountedCameraToVehicle.
-        //   Do NOT move camera here.  player.pos is the seat position which is
-        //   always ~15u from the 3rd-person camera — comparing would be meaningless.
-        // When INFANTRY: client is authoritative.  Only teleport on respawn-level
-        //   jumps (> 100u).
-        const sp = player.pos;
-        const isMountedNow = Number(player.mountedVehicleId ?? 0) !== 0;
-        if (!isMountedNow) {
-          const cp = this.camera.position;
-          const tdx = sp.x - cp.x, tdy = sp.y - cp.y, tdz = sp.z - cp.z;
-          const echoDsq = tdx * tdx + tdy * tdy + tdz * tdz;
-          this.netDiag.recordServerEcho(sp, { x: cp.x, y: cp.y, z: cp.z });
-          if (echoDsq > 10000) {
-            // > 100u: respawn, map reset, admin teleport
-            this.netDiag.recordTeleport(sp, { x: cp.x, y: cp.y, z: cp.z });
-            this.camera.position.set(sp.x, sp.y, sp.z);
-            this.controls.resetVelocity();
+        if (this.localIdentity && id === this.localIdentity) {
+          const wasMounted = this.mountedVehicleId !== 0;
+          const serverWeapon = Number(player.currentWeapon);
+          const localSwitchAgeMs =
+            performance.now() - this.lastLocalWeaponSwitchAt;
+          if (
+            Number.isInteger(serverWeapon) &&
+            localSwitchAgeMs > 180 &&
+            this.weapons.setCurrentWeapon(serverWeapon)
+          ) {
+            this.weaponModel.switchWeapon(serverWeapon);
+            this.lastWeaponIndex = serverWeapon;
           }
-        }
 
-        const oldHealth = this.health;
-        this.health = player.health;
-        this.kills = player.kills;
-        this.deaths = player.deaths;
-        this.mountedVehicleId = Number(player.mountedVehicleId ?? 0);
-        if (wasMounted !== (this.mountedVehicleId !== 0)) {
-          this.vehicleManager.resetLocalPilotSmoothing();
-          if (this.mountedVehicleId !== 0) {
-            const pose = this.vehicleManager.getMountedVehiclePose();
-            if (pose) {
-              this.vehicleManager.vehiclePilotYaw = pose.yaw;
-              this.vehicleManager.vehiclePilotPitch = Math.max(this.vehicleManager.PILOT_PITCH_MIN, Math.min(this.vehicleManager.PILOT_PITCH_MAX, pose.pitch));
-              // Seed dead-reckoning immediately so the first frame doesn't
-              // show a stale/origin position while waiting for entity.onUpdate
-              this.vehicleManager.localLastServerPos.set(pose.x, pose.y, pose.z);
-              this.vehicleManager.localLastServerVel.set(0, 0, 0);
-              this.vehicleManager.localLastServerYaw = pose.yaw;
-              this.vehicleManager.localLastServerPitch = pose.pitch;
-              this.vehicleManager.localLastServerTime = performance.now();
+          // Server reconciliation for local player:
+          // When MOUNTED: camera is driven by vehicle mesh in syncMountedCameraToVehicle.
+          //   Do NOT move camera here.  player.pos is the seat position which is
+          //   always ~15u from the 3rd-person camera — comparing would be meaningless.
+          // When INFANTRY: client is authoritative.  Only teleport on respawn-level
+          //   jumps (> 100u).
+          const sp = player.pos;
+          const isMountedNow = Number(player.mountedVehicleId ?? 0) !== 0;
+          if (!isMountedNow) {
+            const cp = this.camera.position;
+            const tdx = sp.x - cp.x,
+              tdy = sp.y - cp.y,
+              tdz = sp.z - cp.z;
+            const echoDsq = tdx * tdx + tdy * tdy + tdz * tdz;
+            this.netDiag.recordServerEcho(sp, { x: cp.x, y: cp.y, z: cp.z });
+            if (echoDsq > 10000) {
+              // > 100u: respawn, map reset, admin teleport
+              this.netDiag.recordTeleport(sp, { x: cp.x, y: cp.y, z: cp.z });
+              this.camera.position.set(sp.x, sp.y, sp.z);
+              this.controls.resetVelocity();
             }
-            // Reset vehicle weapon state on mount
-            this.vehicleManager.vehicleWeaponIndex = 0;
-            this.vehicleManager.lastVehicleFireAt = 0;
-            this.vehicleManager.vehicleReloadingUntil[0] = 0;
-            this.vehicleManager.vehicleReloadingUntil[1] = 0;
-            this.vehicleManager.vehicleReloadingUntil[2] = 0;
-            this.vehicleManager.vehicleCameraDistance = this.vehicleManager.CAMERA_DISTANCE;
-            const vRow = this.vehicleManager.getVehicleRow(this.mountedVehicleId);
-            // Resolve weapon indices based on vehicle type for correct maxAmmo
-            const wep0Idx = this.vehicleManager.getResolvedWeaponIndexForSlot(0);
-            const wep1Idx = this.vehicleManager.getResolvedWeaponIndexForSlot(1);
-            const wep2Idx = this.vehicleManager.getResolvedWeaponIndexForSlot(2);
-            const maxAmmo0 = VEHICLE_WEAPONS[wep0Idx]?.maxAmmo ?? VEHICLE_WEAPONS[0].maxAmmo;
-            const maxAmmo1 = VEHICLE_WEAPONS[wep1Idx]?.maxAmmo ?? VEHICLE_WEAPONS[1].maxAmmo;
-            const maxAmmo2 = VEHICLE_WEAPONS[wep2Idx]?.maxAmmo ?? 0;
-            if (vRow) {
-              this.vehicleManager.vehicleAmmo[0] = Number(vRow.weaponAmmoPrimary ?? maxAmmo0);
-              this.vehicleManager.vehicleAmmo[1] = Number(vRow.weaponAmmoSecondary ?? maxAmmo1);
-              this.vehicleManager.vehicleAmmo[2] = Number(vRow.weaponAmmoTertiary ?? maxAmmo2);
+          }
+
+          const oldHealth = this.health;
+          this.health = player.health;
+          this.kills = player.kills;
+          this.deaths = player.deaths;
+          this.mountedVehicleId = Number(player.mountedVehicleId ?? 0);
+          if (wasMounted !== (this.mountedVehicleId !== 0)) {
+            this.vehicleManager.resetLocalPilotSmoothing();
+            if (this.mountedVehicleId !== 0) {
+              const pose = this.vehicleManager.getMountedVehiclePose();
+              if (pose) {
+                this.vehicleManager.vehiclePilotYaw = pose.yaw;
+                this.vehicleManager.vehiclePilotPitch = Math.max(
+                  this.vehicleManager.PILOT_PITCH_MIN,
+                  Math.min(this.vehicleManager.PILOT_PITCH_MAX, pose.pitch),
+                );
+                // Seed dead-reckoning immediately so the first frame doesn't
+                // show a stale/origin position while waiting for entity.onUpdate
+                this.vehicleManager.localLastServerPos.set(
+                  pose.x,
+                  pose.y,
+                  pose.z,
+                );
+                this.vehicleManager.localLastServerVel.set(0, 0, 0);
+                this.vehicleManager.localLastServerYaw = pose.yaw;
+                this.vehicleManager.localLastServerPitch = pose.pitch;
+                this.vehicleManager.localLastServerTime = performance.now();
+              }
+              // Reset vehicle weapon state on mount
+              this.vehicleManager.vehicleWeaponIndex = 0;
+              this.vehicleManager.lastVehicleFireAt = 0;
+              this.vehicleManager.vehicleReloadingUntil[0] = 0;
+              this.vehicleManager.vehicleReloadingUntil[1] = 0;
+              this.vehicleManager.vehicleReloadingUntil[2] = 0;
+              this.vehicleManager.vehicleCameraDistance =
+                this.vehicleManager.CAMERA_DISTANCE;
+              const vRow = this.vehicleManager.getVehicleRow(
+                this.mountedVehicleId,
+              );
+              // Resolve weapon indices based on vehicle type for correct maxAmmo
+              const wep0Idx =
+                this.vehicleManager.getResolvedWeaponIndexForSlot(0);
+              const wep1Idx =
+                this.vehicleManager.getResolvedWeaponIndexForSlot(1);
+              const wep2Idx =
+                this.vehicleManager.getResolvedWeaponIndexForSlot(2);
+              const maxAmmo0 =
+                VEHICLE_WEAPONS[wep0Idx]?.maxAmmo ?? VEHICLE_WEAPONS[0].maxAmmo;
+              const maxAmmo1 =
+                VEHICLE_WEAPONS[wep1Idx]?.maxAmmo ?? VEHICLE_WEAPONS[1].maxAmmo;
+              const maxAmmo2 = VEHICLE_WEAPONS[wep2Idx]?.maxAmmo ?? 0;
+              if (vRow) {
+                this.vehicleManager.vehicleAmmo[0] = Number(
+                  vRow.weaponAmmoPrimary ?? maxAmmo0,
+                );
+                this.vehicleManager.vehicleAmmo[1] = Number(
+                  vRow.weaponAmmoSecondary ?? maxAmmo1,
+                );
+                this.vehicleManager.vehicleAmmo[2] = Number(
+                  vRow.weaponAmmoTertiary ?? maxAmmo2,
+                );
+              } else {
+                this.vehicleManager.vehicleAmmo[0] = maxAmmo0;
+                this.vehicleManager.vehicleAmmo[1] = maxAmmo1;
+                this.vehicleManager.vehicleAmmo[2] = maxAmmo2;
+              }
             } else {
-              this.vehicleManager.vehicleAmmo[0] = maxAmmo0;
-              this.vehicleManager.vehicleAmmo[1] = maxAmmo1;
-              this.vehicleManager.vehicleAmmo[2] = maxAmmo2;
+              // Dismounting — snap camera to server player position so infantry
+              // controls start from the correct location (not the 3rd-person offset).
+              this.camera.position.set(sp.x, sp.y, sp.z);
+              this.controls.resetVelocity();
+              this.vehicleManager.jetThrottle = 0;
             }
-          } else {
-            // Dismounting — snap camera to server player position so infantry
-            // controls start from the correct location (not the 3rd-person offset).
-            this.camera.position.set(sp.x, sp.y, sp.z);
-            this.controls.resetVelocity();
-            this.vehicleManager.jetThrottle = 0;
           }
+          if (player.health < oldHealth) {
+            this.triggerDamageIndicator(oldHealth - player.health);
+            const dmgRatio = (oldHealth - player.health) / 100;
+            this.postfx.triggerDamage(0.3 + dmgRatio * 0.7);
+            this.audio.playDamage(this.localAudioSource(-0.2));
+            this.vfx.shake(0.5 + dmgRatio);
+          }
+          // Respawn: health went from 0 to positive — play respawn audio
+          if (oldHealth <= 0 && player.health > 0) {
+            this.audio.playRespawn(this.localAudioSource(-0.2));
+            this.recentDamageSources.length = 0;
+            this.damageIndicators.length = 0;
+          }
+          return;
         }
-        if (player.health < oldHealth) {
-          this.triggerDamageIndicator(oldHealth - player.health);
-          const dmgRatio = (oldHealth - player.health) / 100;
-          this.postfx.triggerDamage(0.3 + dmgRatio * 0.7);
-          this.audio.playDamage(this.localAudioSource(-0.2));
-          this.vfx.shake(0.5 + dmgRatio);
-        }
-        // Respawn: health went from 0 to positive — play respawn audio
-        if (oldHealth <= 0 && player.health > 0) {
-          this.audio.playRespawn(this.localAudioSource(-0.2));
-          this.recentDamageSources.length = 0;
-          this.damageIndicators.length = 0;
-        }
-        return;
-      }
 
-      if (this.remotePlayers.shouldRenderRemotePlayer(player)) {
-        const pvel = player.vel || { x: 0, y: 0, z: 0 };
-        this.remotePlayers.updateOtherPlayer(
-          id,
-          player.pos,
-          pvel,
-          player.rot,
-          player.username,
-          Number(player.characterPreset ?? 0),
-          Number(player.currentWeapon ?? 0),
-          Number(player.movementFlags ?? 0),
-        );
-      } else {
-        this.remotePlayers.removeOtherPlayer(id);
-      }
-    });
+        if (this.remotePlayers.shouldRenderRemotePlayer(player)) {
+          const pvel = player.vel || { x: 0, y: 0, z: 0 };
+          this.remotePlayers.updateOtherPlayer(
+            id,
+            player.pos,
+            pvel,
+            player.rot,
+            player.username,
+            Number(player.characterPreset ?? 0),
+            Number(player.currentWeapon ?? 0),
+            Number(player.movementFlags ?? 0),
+          );
+        } else {
+          this.remotePlayers.removeOtherPlayer(id);
+        }
+      },
+    );
 
     this.conn.db.player.onInsert((_ctx: unknown, player: any) => {
       const id = player.identity.toHexString();
@@ -1825,21 +2202,32 @@ export class Engine {
       const shooterId = shot.shooter.toHexString();
 
       const weaponIdx = shot.weapon as number;
-      const origin = new THREE.Vector3(shot.origin.x, shot.origin.y, shot.origin.z);
-      const dir = new THREE.Vector3(shot.direction.x, shot.direction.y, shot.direction.z);
+      const origin = new THREE.Vector3(
+        shot.origin.x,
+        shot.origin.y,
+        shot.origin.z,
+      );
+      const dir = new THREE.Vector3(
+        shot.direction.x,
+        shot.direction.y,
+        shot.direction.z,
+      );
       let shotEventId = 0n;
-      if (typeof shot.id === 'bigint') {
+      if (typeof shot.id === "bigint") {
         shotEventId = shot.id;
-      } else if (typeof shot.id === 'number' && Number.isFinite(shot.id)) {
+      } else if (typeof shot.id === "number" && Number.isFinite(shot.id)) {
         shotEventId = BigInt(Math.trunc(shot.id));
       }
       const sourceVehicleId = Number(shot.sourceVehicle ?? 0);
       const firedAt = shot.firedAt;
       let firedAtPerf: number | null = null;
-      if (firedAt && typeof firedAt.toMillis === 'function') {
+      if (firedAt && typeof firedAt.toMillis === "function") {
         const firedAtMs = Number(firedAt.toMillis());
         if (Number.isFinite(firedAtMs)) {
-          const approxAgeMs = Math.max(0, Math.min(3000, Date.now() - firedAtMs));
+          const approxAgeMs = Math.max(
+            0,
+            Math.min(3000, Date.now() - firedAtMs),
+          );
           firedAtPerf = performance.now() - approxAgeMs;
         }
       }
@@ -1860,7 +2248,12 @@ export class Engine {
           }
         } else {
           const w = WEAPONS[weaponIdx];
-          if (w && weaponIdx !== 4 && isFinite(w.projectile.speed) && shotEventId !== 0n) {
+          if (
+            w &&
+            weaponIdx !== 4 &&
+            isFinite(w.projectile.speed) &&
+            shotEventId !== 0n
+          ) {
             this.projectileManager.linkLocalShotEventId(
               shotEventId,
               weaponIdx,
@@ -1903,23 +2296,42 @@ export class Engine {
             0,
           );
           // Muzzle flash at launch point (color varies by weapon)
-          const flashColor = vehWeaponIdx === 6 ? 0x00ccff : vehWeaponIdx === 2 ? 0xff2200 : vehWeaponIdx === 3 ? 0xff6600 : vehWeaponIdx === 4 ? 0xffdd33 : 0xff4400;
+          const flashColor =
+            vehWeaponIdx === 6
+              ? 0x00ccff
+              : vehWeaponIdx === 2
+                ? 0xff2200
+                : vehWeaponIdx === 3
+                  ? 0xff6600
+                  : vehWeaponIdx === 4
+                    ? 0xffdd33
+                    : 0xff4400;
           this.vfx.emitMuzzleFlashAt(origin, dir, flashColor);
         } else if (vehWeaponIdx === 2) {
           // Kinetic penetrator is a dedicated jet strike, not a minigun tracer.
           const hasHit = shot.hasHit as boolean;
           const hitPos = shot.hitPos;
-          const end = hasHit && hitPos
-            ? new THREE.Vector3(hitPos.x + 0.5, hitPos.y + 0.5, hitPos.z + 0.5)
-            : origin.clone().add(dir.clone().normalize().multiplyScalar(vw.maxRange));
+          const end =
+            hasHit && hitPos
+              ? new THREE.Vector3(
+                  hitPos.x + 0.5,
+                  hitPos.y + 0.5,
+                  hitPos.z + 0.5,
+                )
+              : origin
+                  .clone()
+                  .add(dir.clone().normalize().multiplyScalar(vw.maxRange));
           this.vfx.emitKineticBeam(origin, end);
         } else {
           // Hitscan (minigun): tracer + muzzle flash + impact
           const hasHit = shot.hasHit as boolean;
           const hitPos = shot.hitPos;
-          const end = hasHit && hitPos
-            ? new THREE.Vector3(hitPos.x, hitPos.y, hitPos.z)
-            : origin.clone().add(dir.clone().normalize().multiplyScalar(vw.maxRange));
+          const end =
+            hasHit && hitPos
+              ? new THREE.Vector3(hitPos.x, hitPos.y, hitPos.z)
+              : origin
+                  .clone()
+                  .add(dir.clone().normalize().multiplyScalar(vw.maxRange));
           this.vfx.emitTracer(origin, end, 0xffaa00);
           this.vfx.emitMuzzleFlashAt(origin, dir, 0xffaa00);
 
@@ -1963,10 +2375,17 @@ export class Engine {
         // Hitscan: render instant tracer + impact VFX at hit position
         const hasHit = shot.hasHit as boolean;
         const hitPos = shot.hitPos;
-        const end = hasHit && hitPos
-          ? new THREE.Vector3(hitPos.x, hitPos.y, hitPos.z)
-          : origin.clone().add(dir.clone().normalize().multiplyScalar(w.range));
-        this.vfx.emitTracer(origin, end, parseInt(w.color.replace('#', ''), 16));
+        const end =
+          hasHit && hitPos
+            ? new THREE.Vector3(hitPos.x, hitPos.y, hitPos.z)
+            : origin
+                .clone()
+                .add(dir.clone().normalize().multiplyScalar(w.range));
+        this.vfx.emitTracer(
+          origin,
+          end,
+          parseInt(w.color.replace("#", ""), 16),
+        );
 
         if (hasHit && hitPos) {
           this.vfx.emitImpact(hitPos.x, hitPos.y, hitPos.z);
@@ -1994,7 +2413,12 @@ export class Engine {
         const weaponIdx = explosion.weapon as number;
 
         // Remove corresponding remote projectile when authoritative impact arrives.
-        this.projectileManager.resolveRemoteImpact(originId, weaponIdx, { x, y, z }, radius);
+        this.projectileManager.resolveRemoteImpact(
+          originId,
+          weaponIdx,
+          { x, y, z },
+          radius,
+        );
 
         // Skip if we are the originator (we already played local VFX) —
         // EXCEPT for grenades (weapon 4) which are server-authoritative and have no local VFX
@@ -2058,7 +2482,8 @@ export class Engine {
       });
       db.entity.onDelete((_ctx: unknown, entity: any) => {
         const id = Number(entity.id);
-        if (Number(entity.kind) !== ENTITY_KIND_VEHICLE || !Number.isFinite(id)) return;
+        if (Number(entity.kind) !== ENTITY_KIND_VEHICLE || !Number.isFinite(id))
+          return;
         if (performance.now() < this.vehicleManager.suppressDeleteFxUntil) {
           this.vehicleManager.removeVehicleMesh(id);
           return;
@@ -2072,7 +2497,11 @@ export class Engine {
       const refresh = (_ctx: unknown, row: any) => {
         const id = Number(row.entityId);
         const entity = this.vehicleManager.findEntityRow(id);
-        if (entity && Number(entity.kind) === ENTITY_KIND_VEHICLE && id === this.mountedVehicleId) {
+        if (
+          entity &&
+          Number(entity.kind) === ENTITY_KIND_VEHICLE &&
+          id === this.mountedVehicleId
+        ) {
           // Reconcile local mounted vehicle on vehicle stream so ackedInputSeq
           // and pose are read coherently from the same server tick.
           this.vehicleManager.updateVehicleEntity(entity, true);
@@ -2098,11 +2527,16 @@ export class Engine {
         const entityId = Number(event.entityId);
         if (!Number.isFinite(entityId) || entityId <= 0) return;
 
-        this.vehicleManager.triggerDestroyFx(entityId, {
-          x: Number(event.pos.x),
-          y: Number(event.pos.y),
-          z: Number(event.pos.z),
-        }, Number(event.rot?.yaw ?? 0), 1.4);
+        this.vehicleManager.triggerDestroyFx(
+          entityId,
+          {
+            x: Number(event.pos.x),
+            y: Number(event.pos.y),
+            z: Number(event.pos.z),
+          },
+          Number(event.rot?.yaw ?? 0),
+          1.4,
+        );
       });
     }
   }
@@ -2112,9 +2546,11 @@ export class Engine {
     const db = this.conn.db as any;
 
     if (db.world_environment) {
-      db.world_environment.onUpdate((_ctx: unknown, _old: unknown, env: any) => {
-        this.applyEnvironmentUpdate(env);
-      });
+      db.world_environment.onUpdate(
+        (_ctx: unknown, _old: unknown, env: any) => {
+          this.applyEnvironmentUpdate(env);
+        },
+      );
       db.world_environment.onInsert((_ctx: unknown, env: any) => {
         this.applyEnvironmentUpdate(env);
       });
@@ -2133,7 +2569,8 @@ export class Engine {
 
         // ── Vehicles: suppress VFX, remove meshes, clear breakup pieces ──
         this.vehicleManager.suppressDeleteFxUntil = performance.now() + 1500;
-        for (const id of Array.from(this.vehicleManager.vehicles.keys())) this.vehicleManager.removeVehicleMesh(id);
+        for (const id of Array.from(this.vehicleManager.vehicles.keys()))
+          this.vehicleManager.removeVehicleMesh(id);
         for (const piece of this.vehicleManager.vehicleBreakupPieces) {
           this.scene.remove(piece.mesh);
           piece.mesh.geometry.dispose();
@@ -2159,7 +2596,8 @@ export class Engine {
           this.vehicleManager.vehicleReloadingUntil[0] = 0;
           this.vehicleManager.vehicleReloadingUntil[1] = 0;
           this.vehicleManager.vehicleReloadingUntil[2] = 0;
-          this.vehicleManager.vehicleCameraDistance = this.vehicleManager.CAMERA_DISTANCE;
+          this.vehicleManager.vehicleCameraDistance =
+            this.vehicleManager.CAMERA_DISTANCE;
           this.vehicleManager.jetThrottle = 0;
           this.vehicleManager.carpetBombSide = 1;
         }
@@ -2212,7 +2650,7 @@ export class Engine {
 
         // ── HUD state ──
         this.hitMarkerTimer = 0;
-        this.hitMarkerType = 'none';
+        this.hitMarkerType = "none";
         this.prevKills = 0;
         this.prevDeaths = 0;
         this.health = 100;
@@ -2235,9 +2673,11 @@ export class Engine {
     this.conn.db.player_ammo.onInsert((_ctx: unknown, row: any) => {
       this.syncAmmoRow(row);
     });
-    this.conn.db.player_ammo.onUpdate((_ctx: unknown, _old: unknown, row: any) => {
-      this.syncAmmoRow(row);
-    });
+    this.conn.db.player_ammo.onUpdate(
+      (_ctx: unknown, _old: unknown, row: any) => {
+        this.syncAmmoRow(row);
+      },
+    );
 
     // Persistent loadout sync
     if (db.player_loadout) {
@@ -2279,7 +2719,11 @@ export class Engine {
 
         let light: THREE.PointLight | null = null;
         if (cfg.lightIntensity > 0) {
-          light = new THREE.PointLight(cfg.lightColor, cfg.lightIntensity, cfg.lightRange);
+          light = new THREE.PointLight(
+            cfg.lightColor,
+            cfg.lightIntensity,
+            cfg.lightRange,
+          );
           light.position.copy(mesh.position);
           this.scene.add(light);
         }
@@ -2334,7 +2778,11 @@ export class Engine {
 
         let light: THREE.PointLight | null = null;
         if (cfg.lightIntensity > 0) {
-          light = new THREE.PointLight(cfg.lightColor, cfg.lightIntensity, cfg.lightRange);
+          light = new THREE.PointLight(
+            cfg.lightColor,
+            cfg.lightIntensity,
+            cfg.lightRange,
+          );
           light.position.copy(mesh.position);
           this.scene.add(light);
         }
@@ -2357,13 +2805,25 @@ export class Engine {
     const pickupTable = (this.conn.db as any).ability_pickup;
     if (pickupTable) {
       pickupTable.onInsert((_ctx: unknown, p: any) => {
-        this.abilityPickups.addPickup(BigInt(p.id), p.abilityType, p.pos.x, p.pos.y, p.pos.z);
+        this.abilityPickups.addPickup(
+          BigInt(p.id),
+          p.abilityType,
+          p.pos.x,
+          p.pos.y,
+          p.pos.z,
+        );
         if (!p.active) this.abilityPickups.setActive(BigInt(p.id), false);
       });
       pickupTable.onUpdate((_ctx: unknown, _old: any, p: any) => {
         const id = BigInt(p.id);
-        if (!this.abilityPickups['pickups'].has(id)) {
-          this.abilityPickups.addPickup(id, p.abilityType, p.pos.x, p.pos.y, p.pos.z);
+        if (!this.abilityPickups["pickups"].has(id)) {
+          this.abilityPickups.addPickup(
+            id,
+            p.abilityType,
+            p.pos.x,
+            p.pos.y,
+            p.pos.z,
+          );
         }
         this.abilityPickups.setActive(id, p.active);
       });
@@ -2372,7 +2832,13 @@ export class Engine {
       });
       // Bootstrap existing pickups
       for (const p of pickupTable.iter()) {
-        this.abilityPickups.addPickup(BigInt(p.id), p.abilityType, p.pos.x, p.pos.y, p.pos.z);
+        this.abilityPickups.addPickup(
+          BigInt(p.id),
+          p.abilityType,
+          p.pos.x,
+          p.pos.y,
+          p.pos.z,
+        );
         if (!p.active) this.abilityPickups.setActive(BigInt(p.id), false);
       }
     }
@@ -2402,15 +2868,24 @@ export class Engine {
   /** Update local ammo from a single PlayerAmmo row */
   private syncAmmoRow(row: any): void {
     if (!this.conn) return;
-    if (!this.localIdentity || row.identity.toHexString() !== this.localIdentity) return;
+    if (
+      !this.localIdentity ||
+      row.identity.toHexString() !== this.localIdentity
+    )
+      return;
     const idx = row.weaponIndex;
     if (idx >= 0 && idx < WEAPONS.length) {
       this.weapons.setAmmo(idx, row.ammo);
     }
   }
 
-  spawnPredictedGrenade(origin: THREE.Vector3, direction: THREE.Vector3): boolean {
-    if (this.predictedGrenadeGhosts.length >= this.MAX_PREDICTED_GRENADE_GHOSTS) {
+  spawnPredictedGrenade(
+    origin: THREE.Vector3,
+    direction: THREE.Vector3,
+  ): boolean {
+    if (
+      this.predictedGrenadeGhosts.length >= this.MAX_PREDICTED_GRENADE_GHOSTS
+    ) {
       const oldest = this.predictedGrenadeGhosts.shift();
       if (oldest) {
         this.scene.remove(oldest.mesh);
@@ -2425,7 +2900,11 @@ export class Engine {
 
     const cfg = WEAPONS[4].projectile;
     const dir = direction.clone().normalize();
-    if (!Number.isFinite(dir.x) || !Number.isFinite(dir.y) || !Number.isFinite(dir.z)) {
+    if (
+      !Number.isFinite(dir.x) ||
+      !Number.isFinite(dir.y) ||
+      !Number.isFinite(dir.z)
+    ) {
       return false;
     }
 
@@ -2438,7 +2917,11 @@ export class Engine {
 
     let light: THREE.PointLight | null = null;
     if (cfg.lightIntensity > 0) {
-      light = new THREE.PointLight(cfg.lightColor, cfg.lightIntensity, cfg.lightRange);
+      light = new THREE.PointLight(
+        cfg.lightColor,
+        cfg.lightIntensity,
+        cfg.lightRange,
+      );
       light.position.copy(origin);
       this.scene.add(light);
     }
@@ -2457,7 +2940,10 @@ export class Engine {
     return true;
   }
 
-  private consumePredictedGrenadeGhostNear(serverPos: THREE.Vector3, serverVel: THREE.Vector3): void {
+  private consumePredictedGrenadeGhostNear(
+    serverPos: THREE.Vector3,
+    serverVel: THREE.Vector3,
+  ): void {
     let bestIdx = -1;
     let bestScore = Number.POSITIVE_INFINITY;
 
@@ -2520,7 +3006,12 @@ export class Engine {
         ghost.trailTimer += delta;
         if (ghost.trailTimer >= 0.35 / speed) {
           ghost.trailTimer = 0;
-          this.vfx.emitProjectileTrail(ghost.pos.x, ghost.pos.y, ghost.pos.z, cfg.trailColor);
+          this.vfx.emitProjectileTrail(
+            ghost.pos.x,
+            ghost.pos.y,
+            ghost.pos.z,
+            cfg.trailColor,
+          );
         }
       }
     }
@@ -2552,9 +3043,10 @@ export class Engine {
     //   Active infantry: 33ms (~30Hz)
     //   Idle infantry: 100ms (~10Hz)
     const vel = this.controls.getVelocity();
-    const isActive = this.controls.horizontalSpeed > 0.5
-      || Math.abs(vel.y) > 0.5
-      || this.mouseDown;
+    const isActive =
+      this.controls.horizontalSpeed > 0.5 ||
+      Math.abs(vel.y) > 0.5 ||
+      this.mouseDown;
     const interval = isMounted ? 100 : isActive ? 33 : 100;
     if (!force && now - this.lastPositionUpdate < interval) return;
     this.lastPositionUpdate = now;
@@ -2563,9 +3055,14 @@ export class Engine {
     const px = mountedPose ? mountedPose.x : this.camera.position.x;
     const py = mountedPose ? mountedPose.y + 1.8 : this.camera.position.y;
     const pz = mountedPose ? mountedPose.z : this.camera.position.z;
-    const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
-    const sendYaw = this.mountedVehicleId !== 0 ? this.vehicleManager.vehiclePilotYaw : e.y;
-    const sendPitch = this.mountedVehicleId !== 0 ? this.vehicleManager.vehiclePilotPitch : e.x;
+    const e = new THREE.Euler().setFromQuaternion(
+      this.camera.quaternion,
+      "YXZ",
+    );
+    const sendYaw =
+      this.mountedVehicleId !== 0 ? this.vehicleManager.vehiclePilotYaw : e.y;
+    const sendPitch =
+      this.mountedVehicleId !== 0 ? this.vehicleManager.vehiclePilotPitch : e.x;
     const sentPos = {
       x: Math.max(-1, Math.min(WORLD_X + 1, px)),
       y: Math.max(-10, Math.min(100, py)),
@@ -2576,15 +3073,16 @@ export class Engine {
       vel: { x: vel.x, y: vel.y, z: vel.z },
       rot: { yaw: sendYaw, pitch: sendPitch },
       weapon: this.weapons.currentWeapon,
-      movementFlags: this.mountedVehicleId === 0
-        ? buildPlayerMovementFlags({
-          sprinting: this.controls.isSprinting,
-          crouching: this.controls.isCrouching,
-          sliding: this.controls.isSliding,
-          climbing: this.controls.isClimbing,
-          grounded: this.controls.onGround,
-        })
-        : 0,
+      movementFlags:
+        this.mountedVehicleId === 0
+          ? buildPlayerMovementFlags({
+              sprinting: this.controls.isSprinting,
+              crouching: this.controls.isCrouching,
+              sliding: this.controls.isSliding,
+              climbing: this.controls.isClimbing,
+              grounded: this.controls.onGround,
+            })
+          : 0,
     });
     this.netDiag.recordPositionSent(sentPos);
 
@@ -2612,11 +3110,11 @@ export class Engine {
   }
 
   private toU64BigInt(value: unknown): bigint {
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+    if (typeof value === "bigint") return value;
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
       return BigInt(Math.floor(value));
     }
-    if (typeof value === 'string' && /^\d+$/.test(value)) {
+    if (typeof value === "string" && /^\d+$/.test(value)) {
       return BigInt(value);
     }
     return 0n;
@@ -2641,7 +3139,8 @@ export class Engine {
     this.fpsTime += delta;
     if (this.fpsTime >= 0.5) {
       this.currentFps = Math.round(this.frameCount / this.fpsTime);
-      this.frameCount = 0; this.fpsTime = 0;
+      this.frameCount = 0;
+      this.fpsTime = 0;
     }
 
     // Net diagnostics frame tracking
@@ -2664,8 +3163,8 @@ export class Engine {
       const sampledSimTick = this.cachedMaxSimTick;
       if (sampledSimTick > 0n) {
         if (
-          this.tpsWindowStartTick === 0n
-          || sampledSimTick < this.tpsWindowStartTick
+          this.tpsWindowStartTick === 0n ||
+          sampledSimTick < this.tpsWindowStartTick
         ) {
           this.tpsWindowStartTick = sampledSimTick;
           this.tpsWindowStartMs = nowMs;
@@ -2674,7 +3173,8 @@ export class Engine {
           const elapsedSec = (nowMs - this.tpsWindowStartMs) / 1000;
           if (elapsedSec >= 0.5) {
             const deltaTicks = sampledSimTick - this.tpsWindowStartTick;
-            this.currentServerTps = elapsedSec > 0 ? Math.round(Number(deltaTicks) / elapsedSec) : 0;
+            this.currentServerTps =
+              elapsedSec > 0 ? Math.round(Number(deltaTicks) / elapsedSec) : 0;
             this.tpsWindowStartTick = sampledSimTick;
             this.tpsWindowStartMs = nowMs;
           }
@@ -2687,13 +3187,20 @@ export class Engine {
     }
 
     const _diagVel = this.controls.getVelocity();
-    this.netDiag.recordSpeed(Math.sqrt(_diagVel.x * _diagVel.x + _diagVel.y * _diagVel.y + _diagVel.z * _diagVel.z));
+    this.netDiag.recordSpeed(
+      Math.sqrt(
+        _diagVel.x * _diagVel.x +
+          _diagVel.y * _diagVel.y +
+          _diagVel.z * _diagVel.z,
+      ),
+    );
 
     this.refreshAdaptiveScaling(delta);
     if (this.netDiag.visible) {
       this.netDiag.recordMountedId(this.mountedVehicleId);
       if (this.mountedVehicleId !== 0) {
-        const staleness = performance.now() - this.vehicleManager.localLastServerTime;
+        const staleness =
+          performance.now() - this.vehicleManager.localLastServerTime;
         this.netDiag.recordVehicleStaleness(staleness);
       }
     }
@@ -2721,7 +3228,11 @@ export class Engine {
 
     // Chunk streaming (every N frames to load quickly)
     this.chunkStreamer.chunkLoadFrame++;
-    if (this.chunkStreamer.chunkLoadFrame % this.currentChunkStreamIntervalFrames === 0) {
+    if (
+      this.chunkStreamer.chunkLoadFrame %
+        this.currentChunkStreamIntervalFrames ===
+      0
+    ) {
       this.chunkStreamer.updateChunkLoading();
     }
 
@@ -2732,7 +3243,9 @@ export class Engine {
     // Vehicle breakup piece physics (delegated to VehicleManager)
     this.vehicleManager.updateBreakupPieces(delta);
 
-    const startupProgress = this.chunkStreamer.startupWorldReady ? 1 : this.chunkStreamer.getStartupLoadProgress();
+    const startupProgress = this.chunkStreamer.startupWorldReady
+      ? 1
+      : this.chunkStreamer.getStartupLoadProgress();
     if (!this.chunkStreamer.startupWorldReady) {
       if (startupProgress > this.chunkStreamer.startupProgressPrev + 0.0005) {
         this.chunkStreamer.startupProgressStallTime = 0;
@@ -2768,11 +3281,19 @@ export class Engine {
       this.camera.position.y,
       this.camera.position.z,
     );
-    const isMoving = this.controls.moveForward || this.controls.moveBackward
-      || this.controls.moveLeft || this.controls.moveRight
-      || this.controls.isSliding || !this.controls.onGround;
-    const maxBuildChunks = isMoving ? this.currentRebuildBudgetMoving : this.currentRebuildBudgetIdle;
-    const maxApplyMs = isMoving ? this.currentMeshApplyBudgetMsMoving : this.currentMeshApplyBudgetMsIdle;
+    const isMoving =
+      this.controls.moveForward ||
+      this.controls.moveBackward ||
+      this.controls.moveLeft ||
+      this.controls.moveRight ||
+      this.controls.isSliding ||
+      !this.controls.onGround;
+    const maxBuildChunks = isMoving
+      ? this.currentRebuildBudgetMoving
+      : this.currentRebuildBudgetIdle;
+    const maxApplyMs = isMoving
+      ? this.currentMeshApplyBudgetMsMoving
+      : this.currentMeshApplyBudgetMsIdle;
     this.world.rebuildDirtyChunks(this.scene, {
       maxChunks: maxBuildChunks,
       maxBuildChunks,
@@ -2829,8 +3350,12 @@ export class Engine {
       if (this.mountedVehicleId === 0) {
         // Apply speed boost from active buffs
         const buffs = this.getActiveBuffs();
-        const hasSpeedBuff = buffs.some(b => b.type === ABILITIES.types.SpeedBoost);
-        this.controls.speedMultiplier = hasSpeedBuff ? ABILITIES.speedBoostMultiplier : 1.0;
+        const hasSpeedBuff = buffs.some(
+          (b) => b.type === ABILITIES.types.SpeedBoost,
+        );
+        this.controls.speedMultiplier = hasSpeedBuff
+          ? ABILITIES.speedBoostMultiplier
+          : 1.0;
         this.controls.update(delta, this.world);
       } else {
         this.controls.resetVelocity();
@@ -2845,15 +3370,23 @@ export class Engine {
     }
 
     this.camera.getWorldDirection(this.audioForward);
-    this.audioUp.set(0, 1, 0).applyQuaternion(this.camera.quaternion).normalize();
-    this.audio.setListenerPose(this.camera.position, this.audioForward, this.audioUp);
+    this.audioUp
+      .set(0, 1, 0)
+      .applyQuaternion(this.camera.quaternion)
+      .normalize();
+    this.audio.setListenerPose(
+      this.camera.position,
+      this.audioForward,
+      this.audioUp,
+    );
     this.audio.updateAcoustics(delta);
 
     // Landing impact effects
     if (this.controls.justLanded) {
       const intensity = this.controls.landingIntensity;
       if (intensity > 0.1) this.vfx.shake(intensity * 0.6);
-      if (intensity > 0.15) this.audio.playLanding(intensity, this.localAudioSource(-1.7));
+      if (intensity > 0.15)
+        this.audio.playLanding(intensity, this.localAudioSource(-1.7));
     }
 
     // Jump sound
@@ -2864,7 +3397,10 @@ export class Engine {
 
     // Footstep sounds
     if (this.controls.stepTriggered) {
-      this.audio.playStep(this.controls.isSprinting, this.localAudioSource(-1.7));
+      this.audio.playStep(
+        this.controls.isSprinting,
+        this.localAudioSource(-1.7),
+      );
     }
 
     // Slide start sound
@@ -2919,24 +3455,39 @@ export class Engine {
         vis.trailTimer += delta;
         if (vis.trailTimer >= 0.35 / speed) {
           vis.trailTimer = 0;
-          this.vfx.emitProjectileTrail(vis.mesh.position.x, vis.mesh.position.y, vis.mesh.position.z, 0x8dff66);
+          this.vfx.emitProjectileTrail(
+            vis.mesh.position.x,
+            vis.mesh.position.y,
+            vis.mesh.position.z,
+            0x8dff66,
+          );
         }
       }
     }
 
     // Sky & environment
     this.sky.update(delta, this.camera.position);
-    this.renderer.toneMappingExposure += (this.sky.getExposure() - this.renderer.toneMappingExposure) * Math.min(1, delta * 2.2);
+    this.renderer.toneMappingExposure +=
+      (this.sky.getExposure() - this.renderer.toneMappingExposure) *
+      Math.min(1, delta * 2.2);
     this.renderer.setClearColor(this.sky.getFogColor());
 
     // VFX
     this.vfx.update(delta);
 
     // Weapon model — pass movement state
-    const moving = this.controls.moveForward || this.controls.moveBackward
-      || this.controls.moveLeft || this.controls.moveRight;
-    this.weaponModel.setMoving(moving, this.controls.isSprinting, this.controls.isCrouching,
-      this.controls.isSliding, this.controls.strafeInput);
+    const moving =
+      this.controls.moveForward ||
+      this.controls.moveBackward ||
+      this.controls.moveLeft ||
+      this.controls.moveRight;
+    this.weaponModel.setMoving(
+      moving,
+      this.controls.isSprinting,
+      this.controls.isCrouching,
+      this.controls.isSliding,
+      this.controls.strafeInput,
+    );
     this.weaponModel.update(delta);
   }
 
@@ -2944,7 +3495,7 @@ export class Engine {
     // Hit marker
     if (this.hitMarkerTimer > 0) {
       this.hitMarkerTimer -= delta;
-      if (this.hitMarkerTimer <= 0) this.hitMarkerType = 'none';
+      if (this.hitMarkerTimer <= 0) this.hitMarkerType = "none";
     }
 
     if (this.damageIndicators.length > 0) {
@@ -3002,7 +3553,7 @@ export class Engine {
 
     // Camera tilt (strafe roll)
     if (Math.abs(this.controls.cameraTiltZ) > 0.0001) {
-      const tiltEuler = new THREE.Euler(0, 0, this.controls.cameraTiltZ, 'YXZ');
+      const tiltEuler = new THREE.Euler(0, 0, this.controls.cameraTiltZ, "YXZ");
       const tiltQuat = new THREE.Quaternion().setFromEuler(tiltEuler);
       this.camera.quaternion.multiply(tiltQuat);
     }
@@ -3010,7 +3561,7 @@ export class Engine {
     // Screen shake
     if (this.vfx.shakeOffsetX !== 0 || this.vfx.shakeOffsetY !== 0) {
       const shakeQuat = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(this.vfx.shakeOffsetX, this.vfx.shakeOffsetY, 0, 'YXZ'),
+        new THREE.Euler(this.vfx.shakeOffsetX, this.vfx.shakeOffsetY, 0, "YXZ"),
       );
       this.camera.quaternion.multiply(shakeQuat);
     }
@@ -3053,12 +3604,19 @@ export class Engine {
       pc = this.cachedPlayerCount;
     }
     // Compute heading from camera yaw (0-360 degrees, 0=North)
-    const camEuler = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ');
+    const camEuler = new THREE.Euler().setFromQuaternion(
+      this.camera.quaternion,
+      "YXZ",
+    );
     const headingRad = camEuler.y;
-    const headingDeg = (((-headingRad * 180 / Math.PI) % 360) + 360) % 360;
+    const headingDeg = ((((-headingRad * 180) / Math.PI) % 360) + 360) % 360;
     const mountedPose = this.vehicleManager.getMountedVehiclePose();
     const vehicleAltitude = mountedPose
-      ? Math.max(0, mountedPose.y - this.getGroundHeight(mountedPose.x, mountedPose.z, mountedPose.y))
+      ? Math.max(
+          0,
+          mountedPose.y -
+            this.getGroundHeight(mountedPose.x, mountedPose.z, mountedPose.y),
+        )
       : 0;
 
     // Vehicle HUD data
@@ -3079,9 +3637,21 @@ export class Engine {
         const serverAmmoPrimary = Number(vRow.weaponAmmoPrimary ?? 0);
         const serverAmmoSecondary = Number(vRow.weaponAmmoSecondary ?? 0);
         const serverAmmoTertiary = Number(vRow.weaponAmmoTertiary ?? 0);
-        if (Number.isFinite(serverAmmoPrimary) && this.vehicleManager.vehicleReloadingUntil[0] <= now) this.vehicleManager.vehicleAmmo[0] = serverAmmoPrimary;
-        if (Number.isFinite(serverAmmoSecondary) && this.vehicleManager.vehicleReloadingUntil[1] <= now) this.vehicleManager.vehicleAmmo[1] = serverAmmoSecondary;
-        if (Number.isFinite(serverAmmoTertiary) && this.vehicleManager.vehicleReloadingUntil[2] <= now) this.vehicleManager.vehicleAmmo[2] = serverAmmoTertiary;
+        if (
+          Number.isFinite(serverAmmoPrimary) &&
+          this.vehicleManager.vehicleReloadingUntil[0] <= now
+        )
+          this.vehicleManager.vehicleAmmo[0] = serverAmmoPrimary;
+        if (
+          Number.isFinite(serverAmmoSecondary) &&
+          this.vehicleManager.vehicleReloadingUntil[1] <= now
+        )
+          this.vehicleManager.vehicleAmmo[1] = serverAmmoSecondary;
+        if (
+          Number.isFinite(serverAmmoTertiary) &&
+          this.vehicleManager.vehicleReloadingUntil[2] <= now
+        )
+          this.vehicleManager.vehicleAmmo[2] = serverAmmoTertiary;
         // Sync weapon type from server
         const serverWeaponType = Number(vRow.weaponType ?? 0);
         if (Number.isFinite(serverWeaponType) && serverWeaponType < 3) {
@@ -3102,17 +3672,24 @@ export class Engine {
       nearVehicleName = nearName;
     }
 
-    const resolvedVehWepIdx = this.vehicleManager.getResolvedVehicleWeaponIndex();
+    const resolvedVehWepIdx =
+      this.vehicleManager.getResolvedVehicleWeaponIndex();
     const curVehWep = VEHICLE_WEAPONS[resolvedVehWepIdx];
 
     this.onStateChange({
       weapon: this.weapons.currentWeapon,
       loadout: this.weapons.loadout,
-      ammo: this.weapons.getAmmo(), maxAmmo: wp.maxAmmo,
-      weaponName: wp.name, weaponColor: wp.color,
-      fps: this.currentFps, serverTps: this.currentServerTps, locked: this.controls.locked,
-      playerCount: pc, health: this.health,
-      kills: this.kills, deaths: this.deaths,
+      ammo: this.weapons.getAmmo(),
+      maxAmmo: wp.maxAmmo,
+      weaponName: wp.name,
+      weaponColor: wp.color,
+      fps: this.currentFps,
+      serverTps: this.currentServerTps,
+      locked: this.controls.locked,
+      playerCount: pc,
+      health: this.health,
+      kills: this.kills,
+      deaths: this.deaths,
       hitMarker: this.hitMarkerTimer > 0,
       hitMarkerType: this.hitMarkerType,
       timeOfDay: this.sky.getTimeString(),
@@ -3121,36 +3698,81 @@ export class Engine {
       isReloading: false,
       worldReady: this.chunkStreamer.startupWorldReady,
       worldLoadProgress: startupProgress,
-      mountedVehicleName: this.mountedVehicleId !== 0 ? (this.vehicleManager.getMountedVehicleName() ?? 'Vehicle') : null,
+      mountedVehicleName:
+        this.mountedVehicleId !== 0
+          ? (this.vehicleManager.getMountedVehicleName() ?? "Vehicle")
+          : null,
       vehicleAltitude: this.mountedVehicleId !== 0 ? vehicleAltitude : 0,
       vehicleHealth,
       vehicleMaxHealth,
       vehicleWeapon: this.vehicleManager.vehicleWeaponIndex,
-      vehicleWeaponName: curVehWep?.name ?? '',
-      vehicleAmmo: this.vehicleManager.vehicleAmmo[this.vehicleManager.vehicleWeaponIndex] ?? 0,
+      vehicleWeaponName: curVehWep?.name ?? "",
+      vehicleAmmo:
+        this.vehicleManager.vehicleAmmo[
+          this.vehicleManager.vehicleWeaponIndex
+        ] ?? 0,
       vehicleMaxAmmo: curVehWep?.maxAmmo ?? 0,
       vehicleSpeed,
       vehicleThrottle: this.vehicleManager.jetThrottle,
-      vehicleReloading: this.mountedVehicleId !== 0 && this.vehicleManager.vehicleReloadingUntil[this.vehicleManager.vehicleWeaponIndex] > performance.now(),
+      vehicleReloading:
+        this.mountedVehicleId !== 0 &&
+        this.vehicleManager.vehicleReloadingUntil[
+          this.vehicleManager.vehicleWeaponIndex
+        ] > performance.now(),
       vehicleWeaponSlots: (() => {
         const mountedType = this.vehicleManager.getMountedVehicleType();
-        const isJet = mountedType?.name === 'Fighter Jet';
+        const isJet = mountedType?.name === "Fighter Jet";
         const isAA = mountedType?.typeId === VEHICLE_TYPES.AntiAir;
         if (isAA) {
           // AA has only 1 weapon slot (CRAM)
-          return [{ name: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.name ?? '', color: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.color ?? '#fff' }];
+          return [
+            {
+              name:
+                VEHICLE_WEAPONS[
+                  this.vehicleManager.getResolvedWeaponIndexForSlot(0)
+                ]?.name ?? "",
+              color:
+                VEHICLE_WEAPONS[
+                  this.vehicleManager.getResolvedWeaponIndexForSlot(0)
+                ]?.color ?? "#fff",
+            },
+          ];
         }
         const slots = [
-          { name: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.name ?? '', color: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(0)]?.color ?? '#fff' },
-          { name: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(1)]?.name ?? '', color: VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(1)]?.color ?? '#fff' },
+          {
+            name:
+              VEHICLE_WEAPONS[
+                this.vehicleManager.getResolvedWeaponIndexForSlot(0)
+              ]?.name ?? "",
+            color:
+              VEHICLE_WEAPONS[
+                this.vehicleManager.getResolvedWeaponIndexForSlot(0)
+              ]?.color ?? "#fff",
+          },
+          {
+            name:
+              VEHICLE_WEAPONS[
+                this.vehicleManager.getResolvedWeaponIndexForSlot(1)
+              ]?.name ?? "",
+            color:
+              VEHICLE_WEAPONS[
+                this.vehicleManager.getResolvedWeaponIndexForSlot(1)
+              ]?.color ?? "#fff",
+          },
         ];
         if (isJet) {
-          const wep2 = VEHICLE_WEAPONS[this.vehicleManager.getResolvedWeaponIndexForSlot(2)];
+          const wep2 =
+            VEHICLE_WEAPONS[
+              this.vehicleManager.getResolvedWeaponIndexForSlot(2)
+            ];
           if (wep2) slots.push({ name: wep2.name, color: wep2.color });
         }
         return slots;
       })(),
-      aaTargets: this.vehicleManager.getAATargets(this.camera, ANTI_AIR.trackingRange),
+      aaTargets: this.vehicleManager.getAATargets(
+        this.camera,
+        ANTI_AIR.trackingRange,
+      ),
       nearVehicle,
       nearVehicleName,
       activeBuffs: this.getActiveBuffs(),
@@ -3159,9 +3781,16 @@ export class Engine {
   }
 
   private getDamageReferencePosition(): THREE.Vector3 {
-    const mountedPose = this.mountedVehicleId !== 0 ? this.vehicleManager.getMountedVehiclePose() : null;
+    const mountedPose =
+      this.mountedVehicleId !== 0
+        ? this.vehicleManager.getMountedVehiclePose()
+        : null;
     if (mountedPose) {
-      return new THREE.Vector3(mountedPose.x, mountedPose.y + 1.5, mountedPose.z);
+      return new THREE.Vector3(
+        mountedPose.x,
+        mountedPose.y + 1.5,
+        mountedPose.z,
+      );
     }
     return this.camera.position.clone();
   }
@@ -3179,7 +3808,9 @@ export class Engine {
 
     let match = 0;
     if (hitPos) {
-      const hitDistance = localPos.distanceTo(new THREE.Vector3(hitPos.x, hitPos.y, hitPos.z));
+      const hitDistance = localPos.distanceTo(
+        new THREE.Vector3(hitPos.x, hitPos.y, hitPos.z),
+      );
       if (hitDistance <= 3.5) {
         match = Math.max(match, 1 - hitDistance / 3.5);
       }
@@ -3189,7 +3820,9 @@ export class Engine {
     const toLocal = localPos.clone().sub(origin);
     const alongRay = toLocal.dot(dirNorm);
     if (alongRay >= -2 && alongRay <= maxRange + 6) {
-      const closestPoint = origin.clone().addScaledVector(dirNorm, Math.max(0, alongRay));
+      const closestPoint = origin
+        .clone()
+        .addScaledVector(dirNorm, Math.max(0, alongRay));
       const missDistance = closestPoint.distanceTo(localPos);
       if (missDistance <= 4) {
         match = Math.max(match, 1 - missDistance / 4);
@@ -3200,7 +3833,12 @@ export class Engine {
     this.rememberDamageSource(origin, timestamp, match, 0.45);
   }
 
-  private registerExplosionDamageCandidate(x: number, y: number, z: number, radius: number): void {
+  private registerExplosionDamageCandidate(
+    x: number,
+    y: number,
+    z: number,
+    radius: number,
+  ): void {
     const localPos = this.getDamageReferencePosition();
     const source = new THREE.Vector3(x, y, z);
     const maxDistance = radius * 4 + 8;
@@ -3245,7 +3883,11 @@ export class Engine {
 
     for (let i = 0; i < this.recentDamageSources.length; i++) {
       const source = this.recentDamageSources[i]!;
-      const freshness = THREE.MathUtils.clamp(1 - (now - source.timestamp) / (source.ttl * 1000), 0, 1);
+      const freshness = THREE.MathUtils.clamp(
+        1 - (now - source.timestamp) / (source.ttl * 1000),
+        0,
+        1,
+      );
       const score = source.match * 0.75 + freshness * 0.25;
       if (score > bestScore) {
         bestScore = score;
@@ -3262,11 +3904,20 @@ export class Engine {
     this.addDamageIndicator(source.position, intensity);
   }
 
-  private addDamageIndicator(sourcePosition: THREE.Vector3, intensity: number): void {
+  private addDamageIndicator(
+    sourcePosition: THREE.Vector3,
+    intensity: number,
+  ): void {
     const localPos = this.getDamageReferencePosition();
-    const targetAngle = this.computeDamageIndicatorAngle(sourcePosition, localPos);
+    const targetAngle = this.computeDamageIndicatorAngle(
+      sourcePosition,
+      localPos,
+    );
     const existing = this.damageIndicators.find((indicator) => {
-      const indicatorAngle = this.computeDamageIndicatorAngle(indicator.sourcePosition, localPos);
+      const indicatorAngle = this.computeDamageIndicatorAngle(
+        indicator.sourcePosition,
+        localPos,
+      );
       return this.getWrappedAngleDelta(indicatorAngle, targetAngle) <= 18;
     });
 
@@ -3290,7 +3941,10 @@ export class Engine {
     }
   }
 
-  private computeDamageIndicatorAngle(sourcePosition: THREE.Vector3, localPos = this.getDamageReferencePosition()): number {
+  private computeDamageIndicatorAngle(
+    sourcePosition: THREE.Vector3,
+    localPos = this.getDamageReferencePosition(),
+  ): number {
     const toSource = sourcePosition.clone().sub(localPos);
     toSource.y = 0;
     if (toSource.lengthSq() <= 0.0001) {
@@ -3305,8 +3959,12 @@ export class Engine {
     } else {
       forward.normalize();
     }
-    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-    return THREE.MathUtils.radToDeg(Math.atan2(toSource.dot(right), toSource.dot(forward)));
+    const right = new THREE.Vector3()
+      .crossVectors(forward, new THREE.Vector3(0, 1, 0))
+      .normalize();
+    return THREE.MathUtils.radToDeg(
+      Math.atan2(toSource.dot(right), toSource.dot(forward)),
+    );
   }
 
   private getWrappedAngleDelta(a: number, b: number): number {
@@ -3319,13 +3977,29 @@ export class Engine {
 
     const localPos = this.getDamageReferencePosition();
     return this.damageIndicators.map((indicator) => {
-      const remaining = THREE.MathUtils.clamp(1 - indicator.age / indicator.lifetime, 0, 1);
-      const pulse = 0.9 + Math.sin((1 - remaining) * Math.PI * 5) * 0.1 * remaining;
+      const remaining = THREE.MathUtils.clamp(
+        1 - indicator.age / indicator.lifetime,
+        0,
+        1,
+      );
+      const pulse =
+        0.9 + Math.sin((1 - remaining) * Math.PI * 5) * 0.1 * remaining;
       return {
         id: indicator.id,
-        angle: this.computeDamageIndicatorAngle(indicator.sourcePosition, localPos),
-        opacity: THREE.MathUtils.clamp(remaining * (0.4 + indicator.intensity * 0.6), 0, 1),
-        intensity: THREE.MathUtils.clamp(indicator.intensity * pulse, 0.45, 1.2),
+        angle: this.computeDamageIndicatorAngle(
+          indicator.sourcePosition,
+          localPos,
+        ),
+        opacity: THREE.MathUtils.clamp(
+          remaining * (0.4 + indicator.intensity * 0.6),
+          0,
+          1,
+        ),
+        intensity: THREE.MathUtils.clamp(
+          indicator.intensity * pulse,
+          0.45,
+          1.2,
+        ),
       };
     });
   }
@@ -3338,9 +4012,10 @@ export class Engine {
     const buffs: ActiveBuff[] = [];
     for (const b of buffTable.iter()) {
       if (b.identity.toHexString() !== this.localIdentity) continue;
-      const expiresMs = (b.expiresAt && typeof b.expiresAt.toMillis === 'function')
-        ? Number(b.expiresAt.toMillis())
-        : Date.now();
+      const expiresMs =
+        b.expiresAt && typeof b.expiresAt.toMillis === "function"
+          ? Number(b.expiresAt.toMillis())
+          : Date.now();
       const remaining = expiresMs - now;
       if (remaining > 0) {
         buffs.push({ type: b.abilityType, remainingMs: remaining });
@@ -3352,7 +4027,8 @@ export class Engine {
   // ── RESIZE ──
 
   private onResize = (): void => {
-    const w = this.container.clientWidth, h = this.container.clientHeight;
+    const w = this.container.clientWidth,
+      h = this.container.clientHeight;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
@@ -3365,13 +4041,13 @@ export class Engine {
     this.setActive(false);
     cancelAnimationFrame(this.animationId);
     this.clock.dispose();
-    this.container.removeEventListener('mousedown', this.onMouseDown);
-    this.container.removeEventListener('mouseup', this.onMouseUp);
-    this.container.removeEventListener('contextmenu', this.onContextMenu);
-    document.removeEventListener('keydown', this.onKeyDown);
-    document.removeEventListener('mousemove', this.onVehicleMouseMove);
-    document.removeEventListener('wheel', this.onVehicleWheel);
-    window.removeEventListener('resize', this.onResize);
+    this.container.removeEventListener("mousedown", this.onMouseDown);
+    this.container.removeEventListener("mouseup", this.onMouseUp);
+    this.container.removeEventListener("contextmenu", this.onContextMenu);
+    document.removeEventListener("keydown", this.onKeyDown);
+    document.removeEventListener("mousemove", this.onVehicleMouseMove);
+    document.removeEventListener("wheel", this.onVehicleWheel);
+    window.removeEventListener("resize", this.onResize);
     this.controls.dispose();
     this.sky.dispose();
     this.abilityPickups.dispose();
@@ -3408,11 +4084,14 @@ export class Engine {
     this.world.dispose(this.scene);
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement) {
-      this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);
+      this.renderer.domElement.parentElement.removeChild(
+        this.renderer.domElement,
+      );
     }
     this.remotePlayers.destroyAll();
     // Clean up vehicle state
-    for (const id of Array.from(this.vehicleManager.vehicles.keys())) this.vehicleManager.removeVehicleMesh(id);
+    for (const id of Array.from(this.vehicleManager.vehicles.keys()))
+      this.vehicleManager.removeVehicleMesh(id);
     for (const piece of this.vehicleManager.vehicleBreakupPieces) {
       this.scene.remove(piece.mesh);
       piece.mesh.geometry.dispose();
@@ -3424,6 +4103,7 @@ export class Engine {
     }
     this.vehicleManager.vehicleBreakupPieces.length = 0;
     this.lanterns.dispose(this.getLanternContext());
-    for (const id of Array.from(this.dynamicLights.keys())) this.removeDynamicLight(id);
+    for (const id of Array.from(this.dynamicLights.keys()))
+      this.removeDynamicLight(id);
   }
 }
