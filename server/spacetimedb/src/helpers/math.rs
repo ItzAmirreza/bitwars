@@ -115,8 +115,8 @@ pub fn block_in_bounds(x: i32, y: i32, z: i32) -> bool {
 }
 
 pub fn get_block_type(ctx: &spacetimedb::ReducerContext, x: i32, y: i32, z: i32) -> Option<u8> {
-    use crate::tables::*;
-    use crate::worldgen::{self, AIR, CHUNK_SIZE};
+    use crate::chunks::get_or_generate_decoded_chunk;
+    use crate::worldgen::{AIR, CHUNK_SIZE};
 
     if !block_in_bounds(x, y, z) {
         return Some(AIR);
@@ -127,10 +127,7 @@ pub fn get_block_type(ctx: &spacetimedb::ReducerContext, x: i32, y: i32, z: i32)
     let cx = (ux / CHUNK_SIZE) as u8;
     let cy = (uy / CHUNK_SIZE) as u8;
     let cz = (uz / CHUNK_SIZE) as u8;
-    let chunk_id = worldgen::pack_chunk_id(cx, cy, cz);
-    let chunk = ctx.db.world_chunk().chunk_id().find(chunk_id)?;
-    let mut decoded = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
-    worldgen::rle_decode(&chunk.data, &mut decoded);
+    let decoded = get_or_generate_decoded_chunk(ctx, cx, cy, cz)?;
     Some(
         decoded[ux % CHUNK_SIZE
             + (uy % CHUNK_SIZE) * CHUNK_SIZE

@@ -321,6 +321,38 @@ fn analyze_component_for_collapse(
     let axis_x = load_dir_z;
     let axis_z = -load_dir_x;
 
+    // Pivot around the loaded outer edge of the remaining support footprint,
+    // not the centroid. This produces a more natural topple angle and avoids
+    // large structures appearing to "hinge in midair".
+    let mut pivot_x = support_x;
+    let mut pivot_z = support_z;
+    let mut pivot_y = support_y;
+    let mut pivot_proj = f32::NEG_INFINITY;
+    for &(sx, sz, sy) in &support_points {
+        let proj = sx * load_dir_x + sz * load_dir_z;
+        pivot_proj = pivot_proj.max(proj);
+        if sy < pivot_y {
+            pivot_y = sy;
+        }
+    }
+
+    let mut edge_count = 0usize;
+    let mut edge_x = 0.0f32;
+    let mut edge_z = 0.0f32;
+    let edge_threshold = 0.55f32;
+    for &(sx, sz, _) in &support_points {
+        let proj = sx * load_dir_x + sz * load_dir_z;
+        if pivot_proj - proj <= edge_threshold {
+            edge_x += sx;
+            edge_z += sz;
+            edge_count += 1;
+        }
+    }
+    if edge_count > 0 {
+        pivot_x = edge_x / edge_count as f32;
+        pivot_z = edge_z / edge_count as f32;
+    }
+
     let collapse_strength = (instability - 0.95).max(0.0);
     let ang_accel = (0.18 + collapse_strength * 0.85 + slenderness * 0.02).min(2.4);
     let initial_ang_vel = (0.03 + overload_ratio * 0.2).min(0.5);
@@ -347,7 +379,7 @@ fn analyze_component_for_collapse(
     Some(StructuralCollapsePlan {
         blocks: component.blocks.clone(),
         motion_mode: 1,
-        pivot: (support_x, support_y, support_z),
+        pivot: (pivot_x, pivot_y, pivot_z),
         axis: (axis_x, 0.0, axis_z),
         drift: (
             load_dir_x * lateral_drift,

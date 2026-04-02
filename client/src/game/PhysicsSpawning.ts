@@ -193,13 +193,16 @@ export function spawnFromDetachEvent(
     const relX = fb.startX - fractureOrigin.x;
     const relY = fb.startY - fractureOrigin.y;
     const relZ = fb.startZ - fractureOrigin.z;
-    const planeDist = relX * fx + relY * fy + relZ * fz;
-    fb.delaySec = Math.max(0, Math.min(2.2, (planeDist / speed) * 0.35));
+    const planeDist = Math.max(0, relX * fx + relY * fy + relZ * fz);
+    // Keep fracture propagation visible without leaving upper blocks frozen
+    // in place for multiple seconds on larger structures.
+    fb.delaySec = Math.min(1.15, planeDist / Math.max(3.2, speed) * 0.18);
 
     const seedBase = ((eventId * 73856093) ^ ((bx | 0) * 19349663) ^ ((by | 0) * 83492791) ^ ((bz | 0) * 2654435761)) >>> 0;
     const r1 = hashUnit(seedBase ^ 0x9e3779b9);
     const r2 = hashUnit(seedBase ^ 0x85ebca6b);
-    const spinScale = fb.motionMode === 1 ? 2.2 : 1.4;
+    const inertiaScale = 1 / Math.sqrt(Math.max(0.85, fb.weight));
+    const spinScale = (fb.motionMode === 1 ? 2.2 : 1.4) * inertiaScale;
     fb.rotSpeedX = (r1 * 2 - 1) * spinScale;
     fb.rotSpeedZ = (r2 * 2 - 1) * spinScale;
 

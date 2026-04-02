@@ -1957,12 +1957,30 @@ export class Engine {
           ? Number(event.createdAt.toMillis())
           : Date.now();
 
+      const blocksX = event.blocksX as ArrayLike<number>;
+      const blocksY = event.blocksY as ArrayLike<number>;
+      const blocksZ = event.blocksZ as ArrayLike<number>;
+      const blockTypes = event.blockTypes as ArrayLike<number>;
+      const count = Math.min(blocksX.length, blocksY.length, blocksZ.length, blockTypes.length);
+
+      // Clear detached voxels locally as soon as the collapse event arrives.
+      // Waiting for the chunk table update leaves "ghost" blocks visibly stuck
+      // in the source structure while their debris is already falling.
+      for (let i = 0; i < count; i++) {
+        const bx = Number(blocksX[i]);
+        const by = Number(blocksY[i]);
+        const bz = Number(blocksZ[i]);
+        if (this.world.getBlock(bx, by, bz) !== 0) {
+          this.world.setBlock(bx, by, bz, 0);
+        }
+      }
+
       this.physics.spawnFromDetachEvent({
         eventId: Number(event.id ?? 0),
-        blocksX: event.blocksX as ArrayLike<number>,
-        blocksY: event.blocksY as ArrayLike<number>,
-        blocksZ: event.blocksZ as ArrayLike<number>,
-        blockTypes: event.blockTypes as ArrayLike<number>,
+        blocksX,
+        blocksY,
+        blocksZ,
+        blockTypes,
         motionMode: Number(event.motionMode ?? 0),
         pivot: {
           x: Number(event.pivot?.x ?? 0),
