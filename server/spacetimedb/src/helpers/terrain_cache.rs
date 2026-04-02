@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use spacetimedb::ReducerContext;
 
+use crate::chunks::get_or_generate_decoded_chunk;
 use crate::helpers::block_in_bounds;
-use crate::tables::*;
 use crate::worldgen::{self, AIR, CHUNK_SIZE, WORLD_SIZE_X, WORLD_SIZE_Y, WORLD_SIZE_Z};
 
 pub struct TerrainSampler {
@@ -155,11 +155,8 @@ impl TerrainSampler {
         let cz = (uz / CHUNK_SIZE) as u8;
         let chunk_id = worldgen::pack_chunk_id(cx, cy, cz);
 
-        if !self.chunk_cache.contains_key(&chunk_id) {
-            let chunk = ctx.db.world_chunk().chunk_id().find(chunk_id)?;
-            let mut decoded = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
-            worldgen::rle_decode(&chunk.data, &mut decoded);
-            self.chunk_cache.insert(chunk_id, decoded);
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.chunk_cache.entry(chunk_id) {
+            entry.insert(get_or_generate_decoded_chunk(ctx, cx, cy, cz)?);
         }
 
         let decoded = self.chunk_cache.get(&chunk_id)?;

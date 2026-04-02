@@ -10,6 +10,8 @@ use crate::tables::*;
 use crate::types::*;
 use crate::worldgen::{self, AIR, BEDROCK, CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
 
+type LocalBlockRef = (i32, i32, i32, usize, usize, usize);
+
 // ── Chunk Cache Helpers ──
 
 pub fn get_or_generate_chunk(ctx: &ReducerContext, cx: u8, cy: u8, cz: u8) -> Option<WorldChunk> {
@@ -28,6 +30,22 @@ pub fn get_or_generate_chunk(ctx: &ReducerContext, cx: u8, cy: u8, cz: u8) -> Op
         data,
         version: 1,
     }))
+}
+
+pub fn decode_chunk(chunk: &WorldChunk) -> [u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE] {
+    let mut decoded = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
+    worldgen::rle_decode(&chunk.data, &mut decoded);
+    decoded
+}
+
+pub fn get_or_generate_decoded_chunk(
+    ctx: &ReducerContext,
+    cx: u8,
+    cy: u8,
+    cz: u8,
+) -> Option<[u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE]> {
+    let chunk = get_or_generate_chunk(ctx, cx, cy, cz)?;
+    Some(decode_chunk(&chunk))
 }
 
 pub fn get_block_type_generated_cached(
@@ -49,11 +67,8 @@ pub fn get_block_type_generated_cached(
     let cz = (uz / CHUNK_SIZE) as u8;
 
     let chunk_id = worldgen::pack_chunk_id(cx, cy, cz);
-    if !chunk_cache.contains_key(&chunk_id) {
-        let chunk = get_or_generate_chunk(ctx, cx, cy, cz)?;
-        let mut decoded = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
-        worldgen::rle_decode(&chunk.data, &mut decoded);
-        chunk_cache.insert(chunk_id, decoded);
+    if let std::collections::hash_map::Entry::Vacant(entry) = chunk_cache.entry(chunk_id) {
+        entry.insert(get_or_generate_decoded_chunk(ctx, cx, cy, cz)?);
     }
 
     let decoded = chunk_cache.get(&chunk_id)?;
@@ -178,8 +193,7 @@ pub fn destroy_blocks_in_world(
 ) -> Vec<(i32, i32, i32, u8)> {
     let mut actually_destroyed = Vec::new();
 
-    let mut chunks_affected: HashMap<u32, Vec<(i32, i32, i32, usize, usize, usize)>> =
-        HashMap::new();
+    let mut chunks_affected: HashMap<u32, Vec<LocalBlockRef>> = HashMap::new();
 
     for &(x, y, z) in blocks {
         if !block_in_bounds(x, y, z) {
@@ -199,37 +213,40 @@ pub fn destroy_blocks_in_world(
     }
 
     for (chunk_id, local_blocks) in chunks_affected {
-        if let Some(chunk) = ctx.db.world_chunk().chunk_id().find(chunk_id) {
-            let mut block_data = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
-            worldgen::rle_decode(&chunk.data, &mut block_data);
+        let (cx, cy, cz) = worldgen::unpack_chunk_id(chunk_id);
+        let Some(chunk) = get_or_generate_chunk(ctx, cx, cy, cz) else {
+            continue;
+        };
+        let mut block_data = decode_chunk(&chunk);
 
-            let mut modified = false;
-            for (x, y, z, lx, ly, lz) in local_blocks {
-                let local_idx = lx + ly * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE;
-                let block_type = block_data[local_idx];
-                if block_type != AIR && block_type != BEDROCK {
-                    block_data[local_idx] = AIR;
-                    actually_destroyed.push((x, y, z, block_type));
-                    modified = true;
-                }
+        let mut modified = false;
+        let mut destroyed_in_chunk = 0usize;
+        for (x, y, z, lx, ly, lz) in local_blocks {
+            let local_idx = lx + ly * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE;
+            let block_type = block_data[local_idx];
+            if block_type != AIR && block_type != BEDROCK {
+                block_data[local_idx] = AIR;
+                actually_destroyed.push((x, y, z, block_type));
+                destroyed_in_chunk += 1;
+                modified = true;
             }
+        }
 
-            if modified {
-                let new_version = chunk.version + 1;
-                let new_data = worldgen::rle_encode(&block_data);
-                log::info!(
-                    "[CHUNK_UPDATE] chunk_id={} version {} -> {} destroyed_in_chunk={}",
-                    chunk_id,
-                    chunk.version,
-                    new_version,
-                    actually_destroyed.len(),
-                );
-                ctx.db.world_chunk().chunk_id().update(WorldChunk {
-                    data: new_data,
-                    version: new_version,
-                    ..chunk
-                });
-            }
+        if modified {
+            let new_version = chunk.version + 1;
+            let new_data = worldgen::rle_encode(&block_data);
+            log::info!(
+                "[CHUNK_UPDATE] chunk_id={} version {} -> {} destroyed_in_chunk={}",
+                chunk_id,
+                chunk.version,
+                new_version,
+                destroyed_in_chunk,
+            );
+            ctx.db.world_chunk().chunk_id().update(WorldChunk {
+                data: new_data,
+                version: new_version,
+                ..chunk
+            });
         }
     }
 
@@ -272,9 +289,8 @@ fn decompress_nearby_chunks(
 
     let mut result = HashMap::new();
     for chunk_id in needed_chunks {
-        if let Some(chunk) = ctx.db.world_chunk().chunk_id().find(chunk_id) {
-            let mut data = [0u8; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE];
-            worldgen::rle_decode(&chunk.data, &mut data);
+        let (cx, cy, cz) = worldgen::unpack_chunk_id(chunk_id);
+        if let Some(data) = get_or_generate_decoded_chunk(ctx, cx, cy, cz) {
             result.insert(chunk_id, data);
         }
     }
