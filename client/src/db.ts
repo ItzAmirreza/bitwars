@@ -5,6 +5,7 @@ import {
   VEHICLE_TYPES,
   WORLD as WORLD_CONFIG,
 } from "./shared-config";
+import { getConnectionToken, saveConnectionToken } from "./auth";
 
 const SPACETIMEDB_URI =
   import.meta.env.VITE_SPACETIMEDB_URI || "wss://maincloud.spacetimedb.com";
@@ -217,7 +218,7 @@ export function connect(
   activeSessionId = sessionId;
   connecting = true;
   sessionLossHandler = onDisconnect ?? null;
-  const token = localStorage.getItem("bitwars_token") || undefined;
+  const token = getConnectionToken();
 
   try {
     const conn = DbConnection.builder()
@@ -227,7 +228,7 @@ export function connect(
       .onConnect((_connInstance, identity, token) => {
         if (sessionId !== activeSessionId) return;
         console.log("[BitWars] Connected:", identity.toHexString());
-        localStorage.setItem("bitwars_token", token);
+        saveConnectionToken(token);
         connection = conn;
         connecting = false;
 

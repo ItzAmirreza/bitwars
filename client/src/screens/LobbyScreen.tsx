@@ -2,6 +2,13 @@ import { useState, useEffect } from "react";
 import { useGameStore } from "../store";
 import { menuAudio } from "../menuAudio";
 import { PixelArtBg } from "./PixelArtBg";
+import {
+  getActiveProvider,
+  getAuthMode,
+  getProviderLabel,
+  useGuestProfile,
+} from "../auth";
+import { resetConnection } from "../db";
 
 // Small decorative pixel bar
 function PixelBar({
@@ -29,7 +36,8 @@ function PixelBar({
 }
 
 export function LobbyScreen() {
-  const { username, identity, connection, setScreen } = useGameStore();
+  const { username, identity, connection, setScreen, resetSession } =
+    useGameStore();
   const settings = useGameStore((s) => s.settings);
   const [mounted, setMounted] = useState(false);
 
@@ -64,6 +72,10 @@ export function LobbyScreen() {
     Number(localProfile?.timePlayedSecs ?? 0) / 60,
   );
   const bestStreak = Number(localProfile?.bestStreak ?? 0);
+  const authMode = getAuthMode();
+  const authProviderLabel = getProviderLabel(
+    authMode === "account" ? getActiveProvider() : null,
+  );
 
   useEffect(() => {
     menuAudio.setMasterVolume(settings.masterVolume);
@@ -87,6 +99,12 @@ export function LobbyScreen() {
     menuAudio.playUIDeploy();
     sessionStorage.setItem("bitwars-open-perf", "1");
     setScreen("game");
+  };
+  const handleUseGuest = () => {
+    menuAudio.playUIClick();
+    useGuestProfile();
+    resetConnection();
+    resetSession(null);
   };
 
   const accentOrange = "#ff6b35";
@@ -138,7 +156,15 @@ export function LobbyScreen() {
           />
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "16px",
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
+          }}
+        >
           {/* Online count */}
           <div
             style={{
@@ -170,6 +196,55 @@ export function LobbyScreen() {
           >
             {username}
           </span>
+          <span
+            style={{
+              fontFamily: "var(--font-pixel)",
+              fontSize: "7px",
+              color: authMode === "account" ? "#00e5ff" : "#6b7080",
+              letterSpacing: "0.08em",
+              border: `2px solid ${authMode === "account" ? "#00e5ff55" : "#2a2e3e"}`,
+              padding: "4px 8px",
+            }}
+          >
+            {authMode === "account" ? authProviderLabel.toUpperCase() : "GUEST"}
+          </span>
+          {authMode === "account" && (
+            <button
+              onClick={handleUseGuest}
+              onMouseEnter={() => menuAudio.playUIHover()}
+              style={{
+                border: "2px solid #2a2e3e",
+                background: "transparent",
+                color: "#ffd600",
+                fontFamily: "var(--font-pixel)",
+                fontSize: "7px",
+                letterSpacing: "0.08em",
+                padding: "6px 10px",
+                cursor: "pointer",
+              }}
+            >
+              USE GUEST
+            </button>
+          )}
+          {authMode === "guest" && (
+            <button
+              disabled
+              onMouseEnter={() => menuAudio.playUIHover()}
+              style={{
+                border: "2px solid #2a2e3e",
+                background: "transparent",
+                color: "#00e5ff",
+                fontFamily: "var(--font-pixel)",
+                fontSize: "7px",
+                letterSpacing: "0.08em",
+                padding: "6px 10px",
+                cursor: "not-allowed",
+                opacity: 0.45,
+              }}
+            >
+              SIGN IN
+            </button>
+          )}
         </div>
       </header>
 
@@ -367,6 +442,21 @@ export function LobbyScreen() {
                     SAVED TO THIS BROWSER
                   </span>
                 </div>
+
+                <p
+                  style={{
+                    fontFamily: "var(--font-pixel)",
+                    fontSize: "7px",
+                    color: authMode === "account" ? "#00e5ff" : "#6b7080",
+                    marginBottom: "12px",
+                    letterSpacing: "0.08em",
+                    lineHeight: "1.8",
+                  }}
+                >
+                  {authMode === "account"
+                    ? `SIGNED IN WITH ${authProviderLabel.toUpperCase()}`
+                    : "GUEST PROFILE ACTIVE"}
+                </p>
 
                 <div
                   style={{

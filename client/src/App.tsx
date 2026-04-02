@@ -4,6 +4,7 @@ import { connect, resetConnection } from "./db";
 import { LoginScreen } from "./screens/LoginScreen";
 import { LobbyScreen } from "./screens/LobbyScreen";
 import { GameScreen } from "./screens/GameScreen";
+import { consumeAuthCallback } from "./auth";
 
 function LoadingScreen() {
   const [dots, setDots] = useState("");
@@ -100,6 +101,7 @@ function LoadingScreen() {
 
 function App() {
   const [connectAttempt, setConnectAttempt] = useState(0);
+  const [authReady, setAuthReady] = useState(false);
   const {
     screen,
     identity,
@@ -128,7 +130,15 @@ function App() {
   );
 
   useEffect(() => {
-    if (connected || connection) return;
+    const result = consumeAuthCallback();
+    if (result.error) {
+      setError(result.error);
+    }
+    setAuthReady(true);
+  }, [setError]);
+
+  useEffect(() => {
+    if (!authReady || connected || connection) return;
 
     connect(
       (conn, identity, _token) => {
@@ -157,6 +167,7 @@ function App() {
 
     return () => window.clearTimeout(retryTimer);
   }, [
+    authReady,
     connected,
     connection,
     setConnected,
