@@ -1,9 +1,12 @@
+import type { DamageIndicatorState } from '../../game/Engine';
+
 export interface CrosshairProps {
   hitMarker: boolean;
   hitMarkerType: string;
   mountedVehicleName: string | null;
   vehicleWeapon: number;
   vehicleWeaponColor?: string;
+  damageIndicators: DamageIndicatorState[];
 }
 
 function HitMarkerX({ type }: { type: string }) {
@@ -27,12 +30,74 @@ function HitMarkerX({ type }: { type: string }) {
   );
 }
 
-export function Crosshair({ hitMarker, hitMarkerType, mountedVehicleName, vehicleWeapon, vehicleWeaponColor }: CrosshairProps) {
+export function Crosshair({
+  hitMarker,
+  hitMarkerType,
+  mountedVehicleName,
+  vehicleWeapon,
+  vehicleWeaponColor,
+  damageIndicators,
+}: CrosshairProps) {
   const isAirMissile = mountedVehicleName === 'Fighter Jet' && vehicleWeapon === 2;
   const missileColor = '#00e5ff';
 
   return (
     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+      {damageIndicators.map((indicator) => {
+        const scale = 0.9 + indicator.intensity * 0.18;
+        return (
+          <div
+            key={indicator.id}
+            style={{
+              position: 'absolute',
+              left: '50%',
+              top: '50%',
+              width: '152px',
+              height: '152px',
+              transform: `translate(-50%, -50%) rotate(${indicator.angle}deg) scale(${scale})`,
+              transformOrigin: 'center',
+              opacity: indicator.opacity,
+              filter: `drop-shadow(0 0 ${8 + indicator.intensity * 10}px rgba(255,45,120,0.35))`,
+            }}
+          >
+            <svg
+              width="56"
+              height="36"
+              viewBox="0 0 56 36"
+              fill="none"
+              style={{
+                position: 'absolute',
+                left: '50%',
+                top: '6px',
+                transform: 'translateX(-50%)',
+                overflow: 'visible',
+              }}
+            >
+              <path
+                d="M8 25 C15 12 21 9 28 9 C35 9 41 12 48 25"
+                stroke="rgba(255,45,120,0.32)"
+                strokeWidth="3"
+                strokeLinecap="round"
+              />
+              <path
+                d="M18 28 L28 14 L38 28"
+                stroke="#ff5d8f"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M22 28 L28 20 L34 28"
+                stroke="rgba(255,232,240,0.95)"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+        );
+      })}
+
       {mountedVehicleName && isAirMissile ? (
         /* Air Missile targeting reticle - pixel style */
         <div className="relative" style={{ width: '160px', height: '160px' }}>
