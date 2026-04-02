@@ -121,7 +121,6 @@ function App() {
       if (handlingSessionLossRef.current) return;
 
       handlingSessionLossRef.current = true;
-      localStorage.removeItem("bitwars_token");
       resetConnection();
       resetSession(message);
     },

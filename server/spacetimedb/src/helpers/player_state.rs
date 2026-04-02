@@ -74,6 +74,94 @@ pub fn find_profile_by_display_name(
         .find(|profile| profile.display_name.eq_ignore_ascii_case(needle))
 }
 
+pub fn is_profile_online(ctx: &ReducerContext, profile_id: u64) -> bool {
+    ctx.db
+        .player()
+        .iter()
+        .any(|player| player.profile_id == profile_id && player.online)
+}
+
+pub fn relink_identity_to_profile(ctx: &ReducerContext, identity: Identity, profile_id: u64) {
+    let stale_players: Vec<Player> = ctx
+        .db
+        .player()
+        .iter()
+        .filter(|player| player.profile_id == profile_id && player.identity != identity)
+        .collect();
+    for stale_player in stale_players {
+        ctx.db.player().identity().update(Player {
+            username: String::new(),
+            online: false,
+            current_streak: 0,
+            ..stale_player
+        });
+    }
+
+    let duplicate_links: Vec<Identity> = ctx
+        .db
+        .identity_link()
+        .iter()
+        .filter(|link| link.profile_id == profile_id && link.identity != identity)
+        .map(|link| link.identity)
+        .collect();
+    for linked_identity in duplicate_links {
+        ctx.db.identity_link().identity().delete(&linked_identity);
+    }
+
+    if let Some(link) = ctx.db.identity_link().identity().find(identity) {
+        ctx.db.identity_link().identity().update(IdentityLink {
+            profile_id,
+            linked_at: ctx.timestamp,
+            ..link
+        });
+    } else {
+        ctx.db.identity_link().insert(IdentityLink {
+            identity,
+            profile_id,
+            linked_at: ctx.timestamp,
+        });
+    }
+}
+
+pub fn prune_profile_if_unlinked(ctx: &ReducerContext, profile_id: u64) {
+    let still_linked = ctx
+        .db
+        .identity_link()
+        .iter()
+        .any(|link| link.profile_id == profile_id);
+    let still_has_player = ctx
+        .db
+        .player()
+        .iter()
+        .any(|player| player.profile_id == profile_id);
+    if still_linked || still_has_player {
+        return;
+    }
+
+    let Some(profile) = ctx.db.player_profile().profile_id().find(profile_id) else {
+        return;
+    };
+    let is_empty = profile.display_name.trim().is_empty()
+        && profile.total_kills == 0
+        && profile.total_deaths == 0
+        && profile.time_played_secs == 0
+        && profile.best_streak == 0;
+    if !is_empty {
+        return;
+    }
+
+    if ctx
+        .db
+        .player_loadout()
+        .profile_id()
+        .find(profile_id)
+        .is_some()
+    {
+        ctx.db.player_loadout().profile_id().delete(&profile_id);
+    }
+    ctx.db.player_profile().profile_id().delete(&profile_id);
+}
+
 pub fn touch_player_profile(ctx: &ReducerContext, profile_id: u64) {
     if let Some(profile) = ctx.db.player_profile().profile_id().find(profile_id) {
         ctx.db.player_profile().profile_id().update(PlayerProfile {
