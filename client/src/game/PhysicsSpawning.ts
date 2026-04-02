@@ -54,6 +54,68 @@ export function applyBlastOcclusion(
   return { x: xDir / len, y: yDir / len, z: zDir / len };
 }
 
+function shapeExplosionDirection(
+  world: VoxelWorld,
+  x: number,
+  y: number,
+  z: number,
+  dx: number,
+  dy: number,
+  dz: number,
+  dist: number,
+  radius: number,
+  shaped: number,
+  scale: number,
+): { x: number; y: number; z: number } {
+  let radialX = dx / dist;
+  let radialY = dy / dist;
+  let radialZ = dz / dist;
+
+  const heightRatio = THREE.MathUtils.clamp(dy / Math.max(1, radius), -1, 1);
+  const lift = THREE.MathUtils.lerp(0.08, 0.22, shaped) * (1 - Math.max(0, heightRatio) * 0.7);
+  radialY = THREE.MathUtils.clamp(radialY * 0.65 + lift, -0.32, 0.5);
+
+  const dir = applyBlastOcclusion(world, x, y, z, radialX, radialY, radialZ, scale);
+  const cappedY = THREE.MathUtils.clamp(dir.y, -0.35, 0.5);
+  const len = Math.hypot(dir.x, cappedY, dir.z);
+
+  if (len < 0.001) return { x: 0, y: 0.12, z: 0 };
+  return { x: dir.x / len, y: cappedY / len, z: dir.z / len };
+}
+
+function sampleExplosionBlocks<T>(blocks: T[], maxSpawn: number): T[] {
+  if (blocks.length <= maxSpawn) return blocks;
+
+  const sampled: T[] = [];
+  const step = blocks.length / maxSpawn;
+  let cursor = Math.random() * step;
+
+  for (let i = 0; i < maxSpawn; i++) {
+    sampled.push(blocks[Math.min(blocks.length - 1, Math.floor(cursor))]);
+    cursor += step;
+  }
+
+  return sampled;
+}
+
+function configureDebrisPhysics(fb: FallingBlock, blastIntensity: number): void {
+  const mat = getBlockMat(fb.blockType);
+  const scaleFactor = THREE.MathUtils.clamp(fb.scale, 0.18, 1);
+  const normalizedScale = (scaleFactor - 0.18) / 0.82;
+  const dragTightness = THREE.MathUtils.lerp(0.92, 0.985, normalizedScale);
+  const weightBias = THREE.MathUtils.clamp((mat.weight - 1) / 4, 0, 1);
+
+  fb.airDrag = THREE.MathUtils.clamp(dragTightness + weightBias * 0.008, 0.9, 0.992);
+  fb.restitution = THREE.MathUtils.clamp(
+    THREE.MathUtils.lerp(0.08, 0.2, normalizedScale) * (1.05 - mat.friction * 0.35),
+    0.06,
+    0.2,
+  );
+  fb.maxBounces = fb.scale >= 0.82 ? 1 : 0;
+  fb.impactCount = 0;
+  fb.lifetimeMs = Math.round(THREE.MathUtils.lerp(1800, 5200, normalizedScale) * (0.9 + blastIntensity * 0.08));
+}
+
 // ── Detach Event Spawning ──
 
 export function spawnFromDetachEvent(
@@ -171,8 +233,7 @@ export function spawnExplosionDebris(
   audio: AudioSystem,
 ): void {
   const maxSpawn = Math.min(blocks.length, MAX_FALLING - falling.length, 40);
-  const toSpawn = blocks.length > maxSpawn
-    ? blocks.sort(() => Math.random() - 0.5).slice(0, maxSpawn) : blocks;
+  const toSpawn = sampleExplosionBlocks(blocks, maxSpawn);
   const blastIntensity = THREE.MathUtils.clamp((force * Math.max(1, radius)) / 90, 0.25, 1.8);
 
   for (const b of toSpawn) {
@@ -180,6 +241,7 @@ export function spawnExplosionDebris(
     const fb = pool.acquire(b.blockType, b.x, b.y, b.z);
     fb.scale = 1;
     fb.canSettle = false;
+    configureDebrisPhysics(fb, blastIntensity);
 
     const dx = b.x + 0.5 - cx;
     const dy = b.y + 0.5 - cy;
@@ -189,7 +251,6 @@ export function spawnExplosionDebris(
     let radialY = 0;
     let radialZ = 0;
     let impulse = 0;
-    let updraft = 0;
 
     if (dist > 0.01) {
       const maxDist = Math.max(radius * 2.1, 2.5);
@@ -198,20 +259,13 @@ export function spawnExplosionDebris(
       const mat = getBlockMat(fb.blockType);
       const resistance = Math.max(0.45, mat.pushResistance * 0.6);
       impulse = (force * (0.32 + shaped * 1.45)) / (fb.weight * resistance);
-      radialX = dx / dist;
-      radialY = dy / dist;
-      radialZ = dz / dist;
-      const belowFactor = THREE.MathUtils.clamp(((b.y + 0.5) - cy) / (radius + 0.75), 0, 1);
-      radialY *= (0.2 + belowFactor * 0.8);
-      updraft = impulse * 0.03 * belowFactor;
-
-      const dir = applyBlastOcclusion(world, fb.x, fb.y, fb.z, radialX, radialY, radialZ, fb.scale);
+      const dir = shapeExplosionDirection(world, fb.x, fb.y, fb.z, dx, dy, dz, dist, radius, shaped, fb.scale);
       radialX = dir.x;
       radialY = dir.y;
       radialZ = dir.z;
 
       fb.vx = radialX * impulse;
-      fb.vy = radialY * impulse + updraft;
+      fb.vy = radialY * impulse;
       fb.vz = radialZ * impulse;
     } else {
       const theta = Math.random() * Math.PI * 2;
@@ -219,11 +273,11 @@ export function spawnExplosionDebris(
       const resistance = Math.max(0.45, mat.pushResistance * 0.6);
       impulse = force * 1.1 / (fb.weight * resistance);
       radialX = Math.cos(theta);
-      radialY = 0.16;
+      radialY = 0.1;
       radialZ = Math.sin(theta);
-      const horiz = impulse * 0.82;
+      const horiz = impulse * 0.88;
       fb.vx = radialX * horiz;
-      fb.vy = impulse * 0.14;
+      fb.vy = impulse * 0.1;
       fb.vz = radialZ * horiz;
     }
 
@@ -242,6 +296,7 @@ export function spawnExplosionDebris(
       mini.settleLifetimeMs = SETTLED_DEBRIS_LIFETIME_MS;
       const baseWeight = getBlockMat(mini.blockType).weight;
       mini.weight = baseWeight * (0.16 + miniScale * miniScale * miniScale * 0.9);
+      configureDebrisPhysics(mini, blastIntensity);
 
       const jitter = 0.12 + (0.58 - miniScale) * 0.25;
       mini.x += (Math.random() - 0.5) * jitter;
@@ -250,7 +305,7 @@ export function spawnExplosionDebris(
 
       const scatter = impulse * (0.8 + Math.random() * 1.0) * (0.9 + blastIntensity * 0.25);
       mini.vx = radialX * scatter + (Math.random() - 0.5) * scatter * 0.35;
-      mini.vy = radialY * scatter + updraft * 0.3 + Math.random() * scatter * 0.08;
+      mini.vy = radialY * scatter + (Math.random() - 0.5) * scatter * 0.06;
       mini.vz = radialZ * scatter + (Math.random() - 0.5) * scatter * 0.35;
 
       mini.rotSpeedX = (Math.random() - 0.5) * 18;
@@ -288,20 +343,13 @@ export function applyExplosionForce(
       const mat = getBlockMat(fb.blockType);
       const resistance = Math.max(0.45, mat.pushResistance * 0.6);
       const impulse = (force * (0.25 + shaped * 1.05)) / (fb.weight * resistance);
-      let radialX = dx / dist;
-      let radialY = dy / dist;
-      let radialZ = dz / dist;
-      const belowFactor = THREE.MathUtils.clamp((fb.y - cy) / (radius + 0.75), 0, 1);
-      radialY *= (0.2 + belowFactor * 0.8);
-      const updraft = impulse * 0.025 * belowFactor;
-
-      const dir = applyBlastOcclusion(world, fb.x, fb.y, fb.z, radialX, radialY, radialZ, fb.scale);
-      radialX = dir.x;
-      radialY = dir.y;
-      radialZ = dir.z;
+      const dir = shapeExplosionDirection(world, fb.x, fb.y, fb.z, dx, dy, dz, dist, radius, shaped, fb.scale);
+      const radialX = dir.x;
+      const radialY = dir.y;
+      const radialZ = dir.z;
 
       fb.vx += radialX * impulse;
-      fb.vy += radialY * impulse + updraft;
+      fb.vy += radialY * impulse;
       fb.vz += radialZ * impulse;
     }
   }
@@ -328,23 +376,16 @@ export function applyExplosionForce(
     let radialY = 0;
     let radialZ = 0;
     if (dist > 0.01) {
-      radialX = dx / dist;
-      radialY = dy / dist;
-      radialZ = dz / dist;
+      const dir = shapeExplosionDirection(world, s.x, s.y, s.z, dx, dy, dz, dist, radius, shaped, s.scale);
+      radialX = dir.x;
+      radialY = dir.y;
+      radialZ = dir.z;
     } else {
       const theta = Math.random() * Math.PI * 2;
       radialX = Math.cos(theta);
-      radialY = 0.2;
+      radialY = 0.12;
       radialZ = Math.sin(theta);
     }
-
-    const belowFactor = THREE.MathUtils.clamp((s.y - cy) / (radius + 0.75), 0, 1);
-    radialY *= (0.2 + belowFactor * 0.8);
-    const updraft = impulse * 0.02 * belowFactor;
-    const dir = applyBlastOcclusion(world, s.x, s.y, s.z, radialX, radialY, radialZ, s.scale);
-    radialX = dir.x;
-    radialY = dir.y;
-    radialZ = dir.z;
 
     const fb = pool.acquire(s.blockType, 0, 0, 0);
     fb.x = s.x;
@@ -356,8 +397,9 @@ export function applyExplosionForce(
     fb.weight = baseWeight;
     fb.canSettle = true;
     fb.settleLifetimeMs = SETTLED_DEBRIS_LIFETIME_MS;
+    configureDebrisPhysics(fb, THREE.MathUtils.clamp(force / Math.max(6, radius * 10), 0.25, 1.8));
     fb.vx = radialX * impulse;
-    fb.vy = radialY * impulse + updraft;
+    fb.vy = radialY * impulse;
     fb.vz = radialZ * impulse;
     fb.rotSpeedX = (Math.random() - 0.5) * 16;
     fb.rotSpeedZ = (Math.random() - 0.5) * 16;
