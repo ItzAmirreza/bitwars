@@ -12,8 +12,11 @@ import {
 
 export default __t.row({
   profileId: __t.u64().primaryKey().name("profile_id"),
-  slot1: __t.u8().name("slot_1"),
-  slot2: __t.u8().name("slot_2"),
-  slot3: __t.u8().name("slot_3"),
-  updatedAt: __t.timestamp().name("updated_at"),
+  displayName: __t.string().name("display_name"),
+  totalKills: __t.u32().name("total_kills"),
+  totalDeaths: __t.u32().name("total_deaths"),
+  timePlayedSecs: __t.u64().name("time_played_secs"),
+  bestStreak: __t.u32().name("best_streak"),
+  createdAt: __t.timestamp().name("created_at"),
+  lastSeenAt: __t.timestamp().name("last_seen_at"),
 });

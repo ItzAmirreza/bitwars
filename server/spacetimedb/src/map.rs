@@ -153,7 +153,15 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
         ctx.db.vehicle_destroy_event().id().delete(&id);
     }
 
-    start_round(ctx, ctx.db.world_config().id().find(1).map(|cfg| cfg.round_number).unwrap_or(1));
+    start_round(
+        ctx,
+        ctx.db
+            .world_config()
+            .id()
+            .find(1)
+            .map(|cfg| cfg.round_number)
+            .unwrap_or(1),
+    );
 
     ctx.db.chat_message().insert(ChatMessage {
         id: 0,

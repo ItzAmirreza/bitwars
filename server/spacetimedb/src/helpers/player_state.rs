@@ -37,6 +37,174 @@ pub fn init_movement_state(ctx: &ReducerContext, identity: Identity, pos: &Vec3)
     }
 }
 
+pub fn ensure_player_profile(ctx: &ReducerContext, identity: Identity) -> PlayerProfile {
+    if let Some(link) = ctx.db.identity_link().identity().find(identity) {
+        if let Some(profile) = ctx.db.player_profile().profile_id().find(link.profile_id) {
+            return profile;
+        }
+        ctx.db.identity_link().identity().delete(&identity);
+    }
+
+    let profile = ctx.db.player_profile().insert(PlayerProfile {
+        profile_id: 0,
+        display_name: String::new(),
+        total_kills: 0,
+        total_deaths: 0,
+        time_played_secs: 0,
+        best_streak: 0,
+        created_at: ctx.timestamp,
+        last_seen_at: ctx.timestamp,
+    });
+    ctx.db.identity_link().insert(IdentityLink {
+        identity,
+        profile_id: profile.profile_id,
+        linked_at: ctx.timestamp,
+    });
+    profile
+}
+
+pub fn find_profile_by_display_name(
+    ctx: &ReducerContext,
+    display_name: &str,
+) -> Option<PlayerProfile> {
+    let needle = display_name.trim();
+    ctx.db
+        .player_profile()
+        .iter()
+        .find(|profile| profile.display_name.eq_ignore_ascii_case(needle))
+}
+
+pub fn is_profile_online(ctx: &ReducerContext, profile_id: u64) -> bool {
+    ctx.db
+        .player()
+        .iter()
+        .any(|player| player.profile_id == profile_id && player.online)
+}
+
+pub fn relink_identity_to_profile(ctx: &ReducerContext, identity: Identity, profile_id: u64) {
+    let stale_players: Vec<Player> = ctx
+        .db
+        .player()
+        .iter()
+        .filter(|player| player.profile_id == profile_id && player.identity != identity)
+        .collect();
+    for stale_player in stale_players {
+        ctx.db.player().identity().update(Player {
+            username: String::new(),
+            online: false,
+            current_streak: 0,
+            ..stale_player
+        });
+    }
+
+    let duplicate_links: Vec<Identity> = ctx
+        .db
+        .identity_link()
+        .iter()
+        .filter(|link| link.profile_id == profile_id && link.identity != identity)
+        .map(|link| link.identity)
+        .collect();
+    for linked_identity in duplicate_links {
+        ctx.db.identity_link().identity().delete(&linked_identity);
+    }
+
+    if let Some(link) = ctx.db.identity_link().identity().find(identity) {
+        ctx.db.identity_link().identity().update(IdentityLink {
+            profile_id,
+            linked_at: ctx.timestamp,
+            ..link
+        });
+    } else {
+        ctx.db.identity_link().insert(IdentityLink {
+            identity,
+            profile_id,
+            linked_at: ctx.timestamp,
+        });
+    }
+}
+
+pub fn prune_profile_if_unlinked(ctx: &ReducerContext, profile_id: u64) {
+    let still_linked = ctx
+        .db
+        .identity_link()
+        .iter()
+        .any(|link| link.profile_id == profile_id);
+    let still_has_player = ctx
+        .db
+        .player()
+        .iter()
+        .any(|player| player.profile_id == profile_id);
+    if still_linked || still_has_player {
+        return;
+    }
+
+    let Some(profile) = ctx.db.player_profile().profile_id().find(profile_id) else {
+        return;
+    };
+    let is_empty = profile.display_name.trim().is_empty()
+        && profile.total_kills == 0
+        && profile.total_deaths == 0
+        && profile.time_played_secs == 0
+        && profile.best_streak == 0;
+    if !is_empty {
+        return;
+    }
+
+    if ctx
+        .db
+        .player_loadout()
+        .profile_id()
+        .find(profile_id)
+        .is_some()
+    {
+        ctx.db.player_loadout().profile_id().delete(&profile_id);
+    }
+    ctx.db.player_profile().profile_id().delete(&profile_id);
+}
+
+pub fn touch_player_profile(ctx: &ReducerContext, profile_id: u64) {
+    if let Some(profile) = ctx.db.player_profile().profile_id().find(profile_id) {
+        ctx.db.player_profile().profile_id().update(PlayerProfile {
+            last_seen_at: ctx.timestamp,
+            ..profile
+        });
+    }
+}
+
+pub fn close_player_session(ctx: &ReducerContext, player: &Player) {
+    if let Some(profile) = ctx.db.player_profile().profile_id().find(player.profile_id) {
+        let elapsed_secs = timestamp_micros(ctx.timestamp)
+            .saturating_sub(timestamp_micros(player.session_started_at))
+            / 1_000_000;
+        ctx.db.player_profile().profile_id().update(PlayerProfile {
+            time_played_secs: profile.time_played_secs.saturating_add(elapsed_secs),
+            last_seen_at: ctx.timestamp,
+            ..profile
+        });
+    }
+}
+
+pub fn record_profile_kill(ctx: &ReducerContext, profile_id: u64, streak: u32) {
+    if let Some(profile) = ctx.db.player_profile().profile_id().find(profile_id) {
+        ctx.db.player_profile().profile_id().update(PlayerProfile {
+            total_kills: profile.total_kills + 1,
+            best_streak: profile.best_streak.max(streak),
+            last_seen_at: ctx.timestamp,
+            ..profile
+        });
+    }
+}
+
+pub fn record_profile_death(ctx: &ReducerContext, profile_id: u64) {
+    if let Some(profile) = ctx.db.player_profile().profile_id().find(profile_id) {
+        ctx.db.player_profile().profile_id().update(PlayerProfile {
+            total_deaths: profile.total_deaths + 1,
+            last_seen_at: ctx.timestamp,
+            ..profile
+        });
+    }
+}
+
 pub fn random_spawn_position(ctx: &ReducerContext, identity: &Identity) -> Vec3 {
     let span_x = (WORLD_SIZE_X as i32 - PLAYER_SPAWN_MARGIN * 2).max(8);
     let span_z = (WORLD_SIZE_Z as i32 - PLAYER_SPAWN_MARGIN * 2).max(8);
@@ -164,21 +332,20 @@ pub fn normalize_character_preset(preset: u8) -> u8 {
     }
 }
 
-pub fn normalize_or_create_player_loadout(ctx: &ReducerContext, username: &str) -> PlayerLoadout {
-    let key = username.to_string();
-    if let Some(existing) = ctx.db.player_loadout().username().find(&key) {
+pub fn normalize_or_create_player_loadout(ctx: &ReducerContext, profile_id: u64) -> PlayerLoadout {
+    if let Some(existing) = ctx.db.player_loadout().profile_id().find(profile_id) {
         if loadout_slots_valid(existing.slot1, existing.slot2, existing.slot3) {
             return existing;
         }
-        ctx.db.player_loadout().username().update(PlayerLoadout {
-            username: key.clone(),
+        ctx.db.player_loadout().profile_id().update(PlayerLoadout {
+            profile_id,
             slot1: default_loadout()[0],
             slot2: default_loadout()[1],
             slot3: default_loadout()[2],
             updated_at: ctx.timestamp,
         });
         return PlayerLoadout {
-            username: key,
+            profile_id,
             slot1: default_loadout()[0],
             slot2: default_loadout()[1],
             slot3: default_loadout()[2],
@@ -186,7 +353,7 @@ pub fn normalize_or_create_player_loadout(ctx: &ReducerContext, username: &str) 
         };
     }
     ctx.db.player_loadout().insert(PlayerLoadout {
-        username: key,
+        profile_id,
         slot1: default_loadout()[0],
         slot2: default_loadout()[1],
         slot3: default_loadout()[2],

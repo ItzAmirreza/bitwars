@@ -23,6 +23,7 @@ use crate::vehicles::tick_vehicles;
 pub struct Player {
     #[primary_key]
     pub identity: Identity,
+    pub profile_id: u64,
     pub entity_id: u64,
     pub username: String,
     pub character_preset: u8,
@@ -35,11 +36,43 @@ pub struct Player {
     pub current_weapon: u8,
     pub kills: u32,
     pub deaths: u32,
+    pub current_streak: u32,
     pub spawn_protected: bool,
     pub online: bool,
     pub mounted_vehicle_id: u64,
     pub joined_at: Timestamp,
+    pub session_started_at: Timestamp,
     pub last_damage_time: Timestamp,
+}
+
+/// Persistent player identity that survives reconnects and future account linking.
+#[derive(Clone)]
+#[table(
+    accessor = player_profile,
+    public,
+    index(accessor = idx_player_profile_name, btree(columns = [display_name]))
+)]
+pub struct PlayerProfile {
+    #[primary_key]
+    #[auto_inc]
+    pub profile_id: u64,
+    pub display_name: String,
+    pub total_kills: u32,
+    pub total_deaths: u32,
+    pub time_played_secs: u64,
+    pub best_streak: u32,
+    pub created_at: Timestamp,
+    pub last_seen_at: Timestamp,
+}
+
+/// Maps the current SpacetimeDB identity to its persistent profile.
+#[derive(Clone)]
+#[table(accessor = identity_link)]
+pub struct IdentityLink {
+    #[primary_key]
+    pub identity: Identity,
+    pub profile_id: u64,
+    pub linked_at: Timestamp,
 }
 
 /// Abstract entity root shared by all world objects (player, vehicle, item, ...).
@@ -135,11 +168,11 @@ pub struct VehicleInputCmd {
 
 // ── Player State ──
 
-/// Persistent 3-weapon loadout keyed by username.
+/// Persistent 3-weapon loadout keyed by profile.
 #[table(accessor = player_loadout, public)]
 pub struct PlayerLoadout {
     #[primary_key]
-    pub username: String,
+    pub profile_id: u64,
     pub slot1: u8,
     pub slot2: u8,
     pub slot3: u8,

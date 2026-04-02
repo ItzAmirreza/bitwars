@@ -171,6 +171,13 @@ export const HealthRegenTick = __t.object("HealthRegenTick", {
 });
 export type HealthRegenTick = __Infer<typeof HealthRegenTick>;
 
+export const IdentityLink = __t.object("IdentityLink", {
+  identity: __t.identity(),
+  profileId: __t.u64(),
+  linkedAt: __t.timestamp(),
+});
+export type IdentityLink = __Infer<typeof IdentityLink>;
+
 export const KillEvent = __t.object("KillEvent", {
   id: __t.u64(),
   killerName: __t.string(),
@@ -217,6 +224,7 @@ export type MatchTick = __Infer<typeof MatchTick>;
 
 export const Player = __t.object("Player", {
   identity: __t.identity(),
+  profileId: __t.u64(),
   entityId: __t.u64(),
   username: __t.string(),
   characterPreset: __t.u8(),
@@ -235,10 +243,12 @@ export const Player = __t.object("Player", {
   currentWeapon: __t.u8(),
   kills: __t.u32(),
   deaths: __t.u32(),
+  currentStreak: __t.u32(),
   spawnProtected: __t.bool(),
   online: __t.bool(),
   mountedVehicleId: __t.u64(),
   joinedAt: __t.timestamp(),
+  sessionStartedAt: __t.timestamp(),
   lastDamageTime: __t.timestamp(),
 });
 export type Player = __Infer<typeof Player>;
@@ -267,7 +277,7 @@ export const PlayerFireState = __t.object("PlayerFireState", {
 export type PlayerFireState = __Infer<typeof PlayerFireState>;
 
 export const PlayerLoadout = __t.object("PlayerLoadout", {
-  username: __t.string(),
+  profileId: __t.u64(),
   slot1: __t.u8(),
   slot2: __t.u8(),
   slot3: __t.u8(),
@@ -284,6 +294,18 @@ export const PlayerMovementState = __t.object("PlayerMovementState", {
   violationCount: __t.u32(),
 });
 export type PlayerMovementState = __Infer<typeof PlayerMovementState>;
+
+export const PlayerProfile = __t.object("PlayerProfile", {
+  profileId: __t.u64(),
+  displayName: __t.string(),
+  totalKills: __t.u32(),
+  totalDeaths: __t.u32(),
+  timePlayedSecs: __t.u64(),
+  bestStreak: __t.u32(),
+  createdAt: __t.timestamp(),
+  lastSeenAt: __t.timestamp(),
+});
+export type PlayerProfile = __Infer<typeof PlayerProfile>;
 
 export const Rotation = __t.object("Rotation", {
   yaw: __t.f32(),

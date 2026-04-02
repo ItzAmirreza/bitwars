@@ -104,7 +104,8 @@ fn collect_match_standings(ctx: &ReducerContext) -> Vec<MatchStandingRow> {
         .player()
         .iter()
         .filter(|player| {
-            !player.username.trim().is_empty() && (player.online || player.kills > 0 || player.deaths > 0)
+            !player.username.trim().is_empty()
+                && (player.online || player.kills > 0 || player.deaths > 0)
         })
         .map(|player| MatchStandingRow {
             identity: player.identity,
@@ -151,7 +152,7 @@ fn store_match_result(ctx: &ReducerContext, round_number: u32, standings: &[Matc
 }
 
 fn respawn_player_for_intermission(ctx: &ReducerContext, player: Player) {
-    let loadout = normalize_or_create_player_loadout(ctx, &player.username);
+    let loadout = normalize_or_create_player_loadout(ctx, player.profile_id);
     let current_weapon = if weapon_in_loadout(&loadout, player.current_weapon) {
         player.current_weapon
     } else {
@@ -181,26 +182,41 @@ fn respawn_player_for_intermission(ctx: &ReducerContext, player: Player) {
 }
 
 fn revive_dead_players_for_intermission(ctx: &ReducerContext) {
-    let dead_players: Vec<Player> = ctx.db.player().iter().filter(|player| player.health <= 0).collect();
+    let dead_players: Vec<Player> = ctx
+        .db
+        .player()
+        .iter()
+        .filter(|player| player.health <= 0)
+        .collect();
     for player in dead_players {
         respawn_player_for_intermission(ctx, player);
     }
 
-    let grenade_ids: Vec<u64> = ctx.db.grenade_projectile().iter().map(|row| row.id).collect();
+    let grenade_ids: Vec<u64> = ctx
+        .db
+        .grenade_projectile()
+        .iter()
+        .map(|row| row.id)
+        .collect();
     for id in grenade_ids {
         ctx.db.grenade_projectile().id().delete(&id);
     }
 }
 
 pub fn reset_players_for_new_round(ctx: &ReducerContext) {
-    let player_ids: Vec<Identity> = ctx.db.player().iter().map(|player| player.identity).collect();
+    let player_ids: Vec<Identity> = ctx
+        .db
+        .player()
+        .iter()
+        .map(|player| player.identity)
+        .collect();
 
     for identity in player_ids {
         let Some(player) = ctx.db.player().identity().find(identity) else {
             continue;
         };
         let entity_id = ensure_player_entity(ctx, &player);
-        let loadout = normalize_or_create_player_loadout(ctx, &player.username);
+        let loadout = normalize_or_create_player_loadout(ctx, player.profile_id);
         let current_weapon = if weapon_in_loadout(&loadout, player.current_weapon) {
             player.current_weapon
         } else {
@@ -211,8 +227,16 @@ pub fn reset_players_for_new_round(ctx: &ReducerContext) {
         let dismounted = dismount_player_internal(ctx, player, true);
         let reset = Player {
             entity_id,
-            health: if is_god { god_mode_health() } else { max_health() },
-            max_health: if is_god { god_mode_health() } else { max_health() },
+            health: if is_god {
+                god_mode_health()
+            } else {
+                max_health()
+            },
+            max_health: if is_god {
+                god_mode_health()
+            } else {
+                max_health()
+            },
             pos: spawn_pos.clone(),
             vel: ZERO_VEL,
             rot: Rotation {
@@ -221,6 +245,7 @@ pub fn reset_players_for_new_round(ctx: &ReducerContext) {
             },
             kills: 0,
             deaths: 0,
+            current_streak: 0,
             spawn_protected: true,
             current_weapon,
             mounted_vehicle_id: 0,
@@ -238,7 +263,12 @@ pub fn reset_players_for_new_round(ctx: &ReducerContext) {
         ctx.db.kill_event().id().delete(&id);
     }
 
-    let grenade_ids: Vec<u64> = ctx.db.grenade_projectile().iter().map(|row| row.id).collect();
+    let grenade_ids: Vec<u64> = ctx
+        .db
+        .grenade_projectile()
+        .iter()
+        .map(|row| row.id)
+        .collect();
     for id in grenade_ids {
         ctx.db.grenade_projectile().id().delete(&id);
     }
@@ -325,7 +355,12 @@ pub fn tick_match(ctx: &ReducerContext, _job: MatchTick) {
 
     match state.state {
         MATCH_STATE_WAITING => {
-            if ctx.db.player().iter().any(|player| player.online && !player.username.trim().is_empty()) {
+            if ctx
+                .db
+                .player()
+                .iter()
+                .any(|player| player.online && !player.username.trim().is_empty())
+            {
                 start_round(ctx, state.round_number.max(1));
             }
         }

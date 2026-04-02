@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useGameStore } from './store';
-import { connect, resetConnection } from './db';
-import { LoginScreen } from './screens/LoginScreen';
-import { LobbyScreen } from './screens/LobbyScreen';
-import { GameScreen } from './screens/GameScreen';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useGameStore } from "./store";
+import { connect, resetConnection } from "./db";
+import { LoginScreen } from "./screens/LoginScreen";
+import { LobbyScreen } from "./screens/LobbyScreen";
+import { GameScreen } from "./screens/GameScreen";
+import { consumeAuthCallback } from "./auth";
 
 function LoadingScreen() {
-  const [dots, setDots] = useState('');
+  const [dots, setDots] = useState("");
   const [barWidth, setBarWidth] = useState(0);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setDots((d) => (d.length >= 3 ? '' : d + '.'));
+      setDots((d) => (d.length >= 3 ? "" : d + "."));
     }, 500);
     return () => clearInterval(interval);
   }, []);
@@ -34,47 +35,63 @@ function LoadingScreen() {
   return (
     <div
       style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '100%', position: 'relative', overflow: 'hidden',
-        background: '#0a0c14',
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100%",
+        position: "relative",
+        overflow: "hidden",
+        background: "#0a0c14",
       }}
     >
-      <div style={{ textAlign: 'center' }} className="anim-fade-up relative z-10">
-        <h1 style={{
-          fontFamily: 'var(--font-pixel)',
-          fontSize: 'clamp(32px, 6vw, 52px)',
-          color: '#fff',
-          letterSpacing: '0.12em',
-          marginBottom: '32px',
-          textShadow: '4px 4px 0 #ff6b35, -2px -2px 0 #00e5ff',
-        }}>
+      <div
+        style={{ textAlign: "center" }}
+        className="anim-fade-up relative z-10"
+      >
+        <h1
+          style={{
+            fontFamily: "var(--font-pixel)",
+            fontSize: "clamp(32px, 6vw, 52px)",
+            color: "#fff",
+            letterSpacing: "0.12em",
+            marginBottom: "32px",
+            textShadow: "4px 4px 0 #ff6b35, -2px -2px 0 #00e5ff",
+          }}
+        >
           BITWARS
         </h1>
 
         {/* Pixel loading bar */}
-        <div style={{
-          width: '240px', height: '10px',
-          background: '#12161e',
-          border: '2px solid #2a2e3e',
-          margin: '0 auto 20px',
-          overflow: 'hidden',
-          padding: '1px',
-        }}>
-          <div style={{
-            width: `${barWidth}%`,
-            height: '100%',
-            background: '#ff6b35',
-            transition: 'width 0.15s steps(4)',
-            imageRendering: 'pixelated',
-          }} />
+        <div
+          style={{
+            width: "240px",
+            height: "10px",
+            background: "#12161e",
+            border: "2px solid #2a2e3e",
+            margin: "0 auto 20px",
+            overflow: "hidden",
+            padding: "1px",
+          }}
+        >
+          <div
+            style={{
+              width: `${barWidth}%`,
+              height: "100%",
+              background: "#ff6b35",
+              transition: "width 0.15s steps(4)",
+              imageRendering: "pixelated",
+            }}
+          />
         </div>
 
-        <span style={{
-          fontFamily: 'var(--font-pixel)',
-          fontSize: '9px',
-          color: '#6b7080',
-          letterSpacing: '0.15em',
-        }}>
+        <span
+          style={{
+            fontFamily: "var(--font-pixel)",
+            fontSize: "9px",
+            color: "#6b7080",
+            letterSpacing: "0.15em",
+          }}
+        >
           CONNECTING{dots}
         </span>
       </div>
@@ -84,6 +101,7 @@ function LoadingScreen() {
 
 function App() {
   const [connectAttempt, setConnectAttempt] = useState(0);
+  const [authReady, setAuthReady] = useState(false);
   const {
     screen,
     identity,
@@ -94,21 +112,33 @@ function App() {
     setIdentity,
     setConnection,
     setError,
+    setScreen,
+    setUsername,
     resetSession,
   } = useGameStore();
   const handlingSessionLossRef = useRef(false);
 
-  const handleSessionLoss = useCallback((message: string) => {
-    if (handlingSessionLossRef.current) return;
+  const handleSessionLoss = useCallback(
+    (message: string) => {
+      if (handlingSessionLossRef.current) return;
 
-    handlingSessionLossRef.current = true;
-    localStorage.removeItem('bitwars_token');
-    resetConnection();
-    resetSession(message);
-  }, [resetSession]);
+      handlingSessionLossRef.current = true;
+      resetConnection();
+      resetSession(message);
+    },
+    [resetSession],
+  );
 
   useEffect(() => {
-    if (connected || connection) return;
+    const result = consumeAuthCallback();
+    if (result.error) {
+      setError(result.error);
+    }
+    setAuthReady(true);
+  }, [setError]);
+
+  useEffect(() => {
+    if (!authReady || connected || connection) return;
 
     connect(
       (conn, identity, _token) => {
@@ -120,10 +150,10 @@ function App() {
       },
       (error) => {
         setError(error.message);
-        console.error('[BitWars] Connection error:', error);
+        console.error("[BitWars] Connection error:", error);
       },
       (error) => {
-        console.error('[BitWars] Session lost:', error);
+        console.error("[BitWars] Session lost:", error);
         handleSessionLoss(error.message);
       },
     );
@@ -136,30 +166,67 @@ function App() {
     }, 2000);
 
     return () => window.clearTimeout(retryTimer);
-  }, [connected, connection, setConnected, setIdentity, setConnection, setError, handleSessionLoss, connectAttempt]);
+  }, [
+    authReady,
+    connected,
+    connection,
+    setConnected,
+    setIdentity,
+    setConnection,
+    setError,
+    handleSessionLoss,
+    connectAttempt,
+  ]);
 
   useEffect(() => {
-    if (!connected || !connection || !identity || screen === 'login') return;
+    if (!connected || !connection || !identity) return;
 
     const checkLocalPlayer = () => {
-      let localPlayer: { online?: boolean } | null = null;
+      let localPlayer: { online?: boolean; username?: string } | null = null;
 
       for (const row of connection.db.player.iter()) {
-        const player = row as { identity: { toHexString: () => string }; online?: boolean };
+        const player = row as {
+          identity: { toHexString: () => string };
+          online?: boolean;
+          username?: string;
+        };
         if (player.identity.toHexString() !== identity) continue;
         localPlayer = player;
         break;
       }
 
-      if (!localPlayer || localPlayer.online === false) {
-        handleSessionLoss('Lost sync with the server. Please join again.');
+      if (!localPlayer) {
+        if (screen !== "login") {
+          handleSessionLoss("Lost sync with the server. Please join again.");
+        }
+        return;
+      }
+
+      if (localPlayer.online === false) {
+        handleSessionLoss("Lost sync with the server. Please join again.");
+        return;
+      }
+
+      if (localPlayer.username?.trim()) {
+        setUsername(localPlayer.username);
+        if (screen === "login") {
+          setScreen("lobby");
+        }
       }
     };
 
     checkLocalPlayer();
     const interval = window.setInterval(checkLocalPlayer, 1000);
     return () => window.clearInterval(interval);
-  }, [connected, connection, identity, screen, handleSessionLoss]);
+  }, [
+    connected,
+    connection,
+    identity,
+    screen,
+    handleSessionLoss,
+    setScreen,
+    setUsername,
+  ]);
 
   if (!connected && !error) {
     return <LoadingScreen />;
@@ -170,14 +237,14 @@ function App() {
   return (
     <div className="w-full h-full relative">
       <div className="absolute inset-0">
-        {showGameScreen && <GameScreen active={screen === 'game'} />}
+        {showGameScreen && <GameScreen active={screen === "game"} />}
       </div>
-      {screen === 'login' && (
+      {screen === "login" && (
         <div className="absolute inset-0 z-10">
           <LoginScreen />
         </div>
       )}
-      {screen === 'lobby' && (
+      {screen === "lobby" && (
         <div className="absolute inset-0 z-10">
           <LobbyScreen />
         </div>

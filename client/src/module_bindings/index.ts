@@ -70,6 +70,7 @@ import PlayerRow from "./player_table";
 import PlayerAmmoRow from "./player_ammo_table";
 import PlayerBuffRow from "./player_buff_table";
 import PlayerLoadoutRow from "./player_loadout_table";
+import PlayerProfileRow from "./player_profile_table";
 import ShotEventRow from "./shot_event_table";
 import VehicleRow from "./vehicle_table";
 import VehicleDestroyEventRow from "./vehicle_destroy_event_table";
@@ -239,14 +240,28 @@ const tablesSchema = __schema({
   player_loadout: __table({
     name: 'player_loadout',
     indexes: [
-      { accessor: 'username', name: 'player_loadout_username_idx_btree', algorithm: 'btree', columns: [
-        'username',
+      { accessor: 'profile_id', name: 'player_loadout_profile_id_idx_btree', algorithm: 'btree', columns: [
+        'profileId',
       ] },
     ],
     constraints: [
-      { name: 'player_loadout_username_key', constraint: 'unique', columns: ['username'] },
+      { name: 'player_loadout_profile_id_key', constraint: 'unique', columns: ['profileId'] },
     ],
   }, PlayerLoadoutRow),
+  player_profile: __table({
+    name: 'player_profile',
+    indexes: [
+      { accessor: 'idx_player_profile_name', name: 'player_profile_display_name_idx_btree', algorithm: 'btree', columns: [
+        'displayName',
+      ] },
+      { accessor: 'profile_id', name: 'player_profile_profile_id_idx_btree', algorithm: 'btree', columns: [
+        'profileId',
+      ] },
+    ],
+    constraints: [
+      { name: 'player_profile_profile_id_key', constraint: 'unique', columns: ['profileId'] },
+    ],
+  }, PlayerProfileRow),
   shot_event: __table({
     name: 'shot_event',
     indexes: [
