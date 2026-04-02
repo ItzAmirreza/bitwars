@@ -7,6 +7,7 @@ use spacetimedb::{reducer, Identity, ReducerContext, ScheduleAt, Table};
 
 use crate::constants::*;
 use crate::helpers::*;
+use crate::map::reset_map;
 use crate::tables::*;
 use crate::types::{Rotation, ZERO_VEL};
 use crate::weapons;
@@ -340,9 +341,13 @@ pub fn tick_match(ctx: &ReducerContext, _job: MatchTick) {
         }
         MATCH_STATE_ENDED => {
             if state.time_remaining_secs <= 1 {
-                let next_round = state.round_number + 1;
-                reset_players_for_new_round(ctx);
-                start_round(ctx, next_round);
+                reset_map(
+                    ctx,
+                    MapResetTimer {
+                        scheduled_id: 0,
+                        scheduled_at: ScheduleAt::Time(ctx.timestamp),
+                    },
+                );
             } else {
                 ctx.db.match_state().id().update(MatchState {
                     time_remaining_secs: state.time_remaining_secs - 1,

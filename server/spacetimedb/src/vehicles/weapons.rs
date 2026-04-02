@@ -109,6 +109,7 @@ pub fn fire_vehicle_weapon(
     hit_blocks: Vec<Vec3>,
 ) -> Result<(), String> {
     let sender = ctx.sender();
+    require_active_match(ctx)?;
     let player = ctx
         .db
         .player()
