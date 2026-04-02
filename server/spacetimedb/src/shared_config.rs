@@ -27,6 +27,7 @@ pub struct GameConfig {
     pub grenade: GrenadeConfig,
     pub vehicle_block_collision: VehicleBlockCollisionConfig,
     pub combat: CombatConfig,
+    pub r#match: MatchConfig,
     pub weather: Vec<WeatherConfig>,
     pub abilities: AbilitiesConfig,
 }
@@ -300,6 +301,14 @@ pub struct CombatConfig {
     pub max_block_destroy_range: f32,
     pub hitscan_dot_threshold_player: f32,
     pub hitscan_dot_threshold_vehicle: f32,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchConfig {
+    pub round_duration_secs: u64,
+    pub intermission_secs: u64,
+    pub ending_warning_secs: u64,
 }
 
 #[derive(Deserialize, Debug)]

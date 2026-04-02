@@ -207,6 +207,8 @@ export function connect(
             "SELECT * FROM player_ammo",
             // player_fire_state and player_movement are server-private
             // (not needed client-side, reduces subscription scan load)
+            "SELECT * FROM match_state WHERE id = 1",
+            "SELECT * FROM match_result",
             "SELECT * FROM world_environment WHERE id = 1",
             "SELECT * FROM world_config WHERE id = 1",
             "SELECT * FROM chat_message",

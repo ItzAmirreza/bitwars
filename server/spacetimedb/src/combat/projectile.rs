@@ -7,6 +7,7 @@ use crate::chunks::{destroy_blocks_in_world, run_structural_check};
 use crate::combat::damage::*;
 use crate::constants::max_block_destroy_per_call;
 use crate::helpers::*;
+use crate::matchmaking::require_active_match;
 use crate::tables::*;
 use crate::types::*;
 use crate::weapons;
@@ -358,6 +359,7 @@ pub fn projectile_impact(
     shot_event_id: u64,
 ) -> Result<(), String> {
     let sender = ctx.sender();
+    require_active_match(ctx)?;
     let _player = ctx
         .db
         .player()

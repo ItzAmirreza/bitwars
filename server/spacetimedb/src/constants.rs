@@ -446,6 +446,19 @@ pub fn hitscan_dot_threshold_vehicle() -> f32 {
     shared_config::config().combat.hitscan_dot_threshold_vehicle
 }
 
+// ── Match Flow ──
+// Sourced from shared/game-constants.json → match
+
+pub fn match_round_duration_secs() -> u64 {
+    shared_config::config().r#match.round_duration_secs
+}
+pub fn match_intermission_secs() -> u64 {
+    shared_config::config().r#match.intermission_secs
+}
+pub fn match_ending_warning_secs() -> u64 {
+    shared_config::config().r#match.ending_warning_secs
+}
+
 // ── Weather Presets ──
 // Sourced from shared/game-constants.json → weather
 
