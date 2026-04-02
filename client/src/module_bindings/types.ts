@@ -181,6 +181,7 @@ export const Player = __t.object("Player", {
   entityId: __t.u64(),
   username: __t.string(),
   characterPreset: __t.u8(),
+  movementFlags: __t.u8(),
   get pos() {
     return Vec3;
   },

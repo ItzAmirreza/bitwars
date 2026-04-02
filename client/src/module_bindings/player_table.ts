@@ -20,6 +20,7 @@ export default __t.row({
   entityId: __t.u64().name("entity_id"),
   username: __t.string(),
   characterPreset: __t.u8().name("character_preset"),
+  movementFlags: __t.u8().name("movement_flags"),
   get pos() {
     return Vec3;
   },
