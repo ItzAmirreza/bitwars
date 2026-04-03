@@ -109,10 +109,12 @@ function App() {
     connected,
     connection,
     error,
+    versionStale,
     setConnected,
     setIdentity,
     setConnection,
     setError,
+    setVersionStale,
     setScreen,
     setUsername,
     resetSession,
@@ -139,7 +141,7 @@ function App() {
   }, [setError]);
 
   useEffect(() => {
-    if (!authReady || connected || connection) return;
+    if (!authReady || connected || connection || versionStale) return;
 
     connect(
       (conn, identity, _token) => {
@@ -171,6 +173,7 @@ function App() {
     authReady,
     connected,
     connection,
+    versionStale,
     setConnected,
     setIdentity,
     setConnection,
@@ -231,6 +234,7 @@ function App() {
 
     const checkVersion = (row: { buildHash?: string }) => {
       if (row.buildHash && isVersionMismatch(row.buildHash)) {
+        setVersionStale();
         handleSessionLoss(
           "A new version of BitWars has been deployed. Please refresh to update.",
         );

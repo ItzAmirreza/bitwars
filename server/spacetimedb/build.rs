@@ -10,5 +10,4 @@ fn main() {
         .unwrap_or_else(|| "unknown".to_string());
 
     println!("cargo:rustc-env=BUILD_GIT_COMMIT={}", commit);
-    println!("cargo:rerun-if-changed=.git/HEAD");
 }
