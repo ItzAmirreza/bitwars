@@ -2890,14 +2890,29 @@ export class Engine {
           // Hitscan (minigun): tracer + muzzle flash + impact
           const hasHit = shot.hasHit as boolean;
           const hitPos = shot.hitPos;
+          const isCram = vehWeaponIdx === 4;
+          const tracerColor = isCram ? 0xfff4a3 : 0xffaa00;
           const end =
             hasHit && hitPos
               ? new THREE.Vector3(hitPos.x, hitPos.y, hitPos.z)
               : origin
                   .clone()
                   .add(dir.clone().normalize().multiplyScalar(vw.maxRange));
-          this.vfx.emitTracer(origin, end, 0xffaa00);
-          this.vfx.emitMuzzleFlashAt(origin, dir, 0xffaa00);
+          this.vfx.emitTracer(
+            origin,
+            end,
+            tracerColor,
+            isCram
+              ? {
+                  opacity: 0.88,
+                  ttlMs: 95,
+                  particleCount: 7,
+                  particleSize: 13,
+                  particleJitter: 0.08,
+                }
+              : undefined,
+          );
+          this.vfx.emitMuzzleFlashAt(origin, dir, tracerColor);
 
           if (hasHit && hitPos) {
             this.vfx.emitImpact(hitPos.x, hitPos.y, hitPos.z);

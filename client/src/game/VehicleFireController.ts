@@ -332,9 +332,25 @@ export class VehicleFireController {
       .raycastVehicles(origin, dir, wep.maxRange)
       .filter((id) => id !== ctx.mountedVehicleId);
 
+    const isCram = resolvedIdx === 4;
+    const tracerColor = isCram ? 0xfff4a3 : 0xffaa00;
+
     // VFX: tracer + muzzle flash
-    ctx.vfx.emitTracer(origin, tracerEnd, 0xffaa00);
-    ctx.vfx.emitMuzzleFlashAt(origin, dir, 0xffaa00);
+    ctx.vfx.emitTracer(
+      origin,
+      tracerEnd,
+      tracerColor,
+      isCram
+        ? {
+            opacity: 0.88,
+            ttlMs: 95,
+            particleCount: 7,
+            particleSize: 13,
+            particleJitter: 0.08,
+          }
+        : undefined,
+    );
+    ctx.vfx.emitMuzzleFlashAt(origin, dir, tracerColor);
 
     // VFX: impact
     if (hit) {
@@ -351,8 +367,8 @@ export class VehicleFireController {
       }
     }
 
-    // Player hit marker
-    if (hitPlayerIds.length > 0) {
+    // Player / vehicle hit marker
+    if (hitPlayerIds.length > 0 || hitVehicleIds.length > 0) {
       ctx.hitMarkerTimer = 0.2;
       ctx.hitMarkerType = 'player';
       ctx.audio.playHitMarker();

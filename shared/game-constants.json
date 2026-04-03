@@ -200,7 +200,7 @@
     {
       "index": 4,
       "name": "CRAM",
-      "damage": 5,
+      "damage": 15,
       "playerDamageScale": 0.5,
       "radius": 0,
       "fireRate": 25.0,
