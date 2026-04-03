@@ -222,7 +222,7 @@ function App() {
     checkLocalPlayer();
     const interval = window.setInterval(checkLocalPlayer, 1000);
 
-    // Version mismatch detection: if the server has a newer build hash,
+    // Version mismatch detection: if the deployed client/server hashes differ,
     // kick the client back to login with a warning to refresh.
     const db = connection.db as Record<string, unknown>;
     const serverInfoTable = db.server_info as
