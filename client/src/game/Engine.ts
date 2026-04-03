@@ -365,6 +365,7 @@ export class Engine {
     intensity: number;
   }> = [];
   private nextDamageIndicatorId = 1;
+  private pendingDamageTriggers: number[] = [];
   private lastWeaponIndex = 0;
   private prevKills = 0;
   private prevDeaths = 0;
@@ -2670,7 +2671,9 @@ export class Engine {
             }
           }
           if (player.health < oldHealth) {
-            this.triggerDamageIndicator(oldHealth - player.health);
+            // Defer indicator trigger so shot_event callbacks from the same
+            // server transaction batch finish first and register damage sources.
+            this.pendingDamageTriggers.push(oldHealth - player.health);
             const dmgRatio = (oldHealth - player.health) / 100;
             this.postfx.triggerDamage(0.3 + dmgRatio * 0.7);
             this.audio.playDamage(this.localAudioSource(-0.2));
@@ -4083,6 +4086,16 @@ export class Engine {
     if (this.hitMarkerTimer > 0) {
       this.hitMarkerTimer -= delta;
       if (this.hitMarkerTimer <= 0) this.hitMarkerType = "none";
+    }
+
+    // Process deferred damage triggers — by this point all table callbacks
+    // from the same server transaction (including shot_event) have completed,
+    // so recentDamageSources contains the attacker positions.
+    if (this.pendingDamageTriggers.length > 0) {
+      for (const dmg of this.pendingDamageTriggers) {
+        this.triggerDamageIndicator(dmg);
+      }
+      this.pendingDamageTriggers.length = 0;
     }
 
     if (this.damageIndicators.length > 0) {
