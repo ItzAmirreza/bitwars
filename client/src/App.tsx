@@ -13,7 +13,9 @@ import { GameScreen } from "./screens/GameScreen";
 import { useMatchSession } from "./screens/hooks/useMatchSession";
 import { consumeAuthCallback } from "./auth";
 
-const UPDATE_RELOAD_GUARD_KEY = "bitwars-update-reload-at";
+const UPDATE_RELOAD_AT_KEY = "bitwars-update-reload-at";
+const UPDATE_RELOAD_TARGET_KEY = "bitwars-update-reload-target";
+const UPDATE_RELOAD_COOLDOWN_MS = 60000;
 
 type PendingUpdate = {
   kind: "client" | "compatibility";
@@ -216,6 +218,13 @@ function UpdateBanner({
   );
 }
 
+function pendingUpdateFingerprint(update: PendingUpdate): string {
+  if (update.kind === "compatibility") {
+    return `compatibility:${update.serverBuild ?? "unknown"}`;
+  }
+  return `client:${update.latestClientBuild ?? "unknown"}`;
+}
+
 function App() {
   const [connectAttempt, setConnectAttempt] = useState(0);
   const [authReady, setAuthReady] = useState(false);
@@ -268,20 +277,38 @@ function App() {
     });
   }, []);
 
+  const canAutoReloadPendingUpdate = useCallback((update: PendingUpdate) => {
+    const target = pendingUpdateFingerprint(update);
+    const lastTarget = sessionStorage.getItem(UPDATE_RELOAD_TARGET_KEY);
+    const lastAttempt = Number(sessionStorage.getItem(UPDATE_RELOAD_AT_KEY) ?? "0");
+
+    return !(
+      lastTarget === target && Date.now() - lastAttempt < UPDATE_RELOAD_COOLDOWN_MS
+    );
+  }, []);
+
   const reloadForUpdate = useCallback(() => {
+    if (!pendingUpdate) return;
+
+    const target = pendingUpdateFingerprint(pendingUpdate);
     const now = Date.now();
     const lastAttempt = Number(
-      sessionStorage.getItem(UPDATE_RELOAD_GUARD_KEY) ?? "0",
+      sessionStorage.getItem(UPDATE_RELOAD_AT_KEY) ?? "0",
     );
-    if (now - lastAttempt < 15000) {
+    const lastTarget = sessionStorage.getItem(UPDATE_RELOAD_TARGET_KEY);
+    if (
+      lastTarget === target &&
+      now - lastAttempt < UPDATE_RELOAD_COOLDOWN_MS
+    ) {
       setError("BitWars is still updating. Try again in a few seconds.");
       return;
     }
 
-    sessionStorage.setItem(UPDATE_RELOAD_GUARD_KEY, String(now));
+    sessionStorage.setItem(UPDATE_RELOAD_TARGET_KEY, target);
+    sessionStorage.setItem(UPDATE_RELOAD_AT_KEY, String(now));
     resetConnection();
     window.location.reload();
-  }, [setError]);
+  }, [pendingUpdate, setError]);
 
   useEffect(() => {
     const result = consumeAuthCallback();
@@ -333,9 +360,10 @@ function App() {
   ]);
 
   useEffect(() => {
-    if (!connected) return;
-    sessionStorage.removeItem(UPDATE_RELOAD_GUARD_KEY);
-  }, [connected]);
+    if (pendingUpdate) return;
+    sessionStorage.removeItem(UPDATE_RELOAD_TARGET_KEY);
+    sessionStorage.removeItem(UPDATE_RELOAD_AT_KEY);
+  }, [pendingUpdate]);
 
   useEffect(() => {
     if (import.meta.env.DEV) return;
@@ -457,13 +485,19 @@ function App() {
 
   useEffect(() => {
     if (import.meta.env.DEV || !pendingUpdate || !canReloadForUpdate) return;
+    if (!canAutoReloadPendingUpdate(pendingUpdate)) return;
 
     const reloadTimer = window.setTimeout(() => {
       reloadForUpdate();
     }, pendingUpdate.kind === "compatibility" ? 1500 : 4000);
 
     return () => window.clearTimeout(reloadTimer);
-  }, [pendingUpdate, canReloadForUpdate, reloadForUpdate]);
+  }, [
+    pendingUpdate,
+    canAutoReloadPendingUpdate,
+    canReloadForUpdate,
+    reloadForUpdate,
+  ]);
 
   if (!connected && !error) {
     return <LoadingScreen />;

@@ -47,24 +47,33 @@ jobs:
         working-directory: server
         run: spacetime publish bitwars --clear-database -y --module-path ./spacetimedb
 
+      - name: Write deployed server build manifest
+        run: |
+          cat <<EOF > client/public/bitwars-server-build.json
+          {
+            "serverBuild": "${GITHUB_SHA::7}",
+            "updatedAt": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          }
+          EOF
+
       - name: Regenerate client bindings
         working-directory: server
         run: spacetime generate --lang typescript --out-dir ../client/src/module_bindings --module-path ./spacetimedb
 
-      - name: Check for binding changes
-        id: bindings
+      - name: Check for deploy artifact changes
+        id: deploy_artifacts
         run: |
-          if git diff --quiet client/src/module_bindings/; then
+          if git diff --quiet client/src/module_bindings/ client/public/bitwars-server-build.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commit updated bindings
-        if: steps.bindings.outputs.changed == 'true'
+      - name: Commit updated deploy artifacts
+        if: steps.deploy_artifacts.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add client/src/module_bindings/
-          git commit -m "chore: regenerate client bindings after server deploy"
+          git add client/src/module_bindings/ client/public/bitwars-server-build.json
+          git commit -m "chore: update deployed server artifacts"
           git push origin HEAD:master

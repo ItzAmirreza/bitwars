@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { execSync } from 'child_process'
+import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
@@ -23,6 +24,11 @@ const EXPECTED_SERVER_BUILD_ENV_KEYS = [
 ]
 const configDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(configDir, '..')
+const serverBuildManifestPath = path.resolve(
+  configDir,
+  'public',
+  'bitwars-server-build.json',
+)
 
 function git(cmd: string, cwd = process.cwd()): string {
   try { return execSync(cmd, { cwd, encoding: 'utf-8' }).trim() }
@@ -53,6 +59,16 @@ function resolveBuildCommit(): string {
 function resolveExpectedServerBuild(): string {
   const fromEnv = shortCommit(readBuildEnv(EXPECTED_SERVER_BUILD_ENV_KEYS))
   if (fromEnv) return fromEnv
+
+  try {
+    const manifest = JSON.parse(fs.readFileSync(serverBuildManifestPath, 'utf-8')) as {
+      serverBuild?: string
+    }
+    const fromManifest = shortCommit(manifest.serverBuild?.trim())
+    if (fromManifest) return fromManifest
+  } catch {
+    // Fall back to git history for local dev if the manifest is missing.
+  }
 
   const fromGitHistory = shortCommit(
     git('git log -1 --format=%H HEAD -- server shared/game-constants.json', repoRoot),
