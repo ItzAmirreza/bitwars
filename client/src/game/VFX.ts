@@ -77,7 +77,12 @@ export class VFX {
   shakeOffsetY = 0;
 
   // Tracers
-  private tracers: { mesh: THREE.Line; birth: number }[] = [];
+  private tracers: Array<{
+    mesh: THREE.Line;
+    birth: number;
+    ttlMs: number;
+    baseOpacity: number;
+  }> = [];
 
   constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera) {
     this.scene = scene;
@@ -385,16 +390,60 @@ export class VFX {
   }
 
   // ── Bullet tracer ──
-  emitTracer(from: THREE.Vector3, to: THREE.Vector3, color: number): void {
+  emitTracer(
+    from: THREE.Vector3,
+    to: THREE.Vector3,
+    color: number,
+    options: {
+      opacity?: number;
+      ttlMs?: number;
+      particleCount?: number;
+      particleSize?: number;
+      particleJitter?: number;
+    } = {},
+  ): void {
+    const baseOpacity = options.opacity ?? 0.45;
+    const ttlMs = options.ttlMs ?? 70;
     const geo = new THREE.BufferGeometry().setFromPoints([from.clone(), to.clone()]);
     const mat = new THREE.LineBasicMaterial({
       color,
       transparent: true,
-      opacity: 0.45,
+      opacity: baseOpacity,
     });
     const line = new THREE.Line(geo, mat);
     this.scene.add(line);
-    this.tracers.push({ mesh: line, birth: performance.now() });
+    this.tracers.push({ mesh: line, birth: performance.now(), ttlMs, baseOpacity });
+
+    const particleCount = Math.max(0, Math.floor(options.particleCount ?? 0));
+    const particleSize = options.particleSize ?? 0;
+    if (particleCount <= 0 || particleSize <= 0) return;
+
+    const col = new THREE.Color(color);
+    const dir = new THREE.Vector3().subVectors(to, from);
+    const dist = dir.length();
+    if (dist <= 0.001) return;
+    dir.multiplyScalar(1 / dist);
+    const jitter = options.particleJitter ?? 0.06;
+    const life = Math.max(0.04, ttlMs / 1000);
+
+    for (let i = 0; i < particleCount && this.particles.length < MAX_PARTICLES; i++) {
+      const t = particleCount === 1 ? 0.5 : i / (particleCount - 1);
+      this.particles.push({
+        x: from.x + dir.x * dist * t + (Math.random() - 0.5) * jitter,
+        y: from.y + dir.y * dist * t + (Math.random() - 0.5) * jitter,
+        z: from.z + dir.z * dist * t + (Math.random() - 0.5) * jitter,
+        vx: dir.x * 1.8 + (Math.random() - 0.5) * 0.35,
+        vy: dir.y * 1.8 + (Math.random() - 0.5) * 0.35,
+        vz: dir.z * 1.8 + (Math.random() - 0.5) * 0.35,
+        r: Math.min(1, col.r * 1.2 + 0.08),
+        g: Math.min(1, col.g * 1.2 + 0.08),
+        b: Math.min(1, col.b * 1.2 + 0.08),
+        life: 0,
+        maxLife: life * (0.75 + Math.random() * 0.2),
+        size: particleSize * (0.8 + Math.random() * 0.4),
+        gravity: false,
+      });
+    }
   }
 
   // ── Screen shake ──
@@ -486,13 +535,14 @@ export class VFX {
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       const tr = this.tracers[i];
       const age = now - tr.birth;
-      if (age > 70) {
+      if (age > tr.ttlMs) {
         this.scene.remove(tr.mesh);
         tr.mesh.geometry.dispose();
         (tr.mesh.material as THREE.Material).dispose();
         this.tracers.splice(i, 1);
       } else {
-        (tr.mesh.material as THREE.LineBasicMaterial).opacity = 0.45 * (1 - age / 70);
+        (tr.mesh.material as THREE.LineBasicMaterial).opacity =
+          tr.baseOpacity * (1 - age / tr.ttlMs);
       }
     }
   }

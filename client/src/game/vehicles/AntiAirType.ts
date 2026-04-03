@@ -21,6 +21,7 @@ import type {
 // ── Constants ──
 const VEHICLE_TYPE_ANTI_AIR = VEHICLE_TYPES.AntiAir;
 const AA_BREAKUP_GRAVITY = 20;
+const AA_HIT_INDICATOR_DURATION = 0.28;
 
 export class AntiAirType implements VehicleType {
   readonly typeId = VEHICLE_TYPE_ANTI_AIR;
@@ -285,6 +286,37 @@ export class AntiAirType implements VehicleType {
     }
     root.add(orientWrapper);
 
+    const hitIndicator = new THREE.Group();
+    hitIndicator.name = 'aa-hit-indicator';
+    hitIndicator.position.set(0, 4.35, 0);
+    hitIndicator.visible = false;
+    root.add(hitIndicator);
+
+    const hitIndicatorMat = new THREE.MeshBasicMaterial({
+      color: 0xffd966,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false,
+    });
+
+    const addIndicatorBar = (
+      size: [number, number, number],
+      pos: [number, number, number],
+      rot: [number, number, number] = [0, 0, 0],
+    ): void => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), hitIndicatorMat);
+      mesh.position.set(...pos);
+      mesh.rotation.set(...rot);
+      mesh.renderOrder = 20;
+      hitIndicator.add(mesh);
+    };
+
+    addIndicatorBar([1.8, 0.14, 0.18], [0, 0, 0]);
+    addIndicatorBar([0.18, 0.14, 1.8], [0, 0, 0]);
+    addIndicatorBar([0.24, 0.9, 0.24], [0, -0.35, 0]);
+
     return root;
   }
 
@@ -305,6 +337,44 @@ export class AntiAirType implements VehicleType {
     const turret = orientWrapper?.getObjectByName('turret');
     const radar = turret?.getObjectByName('radar');
     const barrelGroup = turret?.getObjectByName('barrel-group');
+    const hitIndicator = mesh.getObjectByName('aa-hit-indicator');
+
+    const vehicleRow = ctx.getVehicleRow(instance.entityId);
+    if (vehicleRow) {
+      const health = Number(vehicleRow.health ?? this.getHealthMax());
+      const prevHealth = Number(mesh.userData.lastVehicleHealth ?? health);
+      if (health < prevHealth) {
+        const damageTaken = prevHealth - health;
+        mesh.userData.hitIndicatorTimer = AA_HIT_INDICATOR_DURATION;
+        mesh.userData.hitIndicatorStrength = THREE.MathUtils.clamp(
+          0.6 + damageTaken / 30,
+          0.7,
+          1.45,
+        );
+      }
+      mesh.userData.lastVehicleHealth = health;
+    }
+
+    const hitIndicatorTimer = Math.max(
+      0,
+      Number(mesh.userData.hitIndicatorTimer ?? 0) - delta,
+    );
+    mesh.userData.hitIndicatorTimer = hitIndicatorTimer;
+    if (hitIndicator) {
+      const strength = Number(mesh.userData.hitIndicatorStrength ?? 1);
+      const t = hitIndicatorTimer / AA_HIT_INDICATOR_DURATION;
+      const alpha = Math.max(0, t * (0.55 + strength * 0.22));
+      hitIndicator.visible = alpha > 0.02;
+      hitIndicator.position.y = 4.35 + (1 - t) * 0.25;
+      const scale = 0.9 + (1 - t) * 0.45 * strength;
+      hitIndicator.scale.setScalar(scale);
+      hitIndicator.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshBasicMaterial) {
+          child.material.opacity = alpha;
+          child.material.color.setHex(t > 0.55 ? 0xfff2a6 : 0xff6a4a);
+        }
+      });
+    }
 
     // ── Radar dish rotation (constant spin) ──
     if (radar) {
