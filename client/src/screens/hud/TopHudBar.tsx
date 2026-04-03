@@ -1,3 +1,5 @@
+import { CLIENT_BUILD_HASH } from '../../versionCheck';
+
 const COMPASS_DIRS = [
   { deg: 0, label: 'N' }, { deg: 45, label: 'NE' }, { deg: 90, label: 'E' },
   { deg: 135, label: 'SE' }, { deg: 180, label: 'S' }, { deg: 225, label: 'SW' },
@@ -257,6 +259,11 @@ export function TopHudBar({
               fontFamily: 'var(--font-pixel)', fontSize: '6px', color: '#4a4e5e',
             }}>
               {fps} FPS / {serverTps} TPS
+            </span>
+            <span style={{
+              fontFamily: 'var(--font-pixel)', fontSize: '6px', color: '#3a3e4e',
+            }}>
+              build {CLIENT_BUILD_HASH}
             </span>
           </div>
         </div>

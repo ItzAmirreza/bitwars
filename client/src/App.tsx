@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useGameStore } from "./store";
 import { connect, resetConnection } from "./db";
+import { isVersionMismatch } from "./versionCheck";
 import { LoginScreen } from "./screens/LoginScreen";
 import { LobbyScreen } from "./screens/LobbyScreen";
 import { GameScreen } from "./screens/GameScreen";
@@ -217,7 +218,44 @@ function App() {
 
     checkLocalPlayer();
     const interval = window.setInterval(checkLocalPlayer, 1000);
-    return () => window.clearInterval(interval);
+
+    // Version mismatch detection: if the server has a newer build hash,
+    // kick the client back to login with a warning to refresh.
+    const db = connection.db as Record<string, unknown>;
+    const serverInfoTable = db.server_info as
+      | { onInsert?: (cb: (...args: unknown[]) => void) => { remove: () => void };
+          iter?: () => Iterable<{ buildHash?: string }> }
+      | undefined;
+
+    let versionUnsub: { remove: () => void } | undefined;
+
+    const checkVersion = (row: { buildHash?: string }) => {
+      if (row.buildHash && isVersionMismatch(row.buildHash)) {
+        handleSessionLoss(
+          "A new version of BitWars has been deployed. Please refresh to update.",
+        );
+      }
+    };
+
+    if (serverInfoTable) {
+      // Check existing rows (reconnect after redeploy)
+      if (serverInfoTable.iter) {
+        for (const row of serverInfoTable.iter()) {
+          checkVersion(row);
+        }
+      }
+      // Listen for live updates (hot redeploy while connected)
+      if (serverInfoTable.onInsert) {
+        versionUnsub = serverInfoTable.onInsert(
+          (_ctx: unknown, row: unknown) => checkVersion(row as { buildHash?: string }),
+        );
+      }
+    }
+
+    return () => {
+      window.clearInterval(interval);
+      versionUnsub?.remove();
+    };
   }, [
     connected,
     connection,

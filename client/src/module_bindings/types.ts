@@ -313,6 +313,12 @@ export const Rotation = __t.object("Rotation", {
 });
 export type Rotation = __Infer<typeof Rotation>;
 
+export const ServerInfo = __t.object("ServerInfo", {
+  id: __t.u32(),
+  buildHash: __t.string(),
+});
+export type ServerInfo = __Infer<typeof ServerInfo>;
+
 export const ShotCleanup = __t.object("ShotCleanup", {
   scheduledId: __t.u64(),
   scheduledAt: __t.scheduleAt(),

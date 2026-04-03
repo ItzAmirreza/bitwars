@@ -15,6 +15,17 @@ use crate::matchmaking::tick_match;
 use crate::abilities::tick_abilities;
 use crate::vehicles::tick_vehicles;
 
+// ── Server Metadata ──
+
+/// Server build info singleton (id = 1). Clients compare their build hash
+/// against this to detect version mismatches after a redeploy.
+#[table(accessor = server_info, public)]
+pub struct ServerInfo {
+    #[primary_key]
+    pub id: u32,
+    pub build_hash: String,
+}
+
 // ── Core Entities ──
 
 /// Every connected player.

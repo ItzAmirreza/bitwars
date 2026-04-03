@@ -256,6 +256,7 @@ export function connect(
             "SELECT * FROM match_state WHERE id = 1",
             "SELECT * FROM match_result",
             "SELECT * FROM world_environment WHERE id = 1",
+            "SELECT * FROM server_info WHERE id = 1",
             "SELECT * FROM world_config WHERE id = 1",
             "SELECT * FROM chat_message",
             "SELECT * FROM explosion_event",

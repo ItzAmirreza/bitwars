@@ -116,10 +116,16 @@ pub fn init(ctx: &ReducerContext) {
         ),
     });
 
+    ctx.db.server_info().insert(ServerInfo {
+        id: 1,
+        build_hash: env!("BUILD_GIT_COMMIT").to_string(),
+    });
+
     log::info!(
-        "Environment initialized: time={:.1}h, weather={}",
+        "Environment initialized: time={:.1}h, weather={}, build={}",
         initial_time,
-        initial_weather
+        initial_weather,
+        env!("BUILD_GIT_COMMIT"),
     );
 }
 
