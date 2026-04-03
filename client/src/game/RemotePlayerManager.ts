@@ -60,6 +60,13 @@ interface RemotePlayerRuntime {
   pitch?: number;
 }
 
+interface RemoteWeaponHoldPose {
+  mountPosition: [number, number, number];
+  mountRotation: [number, number, number];
+  leftArmRotation: [number, number, number];
+  rightArmRotation: [number, number, number];
+}
+
 const SNIPER_WEAPON_INDEX = 5;
 const GLINT_DOT_THRESHOLD = 0.92;
 const GLINT_MAX_DIST = 200;
@@ -71,6 +78,53 @@ const REMOTE_PLAYER_NAMETAG_Y = 2.48;
 
 function damp(current: number, target: number, lambda: number, delta: number): number {
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-lambda * delta));
+}
+
+function getRemoteWeaponHoldPose(weaponIndex: number): RemoteWeaponHoldPose {
+  switch (weaponIndex) {
+    case 1:
+      return {
+        mountPosition: [0.35, -0.22, -0.48],
+        mountRotation: [0.22, -0.08, -0.1],
+        leftArmRotation: [1.04, 0.18, 0.46],
+        rightArmRotation: [1.12, -0.16, -0.18],
+      };
+    case 2:
+      return {
+        mountPosition: [0.31, -0.19, -0.46],
+        mountRotation: [0.12, -0.07, -0.03],
+        leftArmRotation: [0.92, 0.1, 0.18],
+        rightArmRotation: [1.0, -0.12, -0.1],
+      };
+    case 3:
+      return {
+        mountPosition: [0.34, -0.24, -0.53],
+        mountRotation: [0.28, -0.1, -0.14],
+        leftArmRotation: [1.14, 0.18, 0.5],
+        rightArmRotation: [1.22, -0.16, -0.22],
+      };
+    case 4:
+      return {
+        mountPosition: [0.34, -0.23, -0.49],
+        mountRotation: [0.24, -0.08, -0.1],
+        leftArmRotation: [1.08, 0.16, 0.44],
+        rightArmRotation: [1.16, -0.14, -0.18],
+      };
+    case 5:
+      return {
+        mountPosition: [0.36, -0.19, -0.62],
+        mountRotation: [0.18, -0.05, -0.08],
+        leftArmRotation: [1.0, 0.14, 0.36],
+        rightArmRotation: [1.08, -0.12, -0.14],
+      };
+    default:
+      return {
+        mountPosition: [0.34, -0.21, -0.54],
+        mountRotation: [0.24, -0.09, -0.12],
+        leftArmRotation: [1.08, 0.18, 0.42],
+        rightArmRotation: [1.16, -0.14, -0.2],
+      };
+  }
 }
 
 export class RemotePlayerManager {
@@ -258,9 +312,10 @@ export class RemotePlayerManager {
     this.addBox(rightLeg, [0.34, 0.16, 0.42], bootMat, [0, -0.87, -0.02]);
 
     const gunMount = new THREE.Group();
+    const defaultHoldPose = getRemoteWeaponHoldPose(0);
     gunMount.name = 'remote-player-gun-mount';
-    gunMount.position.set(0.22, -0.04, -0.3);
-    gunMount.rotation.set(0.04, -0.06, -0.04);
+    gunMount.position.set(...defaultHoldPose.mountPosition);
+    gunMount.rotation.set(...defaultHoldPose.mountRotation);
     upperBody.add(gunMount);
 
     return {
@@ -404,6 +459,7 @@ export class RemotePlayerManager {
     const walkWave = Math.sin(animTime);
     const bounceWave = Math.sin(animTime * 2);
     const upperAimX = pitch * 0.35;
+    const weaponPose = getRemoteWeaponHoldPose(runtime.currentWeapon ?? 0);
 
     const crouchDrop = crouchAlpha * 0.24 + slideAlpha * 0.12;
     const bobY = climbAlpha > 0.2
@@ -424,22 +480,24 @@ export class RemotePlayerManager {
     rig.head.rotation.z = -bodyLeanZ * 0.5;
 
     rig.gunMount.position.set(
-      0.22 + localStrafe * 0.03,
-      -0.04 - crouchAlpha * 0.03 - slideAlpha * 0.02,
-      -0.3,
+      weaponPose.mountPosition[0] + localStrafe * 0.025,
+      weaponPose.mountPosition[1] - crouchAlpha * 0.04 - slideAlpha * 0.05 + bounceWave * moveAlpha * 0.012,
+      weaponPose.mountPosition[2] - sprintAlpha * 0.05 - slideAlpha * 0.08 + walkWave * moveAlpha * 0.01,
     );
     rig.gunMount.rotation.set(
-      0.04 + pitch * 0.5 + sprintAlpha * 0.08 + slideAlpha * 0.14,
-      -0.06 + bodyTwist * 0.4,
-      -0.04 - localStrafe * 0.08,
+      weaponPose.mountRotation[0] + pitch * 0.42 + sprintAlpha * 0.08 + slideAlpha * 0.12,
+      weaponPose.mountRotation[1] + bodyTwist * 0.35,
+      weaponPose.mountRotation[2] - localStrafe * 0.05 - forwardLean * 0.08,
     );
 
     const legSwing = moveAlpha * (crouching ? 0.42 : sprinting ? 0.88 : 0.64);
-    const armSwing = moveAlpha * (crouching ? 0.24 : sprinting ? 0.36 : 0.28);
-    let leftArmX = 0.88 + pitch * 0.18 + walkWave * armSwing;
-    let rightArmX = 1.02 + pitch * 0.26 - walkWave * armSwing * 0.8;
-    let leftArmZ = -0.24 - crouchAlpha * 0.08;
-    let rightArmZ = 0.12 + crouchAlpha * 0.04;
+    const armSwing = moveAlpha * (crouching ? 0.05 : sprinting ? 0.09 : 0.035);
+    let leftArmX = weaponPose.leftArmRotation[0] + pitch * 0.12 + walkWave * armSwing;
+    let rightArmX = weaponPose.rightArmRotation[0] + pitch * 0.18 - walkWave * armSwing * 0.65;
+    let leftArmY = weaponPose.leftArmRotation[1] + bodyTwist * 0.18;
+    let rightArmY = weaponPose.rightArmRotation[1] + bodyTwist * 0.18;
+    let leftArmZ = weaponPose.leftArmRotation[2] - crouchAlpha * 0.04 - localStrafe * 0.03;
+    let rightArmZ = weaponPose.rightArmRotation[2] + crouchAlpha * 0.03 - localStrafe * 0.02;
     let leftLegX = walkWave * legSwing;
     let rightLegX = -walkWave * legSwing;
     let leftLegZ = 0;
@@ -448,6 +506,8 @@ export class RemotePlayerManager {
     if (climbAlpha > 0.2) {
       leftArmX = 1.5 - climbWave * 0.45;
       rightArmX = 1.4 + climbWave * 0.45;
+      leftArmY = 0.06;
+      rightArmY = -0.06;
       leftArmZ = -0.14;
       rightArmZ = 0.14;
       leftLegX = 0.5 - climbWave * 0.4;
@@ -457,6 +517,8 @@ export class RemotePlayerManager {
     } else if (slideAlpha > 0.25) {
       leftArmX = 0.28;
       rightArmX = 0.6;
+      leftArmY = 0.12;
+      rightArmY = -0.16;
       leftArmZ = -0.45;
       rightArmZ = 0.18;
       leftLegX = -0.95;
@@ -473,10 +535,10 @@ export class RemotePlayerManager {
     }
 
     rig.leftArm.rotation.x = leftArmX;
-    rig.leftArm.rotation.y = 0.02 + bodyTwist * 0.2;
+    rig.leftArm.rotation.y = leftArmY;
     rig.leftArm.rotation.z = leftArmZ;
     rig.rightArm.rotation.x = rightArmX;
-    rig.rightArm.rotation.y = -0.08 + bodyTwist * 0.2;
+    rig.rightArm.rotation.y = rightArmY;
     rig.rightArm.rotation.z = rightArmZ;
 
     rig.leftLeg.position.y = 0.96 - crouchAlpha * 0.18 - slideAlpha * 0.14;
