@@ -5,11 +5,8 @@ import type { SkySystem } from './SkySystem';
 import type { DynamicLightOptions } from './Engine';
 
 // ── Lantern lighting constants ──
-const MAX_ACTIVE_LANTERN_LIGHTS = 6;
 const MAX_ACTIVE_LANTERN_GLOWS = 180;
 const LANTERN_LIGHT_REFRESH_INTERVAL = 0.25;
-const LANTERN_LIGHT_MAX_DISTANCE = 36;
-const LANTERN_LIGHT_KEEP_DISTANCE = 56;
 const LANTERN_GLOW_MAX_DISTANCE = 190;
 const LANTERN_LIGHT_STICKY_DISTANCE_BONUS = 12;
 const LANTERN_LIGHT_STICKY_SECONDS = 0.45;
@@ -48,6 +45,11 @@ export class LanternSystem {
   private lanternGlowPoints: THREE.Points | null = null;
   private lanternGlowPositions = new Float32Array(MAX_ACTIVE_LANTERN_GLOWS * 3);
   private lanternGlowColors = new Float32Array(MAX_ACTIVE_LANTERN_GLOWS * 3);
+  private maxActiveLanternLights = 6;
+  private lanternLightMaxDistance = 36;
+  private lanternLightKeepDistance = 56;
+  private lanternLightDistance = 28;
+  private lanternLightIntensityScale = 1;
 
   // Refresh timer (seconds until next full refresh)
   lanternRefreshTimer = 0;
@@ -123,11 +125,11 @@ export class LanternSystem {
       return;
     }
 
-    const addDistance2 = LANTERN_LIGHT_MAX_DISTANCE * LANTERN_LIGHT_MAX_DISTANCE;
-    const keepDistance2 = LANTERN_LIGHT_KEEP_DISTANCE * LANTERN_LIGHT_KEEP_DISTANCE;
-    const stickyKeepDistance = LANTERN_LIGHT_KEEP_DISTANCE + LANTERN_LIGHT_STICKY_DISTANCE_BONUS;
+    const addDistance2 = this.lanternLightMaxDistance * this.lanternLightMaxDistance;
+    const keepDistance2 = this.lanternLightKeepDistance * this.lanternLightKeepDistance;
+    const stickyKeepDistance = this.lanternLightKeepDistance + LANTERN_LIGHT_STICKY_DISTANCE_BONUS;
     const stickyKeepDistance2 = stickyKeepDistance * stickyKeepDistance;
-    const chunkRadius = Math.ceil(LANTERN_LIGHT_KEEP_DISTANCE / CHUNK) + 1;
+    const chunkRadius = Math.ceil(this.lanternLightKeepDistance / CHUNK) + 1;
     const playerCx = Math.floor(THREE.MathUtils.clamp(ctx.camera.position.x, 0, WORLD_X - 1) / CHUNK);
     const playerCy = Math.floor(THREE.MathUtils.clamp(ctx.camera.position.y, 0, WORLD_Y - 1) / CHUNK);
     const playerCz = Math.floor(THREE.MathUtils.clamp(ctx.camera.position.z, 0, WORLD_Z - 1) / CHUNK);
@@ -183,7 +185,7 @@ export class LanternSystem {
 
     const wantedKeys: string[] = [];
     const wanted = new Set<string>();
-    const count = Math.min(MAX_ACTIVE_LANTERN_LIGHTS, candidateByKey.size);
+    const count = Math.min(this.maxActiveLanternLights, candidateByKey.size);
 
     for (const key of this.activeLanternLights.keys()) {
       if (wantedKeys.length >= count) break;
@@ -277,6 +279,26 @@ export class LanternSystem {
     }
   }
 
+  setRenderBudget(
+    maxActiveLights: number,
+    lightMaxDistance: number,
+    lightKeepDistance: number,
+    intensityScale = 1,
+  ): void {
+    this.maxActiveLanternLights = Math.max(0, Math.floor(maxActiveLights));
+    this.lanternLightMaxDistance = Math.max(10, lightMaxDistance);
+    this.lanternLightKeepDistance = Math.max(
+      this.lanternLightMaxDistance + 4,
+      lightKeepDistance,
+    );
+    this.lanternLightDistance = Math.max(
+      10,
+      Math.min(this.lanternLightKeepDistance, this.lanternLightMaxDistance * 0.8),
+    );
+    this.lanternLightIntensityScale = THREE.MathUtils.clamp(intensityScale, 0, 1);
+    this.lanternRefreshTimer = 0;
+  }
+
   /** Get the flicker-adjusted intensity for a lantern light at the current time. */
   getLanternFlickerIntensity(
     baseIntensity: number,
@@ -367,7 +389,7 @@ export class LanternSystem {
   }
 
   private ensureLanternPool(ctx: LanternContext): void {
-    for (let i = 0; i < MAX_ACTIVE_LANTERN_LIGHTS; i++) {
+    for (let i = 0; i < this.maxActiveLanternLights; i++) {
       const currentId = this.lanternPoolIds[i];
       if (currentId) continue;
 
@@ -381,7 +403,7 @@ export class LanternSystem {
         },
         color: 0xffba63,
         intensity: 0,
-        distance: 28,
+        distance: this.lanternLightDistance,
         decay: 1.45,
       });
 
@@ -415,8 +437,8 @@ export class LanternSystem {
     ctx.updateDynamicLight(id, {
       position: { x: c.x + 0.5, y: c.y + 0.62, z: c.z + 0.5 },
       color,
-      intensity: 4.8 * lanternVisibility,
-      distance: 28,
+      intensity: 4.8 * lanternVisibility * this.lanternLightIntensityScale,
+      distance: this.lanternLightDistance,
       decay: 1.45,
       kind: 'lantern',
     });

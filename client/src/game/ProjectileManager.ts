@@ -80,6 +80,7 @@ interface ActiveProjectile {
   radius: number;
   // Visual
   trailColor: number;
+  lightIntensity: number;
   trailTimer: number;
   trailSpacing: number;
   // State
@@ -110,6 +111,9 @@ export class ProjectileManager {
   private otherPlayers: Map<string, THREE.Group>;
   private onLocalImpact: (impact: ProjectileImpact) => void;
   private activeLightCount = 0;
+  private maxVisibleLights = MAX_LIGHTS;
+  private lightDistance = 28;
+  private lightIntensityScale = 1;
 
   constructor(
     scene: THREE.Scene,
@@ -129,6 +133,20 @@ export class ProjectileManager {
     this.camera = camera;
     this.otherPlayers = otherPlayers;
     this.onLocalImpact = onLocalImpact;
+  }
+
+  setLightBudget(maxVisibleLights: number, lightDistance: number, lightIntensityScale = 1): void {
+    this.maxVisibleLights = Math.max(0, Math.floor(maxVisibleLights));
+    this.lightDistance = Math.max(0, lightDistance);
+    this.lightIntensityScale = THREE.MathUtils.clamp(lightIntensityScale, 0, 1);
+  }
+
+  getActiveLightCount(): number {
+    let count = 0;
+    for (const projectile of this.projectiles) {
+      if (projectile.light?.visible) count++;
+    }
+    return count;
   }
 
   /** Spawn a projectile from the local player's fire */
@@ -301,7 +319,7 @@ export class ProjectileManager {
 
     // Optional point light (capped)
     let light: THREE.PointLight | null = null;
-    if (cfg.lightIntensity > 0 && this.activeLightCount < MAX_LIGHTS) {
+    if (cfg.lightIntensity > 0 && this.activeLightCount < this.maxVisibleLights) {
       light = new THREE.PointLight(cfg.lightColor, cfg.lightIntensity, cfg.lightRange);
       light.position.copy(origin);
       this.scene.add(light);
@@ -324,6 +342,7 @@ export class ProjectileManager {
       age: 0,
       radius,
       trailColor: cfg.trailColor,
+      lightIntensity: cfg.lightIntensity,
       trailTimer: 0,
       trailSpacing: cfg.trailLength,
       isLocal,
@@ -343,6 +362,9 @@ export class ProjectileManager {
 
   /** Per-frame update: move projectiles, check collisions, trigger impacts */
   update(delta: number): void {
+    const litProjectiles: Array<{ projectile: ActiveProjectile; d2: number }> = [];
+    const maxLightDistanceSq = this.lightDistance * this.lightDistance;
+
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       p.age += delta;
@@ -440,7 +462,14 @@ export class ProjectileManager {
 
       // Update visuals
       p.mesh.position.copy(p.pos);
-      if (p.light) p.light.position.copy(p.pos);
+      if (p.light) {
+        p.light.position.copy(p.pos);
+        const dx = p.pos.x - this.camera.position.x;
+        const dy = p.pos.y - this.camera.position.y;
+        const dz = p.pos.z - this.camera.position.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 <= maxLightDistanceSq) litProjectiles.push({ projectile: p, d2 });
+      }
 
       // Stretch mesh in velocity direction for motion blur effect
       const speed = p.vel.length();
@@ -482,6 +511,21 @@ export class ProjectileManager {
         }
         p.prevDistToListener = dist;
       }
+    }
+
+    litProjectiles.sort((a, b) => a.d2 - b.d2);
+    const visible = new Set<ActiveProjectile>();
+    for (let i = 0; i < litProjectiles.length && i < this.maxVisibleLights; i++) {
+      visible.add(litProjectiles[i]!.projectile);
+    }
+
+    for (const projectile of this.projectiles) {
+      if (!projectile.light) continue;
+      const enabled = visible.has(projectile);
+      projectile.light.visible = enabled;
+      projectile.light.intensity = enabled
+        ? projectile.lightIntensity * this.lightIntensityScale
+        : 0;
     }
 
   }

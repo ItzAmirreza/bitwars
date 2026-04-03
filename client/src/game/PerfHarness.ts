@@ -498,6 +498,7 @@ export function buildPerfHooks(engine: Engine): PerfHarnessHooks {
         vfx?: { particles?: Array<unknown>; tracers?: Array<unknown> };
         physics?: { falling?: Array<unknown>; settled?: Array<unknown> };
         dynamicLights?: Map<string, unknown>;
+        getActiveSceneLightCount?: () => number;
         __perfLastState?: { frameMs?: number; cpuFrameMs?: number; playerCount?: number };
         mountedVehicleId?: number;
       };
@@ -539,7 +540,7 @@ export function buildPerfHooks(engine: Engine): PerfHarnessHooks {
         activeTracers: e.vfx?.tracers?.length ?? 0,
         activeFallingDebris: e.physics?.falling?.length ?? 0,
         activeSettledDebris: e.physics?.settled?.length ?? 0,
-        dynamicLights: e.dynamicLights?.size ?? 0,
+        dynamicLights: e.getActiveSceneLightCount?.() ?? e.dynamicLights?.size ?? 0,
         startupLoadProgress: e.chunkStreamer?.getStartupLoadProgress?.() ?? 1,
         worldReady: e.chunkStreamer?.startupWorldReady ?? false,
         playerCount: state?.playerCount ?? 1,

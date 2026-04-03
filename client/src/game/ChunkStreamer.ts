@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { VoxelWorld, WORLD_X, WORLD_Y, WORLD_Z, CHUNK, packChunkId, unpackChunkId } from './VoxelWorld';
-import type { ChunkApplyBudget } from './VoxelWorld';
 import type { DbConnection } from '../module_bindings';
 import { updateWorldChunkSubscriptionAoi } from '../db';
 
@@ -19,11 +18,6 @@ const CHUNK_REQUEST_TIMEOUT_MS = 2000;
 const NUM_CHUNKS_Y = Math.ceil(WORLD_Y / CHUNK);
 const STARTUP_READY_RADIUS = 2;
 const WORLD_CHUNK_AOI_RADIUS = VIEW_DISTANCE + UNLOAD_BUFFER + 5;
-const BOOTSTRAP_APPLY_BUDGET: ChunkApplyBudget = {
-  maxChunks: CHUNK_REBUILD_BUDGET_BOOTSTRAP,
-  maxBuildChunks: CHUNK_REBUILD_BUDGET_BOOTSTRAP,
-  maxApplyMs: 2.8,
-};
 
 type ChunkOffset = { dx: number; dz: number; d2: number };
 
@@ -167,10 +161,12 @@ export class ChunkStreamer {
     this.reapPendingChunkRequests();
 
     const [cx, cz] = this.getLoadAnchorChunk();
-    updateWorldChunkSubscriptionAoi(cx, cz, WORLD_CHUNK_AOI_RADIUS);
 
+    const prevCx = this.lastPlayerCx;
+    const prevCz = this.lastPlayerCz;
     const playerMoved = cx !== this.lastPlayerCx || cz !== this.lastPlayerCz;
     if (playerMoved) {
+      updateWorldChunkSubscriptionAoi(cx, cz, WORLD_CHUNK_AOI_RADIUS);
       this.lastPlayerCx = cx;
       this.lastPlayerCz = cz;
       this.rebuildChunkRequestQueue(cx, cz);
@@ -256,17 +252,7 @@ export class ChunkStreamer {
 
     // Unload chunks that are too far away (only check when player moved)
     if (playerMoved) {
-      const unloadDist = VIEW_DISTANCE + UNLOAD_BUFFER;
-      for (const chunkId of this.ctx.world.getLoadedChunkIds()) {
-        const [lcx, , lcz] = unpackChunkId(chunkId);
-        const dx = lcx - cx;
-        const dz = lcz - cz;
-        if (dx * dx + dz * dz > unloadDist * unloadDist) {
-          const [ucx, ucy, ucz] = unpackChunkId(chunkId);
-          this.ctx.onChunkUnloading(chunkId);
-          this.ctx.world.unloadChunk(ucx, ucy, ucz, this.ctx.scene);
-        }
-      }
+      this.unloadOutOfRangeChunks(cx, cz, prevCx, prevCz);
     }
   }
 
@@ -478,20 +464,22 @@ export class ChunkStreamer {
     if (cx < 0 || cx >= maxCx || cz < 0 || cz >= maxCz) return;
 
     let hasGroundMesh = false;
+    let hasLoadedChunk = false;
     for (let cy = 0; cy < NUM_CHUNKS_Y; cy++) {
       if (this.ctx.world.hasChunkMesh(cx, cy, cz)) {
         hasGroundMesh = true;
         break;
       }
+      if (this.ctx.world.isChunkLoaded(cx, cy, cz)) hasLoadedChunk = true;
     }
-    if (hasGroundMesh) return;
+    if (hasGroundMesh || !hasLoadedChunk) return;
+    if (this.ctx.world.hasColumnMeshWork(cx, cz)) return;
 
     for (let cy = 0; cy < NUM_CHUNKS_Y; cy++) {
       if (this.ctx.world.isChunkLoaded(cx, cy, cz)) {
         this.ctx.world.markChunkDirty(cx, cy, cz);
       }
     }
-    this.ctx.world.rebuildDirtyChunks(this.ctx.scene, BOOTSTRAP_APPLY_BUDGET);
   }
 
   /** Reset all chunk streaming state (e.g. on map reset) */
@@ -523,5 +511,61 @@ export class ChunkStreamer {
     this.requestBackoffUntilMs = 0;
     this.lastPlayerCx = -1;
     this.lastPlayerCz = -1;
+  }
+
+  private unloadOutOfRangeChunks(cx: number, cz: number, prevCx: number, prevCz: number): void {
+    const unloadDist = VIEW_DISTANCE + UNLOAD_BUFFER;
+    const unloadDistSq = unloadDist * unloadDist;
+
+    if (prevCx < 0 || prevCz < 0) {
+      this.fullUnloadPass(cx, cz, unloadDistSq);
+      return;
+    }
+
+    const dxMoved = Math.abs(cx - prevCx);
+    const dzMoved = Math.abs(cz - prevCz);
+    if (dxMoved > unloadDist || dzMoved > unloadDist) {
+      this.fullUnloadPass(cx, cz, unloadDistSq);
+      return;
+    }
+
+    for (let dz = -unloadDist; dz <= unloadDist; dz++) {
+      for (let dx = -unloadDist; dx <= unloadDist; dx++) {
+        if (dx * dx + dz * dz > unloadDistSq) continue;
+
+        const unloadCx = prevCx + dx;
+        const unloadCz = prevCz + dz;
+        const nextDx = unloadCx - cx;
+        const nextDz = unloadCz - cz;
+        if (nextDx * nextDx + nextDz * nextDz <= unloadDistSq) continue;
+        this.unloadColumn(unloadCx, unloadCz);
+      }
+    }
+  }
+
+  private fullUnloadPass(cx: number, cz: number, unloadDistSq: number): void {
+    for (const chunkId of this.ctx.world.getLoadedChunkIds()) {
+      const [lcx, , lcz] = unpackChunkId(chunkId);
+      const dx = lcx - cx;
+      const dz = lcz - cz;
+      if (dx * dx + dz * dz <= unloadDistSq) continue;
+      const [ucx, ucy, ucz] = unpackChunkId(chunkId);
+      this.ctx.onChunkUnloading(chunkId);
+      this.ctx.world.unloadChunk(ucx, ucy, ucz, this.ctx.scene);
+    }
+  }
+
+  private unloadColumn(cx: number, cz: number): void {
+    const maxCx = Math.ceil(WORLD_X / CHUNK);
+    const maxCz = Math.ceil(WORLD_Z / CHUNK);
+    if (cx < 0 || cx >= maxCx || cz < 0 || cz >= maxCz) return;
+
+    for (let cy = 0; cy < NUM_CHUNKS_Y; cy++) {
+      if (!this.ctx.world.isChunkLoaded(cx, cy, cz)) continue;
+      const chunkId = packChunkId(cx, cy, cz);
+      this.pendingChunkRequests.delete(chunkId);
+      this.ctx.onChunkUnloading(chunkId);
+      this.ctx.world.unloadChunk(cx, cy, cz, this.ctx.scene);
+    }
   }
 }

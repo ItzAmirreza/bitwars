@@ -77,6 +77,8 @@ function CompassBar({ heading }: { heading: number }) {
 export interface TopHudBarProps {
   showSettings: boolean;
   setShowSettings: (v: boolean) => void;
+  showLivePerfOverlay: boolean;
+  toggleLivePerfOverlay: () => void;
   loadoutOpen: boolean;
   chatOpen: boolean;
   username: string | null;
@@ -104,7 +106,7 @@ const hudBtnBase: React.CSSProperties = {
 };
 
 export function TopHudBar({
-  showSettings, setShowSettings, loadoutOpen, chatOpen, username,
+  showSettings, setShowSettings, showLivePerfOverlay, toggleLivePerfOverlay, loadoutOpen, chatOpen, username,
   roundTimerLabel, roundTimer, roundTimerCritical, playerCount, fps, serverTps, heading, locked, handleLeave, openLoadout,
 }: TopHudBarProps) {
   return (
@@ -141,6 +143,18 @@ export function TopHudBar({
               }}
             >
               SETTINGS
+            </button>
+            <button
+              onClick={toggleLivePerfOverlay}
+              className="pointer-events-auto"
+              style={{
+                ...hudBtnBase,
+                color: showLivePerfOverlay ? '#00e5ff' : '#6b7080',
+                borderColor: showLivePerfOverlay ? '#00e5ff' : '#1a1e2e',
+              }}
+              title="Press F7 in-game"
+            >
+              [F7] LIVE
             </button>
             <button
               className="pointer-events-auto"

@@ -68,6 +68,8 @@ export class VFX {
   // Muzzle flash light
   private muzzleLight: THREE.PointLight;
   private muzzleTimer = 0;
+  private muzzleLightEnabled = true;
+  private muzzleLightIntensityScale = 1;
 
   // Screen shake (stored only, applied by Engine around render)
   private shakeAmount = 0;
@@ -227,6 +229,19 @@ export class VFX {
         gravity: false,
       });
     }
+  }
+
+  setMuzzleLightBudget(enabled: boolean, intensityScale = 1): void {
+    this.muzzleLightEnabled = enabled;
+    this.muzzleLightIntensityScale = THREE.MathUtils.clamp(intensityScale, 0, 1);
+    if (!enabled) {
+      this.muzzleLight.visible = false;
+      this.muzzleLight.intensity = 0;
+    }
+  }
+
+  getActiveLightCount(): number {
+    return this.muzzleLight.visible && this.muzzleLight.intensity > 0.01 ? 1 : 0;
   }
 
   // ── Impact dust ──
@@ -440,8 +455,18 @@ export class VFX {
     // ── Muzzle flash light ──
     if (this.muzzleTimer > 0) {
       this.muzzleTimer -= delta;
-      this.muzzleLight.intensity = this.muzzleTimer > 0 ? 5 * (this.muzzleTimer / 0.05) : 0;
-      this.muzzleLight.position.copy(this.camera.position);
+      if (this.muzzleLightEnabled && this.muzzleTimer > 0) {
+        this.muzzleLight.visible = true;
+        this.muzzleLight.intensity =
+          5 * (this.muzzleTimer / 0.05) * this.muzzleLightIntensityScale;
+        this.muzzleLight.position.copy(this.camera.position);
+      } else {
+        this.muzzleLight.visible = false;
+        this.muzzleLight.intensity = 0;
+      }
+    } else {
+      this.muzzleLight.visible = false;
+      this.muzzleLight.intensity = 0;
     }
 
     // ── Screen shake (compute offsets, don't touch camera) ──
