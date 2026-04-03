@@ -369,6 +369,17 @@ pub struct ChatMessage {
     pub sent_at: Timestamp,
 }
 
+/// Explicit teleport signal so clients can snap immediately for admin `/tp`.
+#[table(accessor = admin_teleport_event, public)]
+pub struct AdminTeleportEvent {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    pub player: Identity,
+    pub pos: Vec3,
+    pub created_at: Timestamp,
+}
+
 /// Server-side chat anti-spam state per player.
 #[table(accessor = chat_throttle)]
 pub struct ChatThrottle {

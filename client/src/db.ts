@@ -259,6 +259,7 @@ export function connect(
             "SELECT * FROM server_info WHERE id = 1",
             "SELECT * FROM world_config WHERE id = 1",
             "SELECT * FROM chat_message",
+            "SELECT * FROM admin_teleport_event",
             "SELECT * FROM explosion_event",
             "SELECT * FROM grenade_projectile",
             "SELECT * FROM kill_event",

@@ -58,6 +58,7 @@ import VehicleProjectileImpactReducer from "./vehicle_projectile_impact_reducer"
 // Import all table schema definitions
 import AbilityPickupRow from "./ability_pickup_table";
 import AbilityPickupEventRow from "./ability_pickup_event_table";
+import AdminTeleportEventRow from "./admin_teleport_event_table";
 import ChatMessageRow from "./chat_message_table";
 import DetachEventRow from "./detach_event_table";
 import EntityRow from "./entity_table";
@@ -105,6 +106,17 @@ const tablesSchema = __schema({
       { name: 'ability_pickup_event_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, AbilityPickupEventRow),
+  admin_teleport_event: __table({
+    name: 'admin_teleport_event',
+    indexes: [
+      { accessor: 'id', name: 'admin_teleport_event_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'admin_teleport_event_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, AdminTeleportEventRow),
   chat_message: __table({
     name: 'chat_message',
     indexes: [
