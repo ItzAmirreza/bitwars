@@ -1,11 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useGameStore } from "./store";
 import { connect, resetConnection } from "./db";
-import { isVersionMismatch } from "./versionCheck";
+import {
+  CLIENT_BUILD_HASH,
+  fetchLatestBuildMeta,
+  hasNewClientBuild,
+  isServerBuildCompatible,
+} from "./versionCheck";
 import { LoginScreen } from "./screens/LoginScreen";
 import { LobbyScreen } from "./screens/LobbyScreen";
 import { GameScreen } from "./screens/GameScreen";
+import { useMatchSession } from "./screens/hooks/useMatchSession";
 import { consumeAuthCallback } from "./auth";
+
+const UPDATE_RELOAD_GUARD_KEY = "bitwars-update-reload-at";
+
+type PendingUpdate = {
+  kind: "client" | "compatibility";
+  latestClientBuild?: string;
+  serverBuild?: string;
+};
 
 function LoadingScreen() {
   const [dots, setDots] = useState("");
@@ -62,7 +76,6 @@ function LoadingScreen() {
           BITWARS
         </h1>
 
-        {/* Pixel loading bar */}
         <div
           style={{
             width: "240px",
@@ -100,26 +113,132 @@ function LoadingScreen() {
   );
 }
 
+function UpdateBanner({
+  pendingUpdate,
+  canReloadNow,
+  onReloadNow,
+}: {
+  pendingUpdate: PendingUpdate;
+  canReloadNow: boolean;
+  onReloadNow: () => void;
+}) {
+  const message = pendingUpdate.kind === "compatibility"
+    ? canReloadNow
+      ? "Server update detected. Reloading BitWars to resync."
+      : "Server update detected. This round will finish before BitWars reloads."
+    : canReloadNow
+      ? "New BitWars build ready. Reloading to update."
+      : "New BitWars build ready. This round will finish before BitWars reloads.";
+
+  const detail = pendingUpdate.kind === "compatibility"
+    ? pendingUpdate.serverBuild
+      ? `server ${pendingUpdate.serverBuild} / client ${CLIENT_BUILD_HASH}`
+      : `client ${CLIENT_BUILD_HASH}`
+    : pendingUpdate.latestClientBuild
+      ? `current ${CLIENT_BUILD_HASH} / latest ${pendingUpdate.latestClientBuild}`
+      : `current ${CLIENT_BUILD_HASH}`;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: "12px",
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 40,
+        minWidth: "min(720px, calc(100vw - 24px))",
+        maxWidth: "min(720px, calc(100vw - 24px))",
+        pointerEvents: "auto",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "12px",
+          padding: "10px 14px",
+          background: "rgba(10, 12, 20, 0.96)",
+          border: "2px solid #ff6b35",
+          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.35)",
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+          <span
+            style={{
+              fontFamily: "var(--font-pixel)",
+              fontSize: "8px",
+              color: "#ff6b35",
+              letterSpacing: "0.12em",
+            }}
+          >
+            UPDATE READY
+          </span>
+          <span
+            style={{
+              fontFamily: "var(--font-pixel)",
+              fontSize: "7px",
+              color: "#e8e8f0",
+              letterSpacing: "0.06em",
+              lineHeight: 1.5,
+            }}
+          >
+            {message}
+          </span>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "11px",
+              color: "#6b7080",
+            }}
+          >
+            {detail}
+          </span>
+        </div>
+        <button
+          onClick={onReloadNow}
+          style={{
+            fontFamily: "var(--font-pixel)",
+            fontSize: "7px",
+            background: "#ff6b35",
+            border: "2px solid #ff9f1c",
+            color: "#0a0c14",
+            letterSpacing: "0.08em",
+            cursor: "pointer",
+            padding: "8px 12px",
+            flexShrink: 0,
+          }}
+        >
+          RELOAD NOW
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [connectAttempt, setConnectAttempt] = useState(0);
   const [authReady, setAuthReady] = useState(false);
+  const [pendingUpdate, setPendingUpdate] = useState<PendingUpdate | null>(null);
   const {
     screen,
     identity,
     connected,
     connection,
     error,
-    versionStale,
     setConnected,
     setIdentity,
     setConnection,
     setError,
-    setVersionStale,
     setScreen,
     setUsername,
     resetSession,
   } = useGameStore();
   const handlingSessionLossRef = useRef(false);
+  const matchSession = useMatchSession(connection, identity);
+
+  const canReloadForUpdate =
+    !connection || screen !== "game" || matchSession.phase !== "active";
 
   const handleSessionLoss = useCallback(
     (message: string) => {
@@ -132,6 +251,38 @@ function App() {
     [resetSession],
   );
 
+  const queuePendingUpdate = useCallback((update: PendingUpdate) => {
+    setPendingUpdate((current) => {
+      if (!current) return update;
+      if (current.kind === "compatibility") {
+        return {
+          ...current,
+          serverBuild: update.serverBuild ?? current.serverBuild,
+        };
+      }
+      if (update.kind === "compatibility") return update;
+      return {
+        ...current,
+        latestClientBuild: update.latestClientBuild ?? current.latestClientBuild,
+      };
+    });
+  }, []);
+
+  const reloadForUpdate = useCallback(() => {
+    const now = Date.now();
+    const lastAttempt = Number(
+      sessionStorage.getItem(UPDATE_RELOAD_GUARD_KEY) ?? "0",
+    );
+    if (now - lastAttempt < 15000) {
+      setError("BitWars is still updating. Try again in a few seconds.");
+      return;
+    }
+
+    sessionStorage.setItem(UPDATE_RELOAD_GUARD_KEY, String(now));
+    resetConnection();
+    window.location.reload();
+  }, [setError]);
+
   useEffect(() => {
     const result = consumeAuthCallback();
     if (result.error) {
@@ -141,23 +292,23 @@ function App() {
   }, [setError]);
 
   useEffect(() => {
-    if (!authReady || connected || connection || versionStale) return;
+    if (!authReady || connected || connection) return;
 
     connect(
-      (conn, identity, _token) => {
+      (conn, nextIdentity, _token) => {
         handlingSessionLossRef.current = false;
         setError(null);
-        setIdentity(identity);
+        setIdentity(nextIdentity);
         setConnection(conn);
         setConnected(true);
       },
-      (error) => {
-        setError(error.message);
-        console.error("[BitWars] Connection error:", error);
+      (nextError) => {
+        setError(nextError.message);
+        console.error("[BitWars] Connection error:", nextError);
       },
-      (error) => {
-        console.error("[BitWars] Session lost:", error);
-        handleSessionLoss(error.message);
+      (disconnectError) => {
+        console.error("[BitWars] Session lost:", disconnectError);
+        handleSessionLoss(disconnectError.message);
       },
     );
 
@@ -173,7 +324,6 @@ function App() {
     authReady,
     connected,
     connection,
-    versionStale,
     setConnected,
     setIdentity,
     setConnection,
@@ -181,6 +331,42 @@ function App() {
     handleSessionLoss,
     connectAttempt,
   ]);
+
+  useEffect(() => {
+    if (!connected) return;
+    sessionStorage.removeItem(UPDATE_RELOAD_GUARD_KEY);
+  }, [connected]);
+
+  useEffect(() => {
+    if (import.meta.env.DEV) return;
+
+    let disposed = false;
+    let activeController: AbortController | null = null;
+
+    const pollLatestBuild = async () => {
+      activeController?.abort();
+      activeController = new AbortController();
+
+      const meta = await fetchLatestBuildMeta(activeController.signal);
+      if (disposed || !meta || !hasNewClientBuild(meta)) return;
+
+      queuePendingUpdate({
+        kind: "client",
+        latestClientBuild: meta.clientBuild,
+      });
+    };
+
+    void pollLatestBuild();
+    const interval = window.setInterval(() => {
+      void pollLatestBuild();
+    }, 60000);
+
+    return () => {
+      disposed = true;
+      activeController?.abort();
+      window.clearInterval(interval);
+    };
+  }, [queuePendingUpdate]);
 
   useEffect(() => {
     if (!connected || !connection || !identity) return;
@@ -222,36 +408,34 @@ function App() {
     checkLocalPlayer();
     const interval = window.setInterval(checkLocalPlayer, 1000);
 
-    // Version mismatch detection: if the deployed client/server hashes differ,
-    // kick the client back to login with a warning to refresh.
     const db = connection.db as Record<string, unknown>;
     const serverInfoTable = db.server_info as
-      | { onInsert?: (cb: (...args: unknown[]) => void) => { remove: () => void };
-          iter?: () => Iterable<{ buildHash?: string }> }
+      | {
+          onInsert?: (cb: (...args: unknown[]) => void) => { remove: () => void };
+          iter?: () => Iterable<{ buildHash?: string }>;
+        }
       | undefined;
 
     let versionUnsub: { remove: () => void } | undefined;
 
     const checkVersion = (row: { buildHash?: string }) => {
-      if (row.buildHash && isVersionMismatch(row.buildHash)) {
-        setVersionStale();
-        handleSessionLoss(
-          "A new version of BitWars has been deployed. Please refresh to update.",
-        );
+      if (row.buildHash && !isServerBuildCompatible(row.buildHash)) {
+        queuePendingUpdate({
+          kind: "compatibility",
+          serverBuild: row.buildHash,
+        });
       }
     };
 
     if (serverInfoTable) {
-      // Check existing rows (reconnect after redeploy)
       if (serverInfoTable.iter) {
         for (const row of serverInfoTable.iter()) {
           checkVersion(row);
         }
       }
-      // Listen for live updates (hot redeploy while connected)
       if (serverInfoTable.onInsert) {
-        versionUnsub = serverInfoTable.onInsert(
-          (_ctx: unknown, row: unknown) => checkVersion(row as { buildHash?: string }),
+        versionUnsub = serverInfoTable.onInsert((_ctx: unknown, row: unknown) =>
+          checkVersion(row as { buildHash?: string }),
         );
       }
     }
@@ -266,9 +450,20 @@ function App() {
     identity,
     screen,
     handleSessionLoss,
+    queuePendingUpdate,
     setScreen,
     setUsername,
   ]);
+
+  useEffect(() => {
+    if (import.meta.env.DEV || !pendingUpdate || !canReloadForUpdate) return;
+
+    const reloadTimer = window.setTimeout(() => {
+      reloadForUpdate();
+    }, pendingUpdate.kind === "compatibility" ? 1500 : 4000);
+
+    return () => window.clearTimeout(reloadTimer);
+  }, [pendingUpdate, canReloadForUpdate, reloadForUpdate]);
 
   if (!connected && !error) {
     return <LoadingScreen />;
@@ -278,6 +473,13 @@ function App() {
 
   return (
     <div className="w-full h-full relative">
+      {pendingUpdate && (
+        <UpdateBanner
+          pendingUpdate={pendingUpdate}
+          canReloadNow={canReloadForUpdate}
+          onReloadNow={reloadForUpdate}
+        />
+      )}
       <div className="absolute inset-0">
         {showGameScreen && <GameScreen active={screen === "game"} />}
       </div>
