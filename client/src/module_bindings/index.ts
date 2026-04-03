@@ -71,6 +71,7 @@ import PlayerAmmoRow from "./player_ammo_table";
 import PlayerBuffRow from "./player_buff_table";
 import PlayerLoadoutRow from "./player_loadout_table";
 import PlayerProfileRow from "./player_profile_table";
+import ServerInfoRow from "./server_info_table";
 import ShotEventRow from "./shot_event_table";
 import VehicleRow from "./vehicle_table";
 import VehicleDestroyEventRow from "./vehicle_destroy_event_table";
@@ -262,6 +263,17 @@ const tablesSchema = __schema({
       { name: 'player_profile_profile_id_key', constraint: 'unique', columns: ['profileId'] },
     ],
   }, PlayerProfileRow),
+  server_info: __table({
+    name: 'server_info',
+    indexes: [
+      { accessor: 'id', name: 'server_info_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'server_info_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, ServerInfoRow),
   shot_event: __table({
     name: 'shot_event',
     indexes: [

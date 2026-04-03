@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useGameStore } from "../store";
+import { CLIENT_BUILD_HASH } from "../versionCheck";
 import { menuAudio } from "../menuAudio";
 import { CHARACTER_PRESETS, colorHex } from "../characterPresets";
 import { PixelArtBg } from "./PixelArtBg";
@@ -788,7 +789,7 @@ export function LoginScreen() {
               letterSpacing: "0.1em",
             }}
           >
-            v0.1.0 ALPHA
+            v0.1.0 ALPHA | build {CLIENT_BUILD_HASH}
           </span>
           <span style={{ color: "#2a2e3e" }}>|</span>
           <a

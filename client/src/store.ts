@@ -61,6 +61,7 @@ interface GameStore {
   connected: boolean;
   connection: DbConnection | null;
   error: string | null;
+  versionStale: boolean;
   settings: GameSettings;
   showSettings: boolean;
   selectedCharacterPreset: number;
@@ -71,6 +72,7 @@ interface GameStore {
   setConnected: (connected: boolean) => void;
   setConnection: (conn: DbConnection | null) => void;
   setError: (error: string | null) => void;
+  setVersionStale: () => void;
   setSettings: (partial: Partial<GameSettings>) => void;
   resetSettings: () => void;
   setShowSettings: (show: boolean) => void;
@@ -85,6 +87,7 @@ export const useGameStore = create<GameStore>((set) => ({
   connected: false,
   connection: null,
   error: null,
+  versionStale: false,
   settings: loadSettings(),
   showSettings: false,
   selectedCharacterPreset: loadCharacterPreset(),
@@ -95,6 +98,7 @@ export const useGameStore = create<GameStore>((set) => ({
   setConnected: (connected) => set({ connected }),
   setConnection: (connection) => set({ connection }),
   setError: (error) => set({ error }),
+  setVersionStale: () => set({ versionStale: true }),
   setSettings: (partial) =>
     set((state) => {
       const next = { ...state.settings, ...partial };
