@@ -102,6 +102,46 @@ function QualitySelect({ value, onChange }: {
   );
 }
 
+function MinimapSideSelect({ value, onChange }: {
+  value: GameSettings['minimapSide'];
+  onChange: (v: GameSettings['minimapSide']) => void;
+}) {
+  const options: GameSettings['minimapSide'][] = ['left', 'right'];
+  return (
+    <div style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px',
+    }}>
+      <span style={{
+        fontFamily: 'var(--font-pixel)', fontSize: '7px',
+        color: '#6b7080', letterSpacing: '0.1em',
+      }}>
+        MINIMAP SIDE
+      </span>
+      <div style={{ display: 'flex', gap: '4px' }}>
+        {options.map((opt) => (
+          <button
+            key={opt}
+            onClick={() => { onChange(opt); menuAudio.playUIClick(); }}
+            style={{
+              fontFamily: 'var(--font-pixel)', fontSize: '6px',
+              padding: '4px 10px',
+              background: value === opt ? 'rgba(0,229,255,0.15)' : 'rgba(255,255,255,0.05)',
+              border: `2px solid ${value === opt ? '#00e5ff' : '#1a1e2e'}`,
+              color: value === opt ? '#00e5ff' : '#6b7080',
+              cursor: 'pointer',
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase',
+              transition: 'all 0.1s',
+            }}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPanel() {
   const { settings, setSettings, resetSettings, setShowSettings } = useGameStore();
 
@@ -163,6 +203,7 @@ export function SettingsPanel() {
           <Slider label="FIELD OF VIEW" value={settings.fov} min={60} max={120} step={1}
             display={`${settings.fov}`} onChange={(v) => setSettings({ fov: v })} />
           <Toggle label="SPRINT TOGGLE" value={settings.sprintToggle} onChange={(v) => setSettings({ sprintToggle: v })} />
+          <MinimapSideSelect value={settings.minimapSide} onChange={(v) => setSettings({ minimapSide: v })} />
         </div>
 
         <div style={{ marginBottom: '20px' }}>

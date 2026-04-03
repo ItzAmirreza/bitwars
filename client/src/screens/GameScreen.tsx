@@ -18,9 +18,11 @@ import { DeathScreen } from './hud/DeathScreen';
 import { BuffIndicators } from './hud/BuffIndicators';
 import { MatchVictoryOverlay } from './hud/MatchVictoryOverlay';
 import { LivePerfOverlay } from './hud/LivePerfOverlay';
+import { TacticalMapOverlay, TacticalMinimap } from './hud/TacticalMap';
 import { useKillTracking } from './hooks/useKillTracking';
 import { useChat } from './hooks/useChat';
 import { useMatchSession } from './hooks/useMatchSession';
+import { useTacticalMap } from './hooks/useTacticalMap';
 
 interface GameScreenProps {
   active: boolean;
@@ -109,6 +111,7 @@ export function GameScreen({ active }: GameScreenProps) {
   const [savingLoadout, setSavingLoadout] = useState(false);
   const [showPerfPanel, setShowPerfPanel] = useState(false);
   const [showLivePerfOverlay, setShowLivePerfOverlay] = useState(false);
+  const [tacticalMapOpen, setTacticalMapOpen] = useState(false);
   const [perfRunning, setPerfRunning] = useState(false);
   const [perfProgress, setPerfProgress] = useState(0);
   const [perfLastRun, setPerfLastRun] = useState<PerfRunResult | null>(null);
@@ -120,11 +123,16 @@ export function GameScreen({ active }: GameScreenProps) {
   const perfHarnessRef = useRef<PerfHarness | null>(null);
   const perfTickerRef = useRef<number | null>(null);
   const matchSession = useMatchSession(activeConnection, identity);
+  const tacticalMap = useTacticalMap(activeConnection, identity, active);
 
   const closeLoadout = useCallback(() => {
     setLoadoutOpen(false);
     setSavingLoadout(false);
     engineRef.current?.setLoadoutMenuOpen(false);
+  }, []);
+
+  const closeTacticalMap = useCallback(() => {
+    setTacticalMapOpen(false);
   }, []);
 
   const openLoadout = useCallback(() => {
@@ -133,11 +141,14 @@ export function GameScreen({ active }: GameScreenProps) {
       setChatDraft('');
       engineRef.current?.setChatOpen(false);
     }
+    if (tacticalMapOpen) {
+      closeTacticalMap();
+    }
     setLoadoutDraft(state.loadout);
     setActiveLoadoutSlot(0);
     setLoadoutOpen(true);
     engineRef.current?.setLoadoutMenuOpen(true);
-  }, [chatOpen, state.loadout, setChatDraft]);
+  }, [chatOpen, tacticalMapOpen, closeTacticalMap, state.loadout, setChatDraft]);
 
   const assignWeaponToSlot = useCallback((slot: number, weaponIndex: number) => {
     setLoadoutDraft((prev) => {
@@ -173,16 +184,29 @@ export function GameScreen({ active }: GameScreenProps) {
     if (loadoutOpen) {
       closeLoadout();
     }
+    if (tacticalMapOpen) {
+      closeTacticalMap();
+    }
     setChatDraft(initialText);
     setChatOpen(true);
     engineRef.current?.setChatOpen(true);
-  }, [loadoutOpen, closeLoadout, setChatDraft]);
+  }, [loadoutOpen, tacticalMapOpen, closeLoadout, closeTacticalMap, setChatDraft]);
 
   const closeChat = useCallback(() => {
     setChatOpen(false);
     setChatDraft('');
     engineRef.current?.setChatOpen(false);
   }, [setChatDraft]);
+
+  const toggleTacticalMap = useCallback(() => {
+    if (chatOpen) {
+      closeChat();
+    }
+    if (loadoutOpen) {
+      closeLoadout();
+    }
+    setTacticalMapOpen((value) => !value);
+  }, [chatOpen, loadoutOpen, closeChat, closeLoadout]);
 
   const handleSendChatMessage = useCallback(
     async (text: string) => {
@@ -375,7 +399,17 @@ export function GameScreen({ active }: GameScreenProps) {
     }
   }, [settings]);
 
-  // Global key handler: Escape (menus), T (chat), E (loadout)
+  useEffect(() => {
+    engineRef.current?.setTacticalMapOpen(tacticalMapOpen);
+  }, [tacticalMapOpen]);
+
+  useEffect(() => {
+    if (showSettings && tacticalMapOpen) {
+      setTacticalMapOpen(false);
+    }
+  }, [showSettings, tacticalMapOpen]);
+
+  // Global key handler: Escape (menus), T (chat), E (loadout), M (map)
   const handleGlobalKey = useCallback(
     (e: KeyboardEvent) => {
       if (!active) return;
@@ -408,20 +442,31 @@ export function GameScreen({ active }: GameScreenProps) {
         return;
       }
 
-      if (chatOpen || loadoutOpen) {
+      if (chatOpen || loadoutOpen || tacticalMapOpen) {
         if (e.code === 'Escape') {
           e.preventDefault();
           if (chatOpen) closeChat();
-          else closeLoadout();
+          else if (loadoutOpen) closeLoadout();
+          else closeTacticalMap();
         }
         if (loadoutOpen && e.code === 'KeyE') {
           e.preventDefault();
           closeLoadout();
         }
+        if (tacticalMapOpen && e.code === 'KeyM') {
+          e.preventDefault();
+          closeTacticalMap();
+        }
         if (loadoutOpen && (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3')) {
           e.preventDefault();
           setActiveLoadoutSlot(Number(e.code.charAt(5)) - 1);
         }
+        return;
+      }
+
+      if (e.code === 'KeyM' && state.worldReady && !showSettings) {
+        e.preventDefault();
+        toggleTacticalMap();
         return;
       }
 
@@ -442,7 +487,7 @@ export function GameScreen({ active }: GameScreenProps) {
         openChat(e.code === 'Slash' ? '/' : '');
       }
     },
-    [active, chatOpen, loadoutOpen, showSettings, setShowSettings, state.locked, state.mountedVehicleName, openChat, openLoadout, closeChat, closeLoadout],
+    [active, chatOpen, loadoutOpen, tacticalMapOpen, showSettings, setShowSettings, state.locked, state.mountedVehicleName, state.worldReady, openChat, openLoadout, closeChat, closeLoadout, closeTacticalMap, toggleTacticalMap],
   );
 
   useEffect(() => {
@@ -454,13 +499,15 @@ export function GameScreen({ active }: GameScreenProps) {
   const handleLeave = useCallback(() => {
     closeChat();
     closeLoadout();
+    closeTacticalMap();
     setShowSettings(false);
     setShowPerfPanel(false);
     setScreen('lobby');
-  }, [closeChat, closeLoadout, setShowSettings, setScreen]);
+  }, [closeChat, closeLoadout, closeTacticalMap, setShowSettings, setScreen]);
   const isLowHealth = state.health > 0 && state.health <= 25;
   const isCriticalHealth = state.health > 0 && state.health <= 10;
   const loadingPercent = Math.max(0, Math.min(100, Math.round(state.worldLoadProgress * 100)));
+  const hudOverlayOpen = chatOpen || loadoutOpen || tacticalMapOpen;
 
   return (
     <div
@@ -680,8 +727,22 @@ export function GameScreen({ active }: GameScreenProps) {
         openLoadout={openLoadout}
       />
 
+      {state.worldReady && !showSettings && (
+        <TacticalMinimap
+          snapshot={tacticalMap}
+          heading={state.heading}
+          side={settings.minimapSide}
+        />
+      )}
+
+      <TacticalMapOverlay
+        open={tacticalMapOpen && state.worldReady}
+        snapshot={tacticalMap}
+        heading={state.heading}
+      />
+
       {/* ═══ CROSSHAIR + HIT MARKER ═══ */}
-      {state.locked && !chatOpen && !loadoutOpen && !matchSession.weaponsDisabled && (
+      {state.locked && !hudOverlayOpen && !matchSession.weaponsDisabled && (
         <Crosshair
           hitMarker={state.hitMarker}
           hitMarkerType={state.hitMarkerType}
@@ -693,7 +754,7 @@ export function GameScreen({ active }: GameScreenProps) {
       )}
 
       {/* ═══ AA CRAM TARGET TRACKING HUD ═══ */}
-      {state.locked && !chatOpen && !loadoutOpen && state.aaTargets.length > 0 && (
+      {state.locked && !hudOverlayOpen && state.aaTargets.length > 0 && (
         <div className="absolute inset-0 pointer-events-none z-10">
           {state.aaTargets.map((t, i) => (
             <div key={i} style={{
@@ -743,7 +804,7 @@ export function GameScreen({ active }: GameScreenProps) {
       {/* Click to deploy overlay */}
 
       {/* ═══ ENTER VEHICLE PROMPT (near crosshair) ═══ */}
-      {state.locked && !chatOpen && !loadoutOpen && !state.mountedVehicleName && state.nearVehicle && (
+      {state.locked && !hudOverlayOpen && !state.mountedVehicleName && state.nearVehicle && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           <div style={{
             marginTop: '80px',
@@ -761,7 +822,7 @@ export function GameScreen({ active }: GameScreenProps) {
       )}
 
       {/* ═══ EJECT PROMPT + CONTROL HINTS (bottom-center) ═══ */}
-      {state.locked && !chatOpen && !loadoutOpen && state.mountedVehicleName && (
+      {state.locked && !hudOverlayOpen && state.mountedVehicleName && (
         <div className="absolute bottom-24 left-0 right-0 flex flex-col items-center pointer-events-none z-10" style={{ gap: '6px' }}>
           <div style={{
             fontFamily: 'var(--font-pixel)',
@@ -813,7 +874,7 @@ export function GameScreen({ active }: GameScreenProps) {
       )}
 
       {/* Click to deploy overlay */}
-      {!state.locked && state.worldReady && !showSettings && !chatOpen && !loadoutOpen && (
+      {!state.locked && state.worldReady && !showSettings && !hudOverlayOpen && (
         <div
           className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer"
           onClick={() => canvasRef.current?.requestPointerLock()}
