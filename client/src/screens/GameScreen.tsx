@@ -133,6 +133,7 @@ export function GameScreen({ active }: GameScreenProps) {
 
   const closeTacticalMap = useCallback(() => {
     setTacticalMapOpen(false);
+    engineRef.current?.setTacticalMapOpen(false);
   }, []);
 
   const openLoadout = useCallback(() => {
