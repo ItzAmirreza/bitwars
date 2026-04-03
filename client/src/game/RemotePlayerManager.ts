@@ -436,8 +436,8 @@ export class RemotePlayerManager {
 
     const legSwing = moveAlpha * (crouching ? 0.42 : sprinting ? 0.88 : 0.64);
     const armSwing = moveAlpha * (crouching ? 0.24 : sprinting ? 0.36 : 0.28);
-    let leftArmX = -0.88 - pitch * 0.18 - walkWave * armSwing;
-    let rightArmX = -1.02 - pitch * 0.26 + walkWave * armSwing * 0.8;
+    let leftArmX = 0.88 + pitch * 0.18 + walkWave * armSwing;
+    let rightArmX = 1.02 + pitch * 0.26 - walkWave * armSwing * 0.8;
     let leftArmZ = -0.24 - crouchAlpha * 0.08;
     let rightArmZ = 0.12 + crouchAlpha * 0.04;
     let leftLegX = walkWave * legSwing;
@@ -446,8 +446,8 @@ export class RemotePlayerManager {
     let rightLegZ = 0;
 
     if (climbAlpha > 0.2) {
-      leftArmX = -1.5 + climbWave * 0.45;
-      rightArmX = -1.4 - climbWave * 0.45;
+      leftArmX = 1.5 - climbWave * 0.45;
+      rightArmX = 1.4 + climbWave * 0.45;
       leftArmZ = -0.14;
       rightArmZ = 0.14;
       leftLegX = 0.5 - climbWave * 0.4;
@@ -455,8 +455,8 @@ export class RemotePlayerManager {
       leftLegZ = -0.05;
       rightLegZ = 0.05;
     } else if (slideAlpha > 0.25) {
-      leftArmX = -0.28;
-      rightArmX = -0.6;
+      leftArmX = 0.28;
+      rightArmX = 0.6;
       leftArmZ = -0.45;
       rightArmZ = 0.18;
       leftLegX = -0.95;
@@ -464,8 +464,8 @@ export class RemotePlayerManager {
       leftLegZ = 0.05;
       rightLegZ = -0.05;
     } else if (airborne) {
-      leftArmX -= rising ? 0.16 : -0.08;
-      rightArmX -= rising ? 0.12 : -0.04;
+      leftArmX += rising ? 0.16 : -0.08;
+      rightArmX += rising ? 0.12 : -0.04;
       leftLegX = rising ? -0.24 : 0.26;
       rightLegX = rising ? -0.12 : 0.18;
       leftLegZ = 0.04;
@@ -498,8 +498,8 @@ export class RemotePlayerManager {
 
     if (falling) {
       rig.upperBody.rotation.x += 0.08;
-      rig.leftArm.rotation.x += 0.08;
-      rig.rightArm.rotation.x += 0.08;
+      rig.leftArm.rotation.x -= 0.08;
+      rig.rightArm.rotation.x -= 0.08;
     }
   }
 
