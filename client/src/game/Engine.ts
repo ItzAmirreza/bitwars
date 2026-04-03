@@ -2553,6 +2553,25 @@ export class Engine {
   private setupPlayerListeners(): void {
     if (!this.conn) return;
 
+    const applyAuthoritativeTeleport = (pos: { x: number; y: number; z: number }): void => {
+      const cp = this.camera.position;
+      this.netDiag.recordTeleport(pos, { x: cp.x, y: cp.y, z: cp.z });
+      this.camera.position.set(pos.x, pos.y, pos.z);
+      this.controls.resetVelocity();
+    };
+
+    this.conn.db.admin_teleport_event.onInsert((_ctx: unknown, event: any) => {
+      if (!this.localIdentity) return;
+      if (event.player?.toHexString?.() !== this.localIdentity) return;
+      const pos = event.pos;
+      if (!pos) return;
+      applyAuthoritativeTeleport({
+        x: Number(pos.x ?? 0),
+        y: Number(pos.y ?? 0),
+        z: Number(pos.z ?? 0),
+      });
+    });
+
     // Player tracking
     this.conn.db.player.onUpdate(
       (_ctx: unknown, _old: unknown, player: any) => {
@@ -2590,9 +2609,7 @@ export class Engine {
             this.netDiag.recordServerEcho(sp, { x: cp.x, y: cp.y, z: cp.z });
             if (echoDsq > 10000) {
               // > 100u: respawn, map reset, admin teleport
-              this.netDiag.recordTeleport(sp, { x: cp.x, y: cp.y, z: cp.z });
-              this.camera.position.set(sp.x, sp.y, sp.z);
-              this.controls.resetVelocity();
+              applyAuthoritativeTeleport(sp);
             }
           }
 

@@ -76,6 +76,18 @@ pub fn cleanup_shots_scheduled(ctx: &ReducerContext, _job: ShotCleanup) {
         ctx.db.kill_event().id().delete(&id);
     }
 
+    // Clean stale admin teleport events (> 10s)
+    let stale_admin_teleports: Vec<u64> = ctx
+        .db
+        .admin_teleport_event()
+        .iter()
+        .filter(|e| now_micros.saturating_sub(timestamp_micros(e.created_at)) > 10_000_000)
+        .map(|e| e.id)
+        .collect();
+    for id in stale_admin_teleports {
+        ctx.db.admin_teleport_event().id().delete(&id);
+    }
+
     ctx.db.shot_cleanup().insert(ShotCleanup {
         scheduled_id: 0,
         scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(3)),

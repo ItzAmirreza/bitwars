@@ -39,6 +39,16 @@ export const AbilityTick = __t.object("AbilityTick", {
 });
 export type AbilityTick = __Infer<typeof AbilityTick>;
 
+export const AdminTeleportEvent = __t.object("AdminTeleportEvent", {
+  id: __t.u64(),
+  player: __t.identity(),
+  get pos() {
+    return Vec3;
+  },
+  createdAt: __t.timestamp(),
+});
+export type AdminTeleportEvent = __Infer<typeof AdminTeleportEvent>;
+
 export const ChatMessage = __t.object("ChatMessage", {
   id: __t.u64(),
   sender: __t.identity(),
