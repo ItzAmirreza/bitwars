@@ -376,6 +376,7 @@ export class Engine {
   private relockAfterOverlay = false;
   chatOpen = false;
   private loadoutMenuOpen = false;
+  private tacticalMapOpen = false;
   private lastLocalWeaponSwitchAt = 0;
   private audioForward = new THREE.Vector3();
   private audioUp = new THREE.Vector3();
@@ -721,8 +722,8 @@ export class Engine {
     if (this.active === active) return;
     this.active = active;
     this.audio.resume();
-    this.controls.inputEnabled = !(this.chatOpen || this.loadoutMenuOpen);
-    this.weapons.setInputEnabled(!(this.chatOpen || this.loadoutMenuOpen));
+    this.controls.inputEnabled = !this.hasBlockingOverlayOpen();
+    this.weapons.setInputEnabled(!this.hasBlockingOverlayOpen());
     this.clock.update(performance.now());
     this.onResize();
     if (!this.animationRunning) {
@@ -1310,15 +1311,19 @@ export class Engine {
     this.controls.flyMode = !this.controls.flyMode;
   }
 
+  private hasBlockingOverlayOpen(): boolean {
+    return this.chatOpen || this.loadoutMenuOpen || this.tacticalMapOpen;
+  }
+
   /** Toggle chat mode — disables game keyboard input */
   setChatOpen(open: boolean): void {
     if (this.chatOpen === open) return;
 
-    const hadOverlayOpen = this.chatOpen || this.loadoutMenuOpen;
+    const hadOverlayOpen = this.hasBlockingOverlayOpen();
 
     this.chatOpen = open;
-    this.controls.inputEnabled = !(this.chatOpen || this.loadoutMenuOpen);
-    this.weapons.setInputEnabled(!(this.chatOpen || this.loadoutMenuOpen));
+    this.controls.inputEnabled = !this.hasBlockingOverlayOpen();
+    this.weapons.setInputEnabled(!this.hasBlockingOverlayOpen());
     this.mouseDown = false;
 
     if (open) {
@@ -1330,15 +1335,11 @@ export class Engine {
       return;
     }
 
-    if (
-      !(this.chatOpen || this.loadoutMenuOpen) &&
-      this.relockAfterOverlay &&
-      !this.controls.locked
-    ) {
+    if (!this.hasBlockingOverlayOpen() && this.relockAfterOverlay && !this.controls.locked) {
       this.controls.lock();
     }
 
-    if (!(this.chatOpen || this.loadoutMenuOpen)) {
+    if (!this.hasBlockingOverlayOpen()) {
       this.relockAfterOverlay = false;
     }
   }
@@ -1347,11 +1348,11 @@ export class Engine {
   setLoadoutMenuOpen(open: boolean): void {
     if (this.loadoutMenuOpen === open) return;
 
-    const hadOverlayOpen = this.chatOpen || this.loadoutMenuOpen;
+    const hadOverlayOpen = this.hasBlockingOverlayOpen();
 
     this.loadoutMenuOpen = open;
-    this.controls.inputEnabled = !(this.chatOpen || this.loadoutMenuOpen);
-    this.weapons.setInputEnabled(!(this.chatOpen || this.loadoutMenuOpen));
+    this.controls.inputEnabled = !this.hasBlockingOverlayOpen();
+    this.weapons.setInputEnabled(!this.hasBlockingOverlayOpen());
     this.mouseDown = false;
 
     if (open) {
@@ -1363,16 +1364,27 @@ export class Engine {
       return;
     }
 
-    if (
-      !(this.chatOpen || this.loadoutMenuOpen) &&
-      this.relockAfterOverlay &&
-      !this.controls.locked
-    ) {
+    if (!this.hasBlockingOverlayOpen() && this.relockAfterOverlay && !this.controls.locked) {
       this.controls.lock();
     }
 
-    if (!(this.chatOpen || this.loadoutMenuOpen)) {
+    if (!this.hasBlockingOverlayOpen()) {
       this.relockAfterOverlay = false;
+    }
+  }
+
+  /** Toggle full tactical map overlay — pauses gameplay input while visible. */
+  setTacticalMapOpen(open: boolean): void {
+    if (this.tacticalMapOpen === open) return;
+
+    this.tacticalMapOpen = open;
+    this.controls.inputEnabled = !this.hasBlockingOverlayOpen();
+    this.weapons.setInputEnabled(!this.hasBlockingOverlayOpen());
+    this.mouseDown = false;
+
+    if (open) {
+      this.controls.releaseAllInput();
+      return;
     }
   }
 
@@ -1432,6 +1444,7 @@ export class Engine {
     if (enabled) {
       this.chatOpen = false;
       this.loadoutMenuOpen = false;
+      this.tacticalMapOpen = false;
       this.controls.inputEnabled = true;
       this.weapons.setInputEnabled(true);
       if (!this.controls.locked) this.controls.lock();
@@ -1920,7 +1933,7 @@ export class Engine {
   private onKeyDown = (e: KeyboardEvent): void => {
     if (!this.active) return;
     if (this.sandboxMotionEnabled) return;
-    if (this.chatOpen || this.loadoutMenuOpen) return;
+    if (this.hasBlockingOverlayOpen()) return;
     if (e.code === "KeyF") {
       if (this.mountedVehicleId !== 0) {
         this.vehicleManager.resetLocalPilotSmoothing();
@@ -3960,7 +3973,7 @@ export class Engine {
       this.weapons.setInputEnabled(false);
       this.controls.releaseAllInput();
       this.controls.resetVelocity();
-    } else if (!this.chatOpen && !this.loadoutMenuOpen) {
+    } else if (!this.hasBlockingOverlayOpen()) {
       this.controls.inputEnabled = true;
       this.weapons.setInputEnabled(true);
     }

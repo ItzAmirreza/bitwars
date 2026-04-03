@@ -12,6 +12,7 @@ export interface GameSettings {
   postFXEnabled: boolean;
   sprintToggle: boolean;
   graphicsQuality: 'low' | 'medium' | 'high';
+  minimapSide: 'left' | 'right';
 }
 
 const DEFAULT_SETTINGS: GameSettings = {
@@ -22,6 +23,7 @@ const DEFAULT_SETTINGS: GameSettings = {
   postFXEnabled: true,
   sprintToggle: false,
   graphicsQuality: 'high',
+  minimapSide: 'left',
 };
 
 function loadSettings(): GameSettings {
