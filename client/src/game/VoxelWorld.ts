@@ -81,6 +81,10 @@ export class VoxelWorld {
   private pendingRequests = new Map<number, PendingMeshJob>();
   private pendingChunkJobs = new Set<number>();
   private completedJobs: CompletedMeshJob[] = [];
+  private shadowAnchorCx = Number.NEGATIVE_INFINITY;
+  private shadowAnchorCz = Number.NEGATIVE_INFINITY;
+  private shadowCastRadiusChunks = -1;
+  private shadowCastingChunks = new Set<number>();
 
   constructor(sx: number, sy: number, sz: number) {
     this.sizeX = sx;
@@ -222,6 +226,7 @@ export class VoxelWorld {
     this.dirtyChunks.delete(id);
     this.chunkRevision.delete(id);
     this.pendingChunkJobs.delete(id);
+    this.shadowCastingChunks.delete(id);
 
     const mesh = this.chunkMeshes.get(id);
     if (mesh) {
@@ -251,6 +256,10 @@ export class VoxelWorld {
     this.pendingRequests.clear();
     this.completedJobs.length = 0;
     this.activeWorkerJobs = 0;
+    this.shadowCastingChunks.clear();
+    this.shadowAnchorCx = Number.NEGATIVE_INFINITY;
+    this.shadowAnchorCz = Number.NEGATIVE_INFINITY;
+    this.shadowCastRadiusChunks = -1;
   }
 
   isChunkLoaded(cx: number, cy: number, cz: number): boolean {
@@ -259,6 +268,15 @@ export class VoxelWorld {
 
   hasChunkMesh(cx: number, cy: number, cz: number): boolean {
     return this.chunkMeshes.has(packChunkId(cx, cy, cz));
+  }
+
+  hasColumnMeshWork(cx: number, cz: number): boolean {
+    const maxCy = Math.ceil(this.sizeY / CHUNK);
+    for (let cy = 0; cy < maxCy; cy++) {
+      const id = packChunkId(cx, cy, cz);
+      if (this.dirtyChunks.has(id) || this.pendingChunkJobs.has(id)) return true;
+    }
+    return false;
   }
 
   markChunkDirty(cx: number, cy: number, cz: number): void {
@@ -365,6 +383,46 @@ export class VoxelWorld {
   private anchorY = 0;
   private anchorZ = 0;
 
+  private selectDirtyChunkIds(limit: number, anchorCx: number, anchorCy: number, anchorCz: number): number[] {
+    if (limit <= 0 || this.dirtyChunks.size === 0) return [];
+
+    const selectedIds: number[] = [];
+    const selectedDistances: number[] = [];
+    const staleIds: number[] = [];
+
+    for (const id of this.dirtyChunks) {
+      if (!this.chunks.has(id)) {
+        staleIds.push(id);
+        continue;
+      }
+      if (this.pendingChunkJobs.has(id)) continue;
+
+      const [cx, cy, cz] = unpackChunkId(id);
+      const dist = (cx - anchorCx) ** 2 + (cy - anchorCy) ** 2 + (cz - anchorCz) ** 2;
+
+      let insertAt = selectedDistances.length;
+      while (insertAt > 0 && dist < selectedDistances[insertAt - 1]!) {
+        insertAt--;
+      }
+      if (insertAt >= limit) continue;
+
+      selectedDistances.splice(insertAt, 0, dist);
+      selectedIds.splice(insertAt, 0, id);
+
+      if (selectedIds.length > limit) {
+        selectedIds.pop();
+        selectedDistances.pop();
+      }
+    }
+
+    for (const id of staleIds) {
+      this.dirtyChunks.delete(id);
+      this.pendingChunkJobs.delete(id);
+    }
+
+    return selectedIds;
+  }
+
   rebuildDirtyChunks(scene: THREE.Scene, budget: number | ChunkApplyBudget = Number.POSITIVE_INFINITY): number {
     const maxChunks = typeof budget === 'number' ? budget : budget.maxChunks;
     const maxBuildChunks = typeof budget === 'number' ? maxChunks : Math.max(0, budget.maxBuildChunks ?? maxChunks);
@@ -378,15 +436,7 @@ export class VoxelWorld {
     const anchorCx = Math.floor(this.anchorX / CHUNK);
     const anchorCy = Math.floor(this.anchorY / CHUNK);
     const anchorCz = Math.floor(this.anchorZ / CHUNK);
-
-    const dirtyIds = Array.from(this.dirtyChunks);
-    dirtyIds.sort((a, b) => {
-      const [ax, ay, az] = unpackChunkId(a);
-      const [bx, by, bz] = unpackChunkId(b);
-      const da = (ax - anchorCx) ** 2 + (ay - anchorCy) ** 2 + (az - anchorCz) ** 2;
-      const db = (bx - anchorCx) ** 2 + (by - anchorCy) ** 2 + (bz - anchorCz) ** 2;
-      return da - db;
-    });
+    const dirtyIds = this.selectDirtyChunkIds(maxBuildChunks, anchorCx, anchorCy, anchorCz);
 
     let built = 0;
     for (const id of dirtyIds) {
@@ -400,13 +450,18 @@ export class VoxelWorld {
 
       const [cx, cy, cz] = unpackChunkId(id);
       const revision = this.chunkRevision.get(id) ?? 0;
-      this.dirtyChunks.delete(id);
 
-      if (this.workersEnabled && this.activeWorkerJobs < this.maxWorkerJobs) {
-        this.dispatchMeshJobToWorker(id, revision, cx, cy, cz);
-        continue;
+      if (this.workersEnabled) {
+        if (this.activeWorkerJobs >= this.maxWorkerJobs) break;
+        this.dirtyChunks.delete(id);
+        if (this.dispatchMeshJobToWorker(id, revision, cx, cy, cz)) {
+          built++;
+          continue;
+        }
+        this.dirtyChunks.add(id);
       }
 
+      this.dirtyChunks.delete(id);
       const mesh = this.buildMeshDataLocally(cx, cy, cz);
       this.applyMesh(scene, id, mesh);
       rebuilt++;
@@ -416,10 +471,10 @@ export class VoxelWorld {
     return rebuilt;
   }
 
-  private dispatchMeshJobToWorker(id: number, revision: number, cx: number, cy: number, cz: number): void {
-    if (this.workers.length === 0) return;
+  private dispatchMeshJobToWorker(id: number, revision: number, cx: number, cy: number, cz: number): boolean {
+    if (this.workers.length === 0) return false;
     const source = this.chunks.get(id);
-    if (!source) return;
+    if (!source) return false;
 
     const worker = this.workers[this.nextWorkerIndex % this.workers.length]!;
     this.nextWorkerIndex++;
@@ -441,6 +496,7 @@ export class VoxelWorld {
     this.pendingChunkJobs.add(id);
     this.activeWorkerJobs++;
     worker.postMessage(req, transfers);
+    return true;
   }
 
   private buildMeshDataLocally(cx: number, cy: number, cz: number): ChunkMeshData {
@@ -540,6 +596,7 @@ export class VoxelWorld {
   private applyMesh(scene: THREE.Scene, id: number, meshData: ChunkMeshData): void {
     const vertexCount = meshData.position.length / 3;
     const existing = this.chunkMeshes.get(id);
+    const shouldCastShadow = this.shouldChunkCastShadow(id);
 
     if (vertexCount === 0) {
       if (existing) {
@@ -547,6 +604,7 @@ export class VoxelWorld {
         existing.geometry.dispose();
         this.chunkMeshes.delete(id);
       }
+      this.shadowCastingChunks.delete(id);
       return;
     }
 
@@ -561,10 +619,12 @@ export class VoxelWorld {
       geo.setDrawRange(0, vertexCount);
 
       const mesh = new THREE.Mesh(geo, this.mat);
-      mesh.castShadow = false;
+      mesh.castShadow = shouldCastShadow;
       mesh.receiveShadow = true;
       scene.add(mesh);
       this.chunkMeshes.set(id, mesh);
+      if (shouldCastShadow) this.shadowCastingChunks.add(id);
+      else this.shadowCastingChunks.delete(id);
       return;
     }
 
@@ -579,22 +639,76 @@ export class VoxelWorld {
     geometry.setDrawRange(0, vertexCount);
     geometry.boundingSphere = null;
     geometry.boundingBox = null;
+    existing.castShadow = shouldCastShadow;
+    if (shouldCastShadow) this.shadowCastingChunks.add(id);
+    else this.shadowCastingChunks.delete(id);
     existing.visible = true;
   }
 
   updateChunkShadowCasting(anchorX: number, anchorZ: number, castRadiusChunks: number): void {
     const anchorCx = Math.floor(anchorX / CHUNK);
     const anchorCz = Math.floor(anchorZ / CHUNK);
+    if (
+      anchorCx === this.shadowAnchorCx
+      && anchorCz === this.shadowAnchorCz
+      && castRadiusChunks === this.shadowCastRadiusChunks
+    ) {
+      return;
+    }
+
+    const nextShadowCastingChunks = this.collectShadowCastingChunkIds(anchorCx, anchorCz, castRadiusChunks);
+    for (const id of this.shadowCastingChunks) {
+      if (nextShadowCastingChunks.has(id)) continue;
+      const mesh = this.chunkMeshes.get(id);
+      if (mesh) mesh.castShadow = false;
+    }
+    for (const id of nextShadowCastingChunks) {
+      if (this.shadowCastingChunks.has(id)) continue;
+      const mesh = this.chunkMeshes.get(id);
+      if (mesh) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      }
+    }
+
+    this.shadowAnchorCx = anchorCx;
+    this.shadowAnchorCz = anchorCz;
+    this.shadowCastRadiusChunks = castRadiusChunks;
+    this.shadowCastingChunks = nextShadowCastingChunks;
+  }
+
+  private shouldChunkCastShadow(id: number): boolean {
+    if (this.shadowCastRadiusChunks <= 0) return false;
+    const [cx, , cz] = unpackChunkId(id);
+    const dx = cx - this.shadowAnchorCx;
+    const dz = cz - this.shadowAnchorCz;
+    return (dx * dx + dz * dz) <= this.shadowCastRadiusChunks * this.shadowCastRadiusChunks;
+  }
+
+  private collectShadowCastingChunkIds(anchorCx: number, anchorCz: number, castRadiusChunks: number): Set<number> {
+    const ids = new Set<number>();
+    if (castRadiusChunks <= 0) return ids;
+
+    const maxCx = Math.ceil(this.sizeX / CHUNK);
+    const maxCy = Math.ceil(this.sizeY / CHUNK);
+    const maxCz = Math.ceil(this.sizeZ / CHUNK);
     const castRadiusSq = castRadiusChunks * castRadiusChunks;
 
-    for (const [id, mesh] of this.chunkMeshes) {
-      const [cx, , cz] = unpackChunkId(id);
-      const dx = cx - anchorCx;
-      const dz = cz - anchorCz;
-      const shouldCast = castRadiusChunks > 0 && (dx * dx + dz * dz) <= castRadiusSq;
-      if (mesh.castShadow !== shouldCast) mesh.castShadow = shouldCast;
-      if (!mesh.receiveShadow) mesh.receiveShadow = true;
+    for (let dz = -castRadiusChunks; dz <= castRadiusChunks; dz++) {
+      for (let dx = -castRadiusChunks; dx <= castRadiusChunks; dx++) {
+        if (dx * dx + dz * dz > castRadiusSq) continue;
+        const cx = anchorCx + dx;
+        const cz = anchorCz + dz;
+        if (cx < 0 || cx >= maxCx || cz < 0 || cz >= maxCz) continue;
+
+        for (let cy = 0; cy < maxCy; cy++) {
+          const id = packChunkId(cx, cy, cz);
+          if (this.chunkMeshes.has(id)) ids.add(id);
+        }
+      }
     }
+
+    return ids;
   }
 
   dispose(scene: THREE.Scene): void {

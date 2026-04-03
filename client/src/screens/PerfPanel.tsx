@@ -50,7 +50,7 @@ const METRICS: Array<{ key: MetricKey; label: string }> = [
   { key: 'activeFallingDebris', label: 'Falling debris' },
   { key: 'activeSettledDebris', label: 'Settled debris' },
   { key: 'activeRemotePlayers', label: 'Remote players' },
-  { key: 'dynamicLights', label: 'Dynamic lights' },
+  { key: 'dynamicLights', label: 'Active lights' },
   { key: 'jsHeapUsedMB', label: 'JS heap MB' },
 ];
 

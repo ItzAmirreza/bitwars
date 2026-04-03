@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Engine } from '../game/Engine';
+import type { EngineLivePerfSnapshot } from '../game/Engine';
 import type { EngineState } from '../game/Engine';
 import { PerfHarness, buildPerfHooks } from '../game/PerfHarness';
 import type { PerfRunResult } from '../game/PerfHarness';
@@ -16,6 +17,7 @@ import { ChatOverlay } from './hud/ChatOverlay';
 import { DeathScreen } from './hud/DeathScreen';
 import { BuffIndicators } from './hud/BuffIndicators';
 import { MatchVictoryOverlay } from './hud/MatchVictoryOverlay';
+import { LivePerfOverlay } from './hud/LivePerfOverlay';
 import { useKillTracking } from './hooks/useKillTracking';
 import { useChat } from './hooks/useChat';
 import { useMatchSession } from './hooks/useMatchSession';
@@ -106,12 +108,14 @@ export function GameScreen({ active }: GameScreenProps) {
   const [activeLoadoutSlot, setActiveLoadoutSlot] = useState(0);
   const [savingLoadout, setSavingLoadout] = useState(false);
   const [showPerfPanel, setShowPerfPanel] = useState(false);
+  const [showLivePerfOverlay, setShowLivePerfOverlay] = useState(false);
   const [perfRunning, setPerfRunning] = useState(false);
   const [perfProgress, setPerfProgress] = useState(0);
   const [perfLastRun, setPerfLastRun] = useState<PerfRunResult | null>(null);
   const [perfSummaries, setPerfSummaries] = useState<PerfRunSummary[]>([]);
   const [perfSelectedRun, setPerfSelectedRun] = useState<PerfRunResult | null>(null);
   const [perfCompareRun, setPerfCompareRun] = useState<PerfRunResult | null>(null);
+  const [livePerfSnapshot, setLivePerfSnapshot] = useState<EngineLivePerfSnapshot | null>(null);
 
   const perfHarnessRef = useRef<PerfHarness | null>(null);
   const perfTickerRef = useRef<number | null>(null);
@@ -234,6 +238,18 @@ export function GameScreen({ active }: GameScreenProps) {
   useEffect(() => {
     engineRef.current?.setPlayerContext(identity, username || null);
   }, [identity, username]);
+
+  useEffect(() => {
+    if (!active || !showLivePerfOverlay) return;
+
+    const sync = () => {
+      setLivePerfSnapshot(engineRef.current?.getLivePerfSnapshot() ?? null);
+    };
+
+    sync();
+    const timer = window.setInterval(sync, 120);
+    return () => clearInterval(timer);
+  }, [active, showLivePerfOverlay]);
 
   useEffect(() => {
     engineRef.current?.setActive(active);
@@ -368,6 +384,30 @@ export function GameScreen({ active }: GameScreenProps) {
         return;
       }
 
+      if (e.code === 'F7') {
+        e.preventDefault();
+        setShowLivePerfOverlay((value) => {
+          const next = !value;
+          if (next) {
+            setLivePerfSnapshot(engineRef.current?.getLivePerfSnapshot() ?? null);
+          }
+          return next;
+        });
+        return;
+      }
+
+      if (e.code === 'F8') {
+        e.preventDefault();
+        setShowPerfPanel((v) => !v);
+        return;
+      }
+
+      if (e.code === 'F9') {
+        e.preventDefault();
+        engineRef.current?.toggleChunkBoundaries();
+        return;
+      }
+
       if (chatOpen || loadoutOpen) {
         if (e.code === 'Escape') {
           e.preventDefault();
@@ -388,18 +428,6 @@ export function GameScreen({ active }: GameScreenProps) {
       if (e.code === 'Escape') {
         e.preventDefault();
         setShowSettings(!showSettings);
-        return;
-      }
-
-      if (e.code === 'F8') {
-        e.preventDefault();
-        setShowPerfPanel((v) => !v);
-        return;
-      }
-
-      if (e.code === 'F9') {
-        e.preventDefault();
-        engineRef.current?.toggleChunkBoundaries();
         return;
       }
 
@@ -479,6 +507,11 @@ export function GameScreen({ active }: GameScreenProps) {
         onClear={clearPerfRuns}
         onExportRun={exportPerfRun}
         onImportRun={importPerfRun}
+      />
+
+      <LivePerfOverlay
+        open={showLivePerfOverlay}
+        snapshot={livePerfSnapshot}
       />
 
       {/* Startup world streaming overlay */}
@@ -622,6 +655,16 @@ export function GameScreen({ active }: GameScreenProps) {
       <TopHudBar
         showSettings={showSettings}
         setShowSettings={setShowSettings}
+        showLivePerfOverlay={showLivePerfOverlay}
+        toggleLivePerfOverlay={() => {
+          setShowLivePerfOverlay((value) => {
+            const next = !value;
+            if (next) {
+              setLivePerfSnapshot(engineRef.current?.getLivePerfSnapshot() ?? null);
+            }
+            return next;
+          });
+        }}
         loadoutOpen={loadoutOpen}
         chatOpen={chatOpen}
         username={username}

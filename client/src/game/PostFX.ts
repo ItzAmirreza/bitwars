@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 
+export type PostFXQuality = 'off' | 'simple' | 'full';
+
 /**
  * Fullscreen shader overlay for warzone screen effects:
  * - Moody dark vignette with amber tint
@@ -20,6 +22,7 @@ void main() {
 const FRAGMENT = /* glsl */ `
 uniform float uDamage;
 uniform float uTime;
+uniform float uSimple;
 
 varying vec2 vUv;
 
@@ -31,6 +34,19 @@ void main() {
     vec2 uv = vUv;
     vec2 center = uv - 0.5;
     float dist = length(center) * 2.0;
+    float dmg = uDamage;
+
+    if (uSimple > 0.5) {
+        float vignette = smoothstep(0.58, 1.55, dist);
+        float pulse = 0.78 + 0.22 * sin(uTime * 16.0);
+        float damageRing = smoothstep(0.18, 0.9, dist) * dmg * pulse;
+
+        vec3 color = vec3(0.028, 0.02, 0.012) * vignette
+                   + vec3(0.92, 0.08, 0.02) * damageRing;
+        float alpha = vignette * 0.22 + damageRing * 0.62;
+        gl_FragColor = vec4(color, clamp(alpha, 0.0, 0.45));
+        return;
+    }
 
     // ── Warzone vignette — wider, darker, with slight amber tint ──
     float vignette = smoothstep(0.5, 1.6, dist);
@@ -43,7 +59,6 @@ void main() {
     vec3 hazeColor = vec3(0.12, 0.10, 0.07);
 
     // ── Damage red pulse (enhanced) ──
-    float dmg = uDamage;
     float pulse = 0.7 + 0.3 * sin(uTime * 20.0);
     float damageRing = smoothstep(0.1, 0.85, dist) * dmg * pulse;
 
@@ -75,6 +90,7 @@ export class PostFX {
   private camera: THREE.OrthographicCamera;
   private material: THREE.ShaderMaterial;
   private damageAmount = 0;
+  private quality: PostFXQuality = 'full';
   enabled = true;
 
   constructor() {
@@ -87,6 +103,7 @@ export class PostFX {
       uniforms: {
         uDamage: { value: 0 },
         uTime: { value: 0 },
+        uSimple: { value: 0 },
       },
       transparent: true,
       depthTest: false,
@@ -107,6 +124,16 @@ export class PostFX {
     this.material.uniforms.uDamage.value = 0;
   }
 
+  setQuality(quality: PostFXQuality): void {
+    this.quality = quality;
+    this.material.uniforms.uSimple.value = quality === 'simple' ? 1 : 0;
+    this.enabled = quality !== 'off';
+  }
+
+  getQuality(): PostFXQuality {
+    return this.quality;
+  }
+
   update(delta: number, elapsedTime: number): void {
     this.damageAmount = Math.max(0, this.damageAmount - delta * 2.0);
     this.material.uniforms.uDamage.value = this.damageAmount;
@@ -114,7 +141,7 @@ export class PostFX {
   }
 
   render(renderer: THREE.WebGLRenderer): void {
-    if (!this.enabled) return;
+    if (!this.enabled || this.quality === 'off') return;
     renderer.render(this.scene, this.camera);
   }
 

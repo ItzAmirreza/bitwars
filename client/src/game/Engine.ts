@@ -15,7 +15,7 @@ import { WeaponSystem, WEAPONS } from "./Weapons";
 import { AudioSystem } from "./AudioSystem";
 import { VFX } from "./VFX";
 import { WeaponModel } from "./WeaponModel";
-import { PostFX } from "./PostFX";
+import { PostFX, type PostFXQuality } from "./PostFX";
 import { PhysicsSystem } from "./PhysicsSystem";
 import { ProjectileManager } from "./ProjectileManager";
 import { SkySystem } from "./SkySystem";
@@ -130,6 +130,92 @@ export interface DamageIndicatorState {
   intensity: number;
 }
 
+type EnginePerfPhaseKey =
+  | 'input'
+  | 'gameplay'
+  | 'remotePlayers'
+  | 'vehicles'
+  | 'worldStreaming'
+  | 'netSync'
+  | 'chunkRebuild'
+  | 'shadowUpdate'
+  | 'render'
+  | 'hud';
+
+export interface EnginePerfPhaseSample {
+  key: EnginePerfPhaseKey;
+  label: string;
+  ms: number;
+}
+
+export interface EnginePerfCounters {
+  drawCalls: number;
+  triangles: number;
+  loadedChunks: number;
+  meshedChunks: number;
+  dirtyChunks: number;
+  pendingChunkJobs: number;
+  pendingChunkRequests: number;
+  activeProjectiles: number;
+  activeVfxParticles: number;
+  activeFallingDebris: number;
+  activeSettledDebris: number;
+  activeRemotePlayers: number;
+  activeVehicles: number;
+  dynamicLights: number;
+  activeLights: number;
+  adaptiveTier: number;
+  dpr: number;
+}
+
+export interface EngineLivePerfFrame {
+  atMs: number;
+  fps: number;
+  frameMs: number;
+  cpuFrameMs: number;
+  renderMs: number;
+  hottestPhase: EnginePerfPhaseKey;
+  suspect: string;
+}
+
+export interface EnginePerfHitch {
+  atMs: number;
+  fps: number;
+  frameMs: number;
+  cpuFrameMs: number;
+  renderMs: number;
+  phase: EnginePerfPhaseSample;
+  suspect: string;
+  counters: EnginePerfCounters;
+}
+
+export interface EngineLivePerfSnapshot {
+  atMs: number;
+  current: EngineLivePerfFrame & {
+    phases: EnginePerfPhaseSample[];
+    counters: EnginePerfCounters;
+  };
+  history: EngineLivePerfFrame[];
+  recentHitches: EnginePerfHitch[];
+}
+
+const PERF_PHASE_LABELS: Record<EnginePerfPhaseKey, string> = {
+  input: 'Input',
+  gameplay: 'Gameplay',
+  remotePlayers: 'Remote players',
+  vehicles: 'Vehicles',
+  worldStreaming: 'World stream',
+  netSync: 'Net sync',
+  chunkRebuild: 'Chunk rebuild',
+  shadowUpdate: 'Shadow update',
+  render: 'Render',
+  hud: 'HUD',
+};
+
+function roundPerf(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 export class Engine {
   // Core
   private renderer: THREE.WebGLRenderer;
@@ -189,6 +275,7 @@ export class Engine {
       ttl: number | null;
       kind: "generic" | "lantern" | "helicopter";
       baseIntensity: number;
+      baseDistance: number;
       phase: number;
     }
   >();
@@ -257,6 +344,7 @@ export class Engine {
   private lastPositionUpdate = 0;
   private remotePlayers!: RemotePlayerManager;
   private localIdentity: string | null = null;
+  private localPlayerEntityId = 0n;
   private mountedVehicleId = 0;
   private health = 100;
   private kills = 0;
@@ -317,11 +405,55 @@ export class Engine {
     maxApplyMs: 4.0,
   };
   private currentChunkStreamIntervalFrames = CHUNK_STREAM_INTERVAL_FRAMES;
-  private shadowRefreshTimer = 0;
+  private currentVisibleDynamicLights = 8;
+  private currentDynamicLightCullDistance = 36;
+  private currentDynamicLightDistanceScale = 1;
+  private currentProjectileLightBudget = 3;
+  private currentProjectileLightDistance = 30;
+  private currentProjectileLightIntensityScale = 1;
+  private currentGrenadeLightBudget = 3;
+  private currentGrenadeLightDistance = 28;
+  private currentGrenadeLightIntensityScale = 1;
+  private currentPickupLightBudget = 6;
+  private currentPickupLightDistance = 28;
+  private currentMuzzleLightEnabled = true;
+  private currentMuzzleLightIntensityScale = 1;
 
   // Dev-only networking diagnostics (F3 overlay, F4 download)
   private netDiag = new NetDiagnostics();
   private chunkBoundaryViewer!: ChunkBoundaryViewer;
+  private livePerfHistory: EngineLivePerfFrame[] = [];
+  private livePerfHitches: EnginePerfHitch[] = [];
+  private livePerfCurrent: EngineLivePerfSnapshot['current'] = {
+    atMs: 0,
+    fps: 0,
+    frameMs: 0,
+    cpuFrameMs: 0,
+    renderMs: 0,
+    hottestPhase: 'render',
+    suspect: 'Waiting for samples',
+    phases: [],
+    counters: {
+      drawCalls: 0,
+      triangles: 0,
+      loadedChunks: 0,
+      meshedChunks: 0,
+      dirtyChunks: 0,
+      pendingChunkJobs: 0,
+      pendingChunkRequests: 0,
+      activeProjectiles: 0,
+      activeVfxParticles: 0,
+      activeFallingDebris: 0,
+      activeSettledDebris: 0,
+      activeRemotePlayers: 0,
+      activeVehicles: 0,
+      dynamicLights: 0,
+      activeLights: 0,
+      adaptiveTier: 0,
+      dpr: 1,
+    },
+  };
+  private lastLivePerfHitchAt = 0;
 
   constructor(
     container: HTMLElement,
@@ -456,7 +588,7 @@ export class Engine {
     });
 
     // ── Ability pickups ──
-    this.abilityPickups = new AbilityPickupManager(this.scene);
+    this.abilityPickups = new AbilityPickupManager(this.scene, this.camera);
 
     // ── Weapons ──
     this.weapons = new WeaponSystem(this.camera, this.world);
@@ -551,6 +683,9 @@ export class Engine {
   ): void {
     const contextChanged =
       this.localIdentity !== localIdentity || this.username !== username;
+    if (this.localIdentity !== localIdentity) {
+      this.localPlayerEntityId = 0n;
+    }
     this.localIdentity = localIdentity;
     this.username = username;
 
@@ -615,6 +750,184 @@ export class Engine {
     this.adaptivePressureTime = 0;
     this.adaptiveReliefTime = 0;
     this.applyGraphicsTier(true);
+  }
+
+  getLivePerfSnapshot(): EngineLivePerfSnapshot {
+    return {
+      atMs: performance.now(),
+      current: {
+        ...this.livePerfCurrent,
+        phases: this.livePerfCurrent.phases.map((phase) => ({ ...phase })),
+        counters: { ...this.livePerfCurrent.counters },
+      },
+      history: this.livePerfHistory.map((frame) => ({ ...frame })),
+      recentHitches: this.livePerfHitches.map((hitch) => ({
+        ...hitch,
+        phase: { ...hitch.phase },
+        counters: { ...hitch.counters },
+      })),
+    };
+  }
+
+  private countLoadedChunks(): number {
+    let count = 0;
+    for (const _ of this.world.getLoadedChunkIds()) count++;
+    return count;
+  }
+
+  private countMeshedChunks(): number {
+    let count = 0;
+    for (const id of this.world.getLoadedChunkIds()) {
+      const cx = id & 0xff;
+      const cy = (id >> 8) & 0xff;
+      const cz = (id >> 16) & 0xff;
+      if (this.world.hasChunkMesh(cx, cy, cz)) count++;
+    }
+    return count;
+  }
+
+  private captureLivePerfCounters(): EnginePerfCounters {
+    const worldStats = this.world as unknown as {
+      dirtyChunks?: Set<number>;
+      pendingChunkJobs?: Set<number>;
+    };
+    const chunkStreamerStats = this.chunkStreamer as unknown as {
+      pendingChunkRequests?: Map<number, number>;
+    };
+    const projectileStats = this.projectileManager as unknown as {
+      projectiles?: Array<unknown>;
+    };
+    const vfxStats = this.vfx as unknown as {
+      particles?: Array<unknown>;
+      tracers?: Array<unknown>;
+    };
+    const physicsStats = this.physics as unknown as {
+      falling?: Array<unknown>;
+      settled?: Array<unknown>;
+    };
+    const remoteStats = this.remotePlayers as unknown as {
+      otherPlayers?: Map<string, unknown>;
+    };
+    const vehicleStats = this.vehicleManager as unknown as {
+      vehicles?: Map<number, unknown>;
+    };
+
+    return {
+      drawCalls: this.renderer.info.render.calls,
+      triangles: this.renderer.info.render.triangles,
+      loadedChunks: this.countLoadedChunks(),
+      meshedChunks: this.countMeshedChunks(),
+      dirtyChunks: worldStats.dirtyChunks?.size ?? 0,
+      pendingChunkJobs: worldStats.pendingChunkJobs?.size ?? 0,
+      pendingChunkRequests: chunkStreamerStats.pendingChunkRequests?.size ?? 0,
+      activeProjectiles: projectileStats.projectiles?.length ?? 0,
+      activeVfxParticles: (vfxStats.particles?.length ?? 0) + (vfxStats.tracers?.length ?? 0),
+      activeFallingDebris: physicsStats.falling?.length ?? 0,
+      activeSettledDebris: physicsStats.settled?.length ?? 0,
+      activeRemotePlayers: remoteStats.otherPlayers?.size ?? 0,
+      activeVehicles: vehicleStats.vehicles?.size ?? 0,
+      dynamicLights: this.dynamicLights.size,
+      activeLights: this.getActiveSceneLightCount(),
+      adaptiveTier: this.adaptiveTier,
+      dpr: this.renderer.getPixelRatio(),
+    };
+  }
+
+  private inferLivePerfSuspect(topPhase: EnginePerfPhaseSample, counters: EnginePerfCounters): string {
+    const previous = this.livePerfCurrent.counters;
+    const loadedDelta = counters.loadedChunks - previous.loadedChunks;
+    const dirtyDelta = counters.dirtyChunks - previous.dirtyChunks;
+    const debrisCount = counters.activeFallingDebris + counters.activeSettledDebris;
+
+    switch (topPhase.key) {
+      case 'chunkRebuild':
+        if (loadedDelta > 0 || dirtyDelta > 0) return 'chunk mesh rebuild / apply spike';
+        return 'chunk meshing cost';
+      case 'shadowUpdate':
+        return 'shadow map refresh';
+      case 'worldStreaming':
+        if (loadedDelta > 0 || counters.pendingChunkRequests > 0) return 'streaming new chunks';
+        return 'world streaming work';
+      case 'netSync':
+        return 'position / entity sync';
+      case 'render':
+        if (counters.activeLights >= 5) return 'dynamic lighting cost';
+        if (this.postfx.getQuality() === 'full' && counters.drawCalls < 420 && counters.triangles < 850_000) {
+          return 'post FX render cost';
+        }
+        if (counters.triangles >= 900_000 || counters.drawCalls >= 450) return 'triangle / draw call pressure';
+        if (this.shadowsActive) return 'render pass with shadows';
+        return 'render pass cost';
+      case 'gameplay':
+        if (counters.activeVfxParticles >= 220) return 'VFX burst';
+        if (debrisCount >= 90) return 'debris physics burst';
+        if (counters.activeProjectiles >= 60) return 'projectile simulation load';
+        return 'gameplay systems spike';
+      case 'vehicles':
+        return counters.activeVehicles > 0 ? 'vehicle simulation' : 'vehicle update';
+      case 'remotePlayers':
+        return counters.activeRemotePlayers > 8 ? 'remote player interpolation' : 'entity interpolation';
+      case 'input':
+        return 'movement / input update';
+      case 'hud':
+        return 'HUD / diagnostics refresh';
+      default:
+        return `${topPhase.label.toLowerCase()} spike`;
+    }
+  }
+
+  private recordLivePerfFrame({
+    frameEndMs,
+    frameMs,
+    cpuFrameMs,
+    renderMs,
+    phases,
+  }: {
+    frameEndMs: number;
+    frameMs: number;
+    cpuFrameMs: number;
+    renderMs: number;
+    phases: EnginePerfPhaseSample[];
+  }): void {
+    if (phases.length === 0) return;
+
+    const counters = this.captureLivePerfCounters();
+    const hottestPhase = phases.reduce((max, phase) => (phase.ms > max.ms ? phase : max), phases[0]!);
+    const suspect = this.inferLivePerfSuspect(hottestPhase, counters);
+    const frame: EngineLivePerfFrame = {
+      atMs: frameEndMs,
+      fps: roundPerf(frameMs > 0.001 ? 1000 / frameMs : 0),
+      frameMs: roundPerf(frameMs),
+      cpuFrameMs: roundPerf(cpuFrameMs),
+      renderMs: roundPerf(renderMs),
+      hottestPhase: hottestPhase.key,
+      suspect,
+    };
+
+    this.livePerfCurrent = {
+      ...frame,
+      phases: phases.map((phase) => ({ ...phase, ms: roundPerf(phase.ms) })),
+      counters: { ...counters },
+    };
+
+    this.livePerfHistory.push(frame);
+    if (this.livePerfHistory.length > 180) this.livePerfHistory.shift();
+
+    const isHitch = frameMs >= 25 || cpuFrameMs >= 18 || hottestPhase.ms >= 10;
+    if (isHitch && frameEndMs - this.lastLivePerfHitchAt >= 250) {
+      this.lastLivePerfHitchAt = frameEndMs;
+      this.livePerfHitches.unshift({
+        atMs: frameEndMs,
+        fps: frame.fps,
+        frameMs: frame.frameMs,
+        cpuFrameMs: frame.cpuFrameMs,
+        renderMs: frame.renderMs,
+        phase: { ...hottestPhase, ms: roundPerf(hottestPhase.ms) },
+        suspect,
+        counters: { ...counters },
+      });
+      if (this.livePerfHitches.length > 8) this.livePerfHitches.length = 8;
+    }
   }
 
   private roundShadowMapSize(size: number): number {
@@ -717,11 +1030,221 @@ export class Engine {
       this.renderer.shadowMap.enabled = shadowsActive;
       this.sun.castShadow = shadowsActive;
       this.renderer.shadowMap.needsUpdate = true;
-      this.shadowRefreshTimer = 0;
     }
 
     this.moon.castShadow = false;
-    this.postfx.enabled = postFxActive;
+    this.configureRenderLightBudget(postFxActive);
+  }
+
+  private configureRenderLightBudget(postFxActive: boolean): void {
+    const qualityIndex =
+      this.graphicsQuality === "low"
+        ? 0
+        : this.graphicsQuality === "medium"
+          ? 1
+          : 2;
+    const tier = THREE.MathUtils.clamp(this.adaptiveTier, 0, 3);
+    const budgetAt = (table: number[][]): number => table[qualityIndex]?.[tier] ?? 0;
+
+    this.currentVisibleDynamicLights = budgetAt([
+      [4, 3, 2, 1],
+      [6, 5, 4, 3],
+      [8, 7, 5, 4],
+    ]);
+    this.currentDynamicLightCullDistance = budgetAt([
+      [24, 21, 18, 16],
+      [30, 27, 24, 20],
+      [36, 32, 28, 24],
+    ]);
+    this.currentDynamicLightDistanceScale = [1.0, 0.9, 0.78, 0.66][tier] ?? 1.0;
+
+    this.currentProjectileLightBudget = budgetAt([
+      [1, 1, 0, 0],
+      [2, 1, 1, 0],
+      [3, 2, 1, 0],
+    ]);
+    this.currentProjectileLightDistance = budgetAt([
+      [18, 16, 14, 0],
+      [24, 20, 18, 0],
+      [30, 26, 22, 0],
+    ]);
+    this.currentProjectileLightIntensityScale = [1.0, 0.85, 0.7, 0.55][tier] ?? 1.0;
+
+    this.currentGrenadeLightBudget = budgetAt([
+      [1, 1, 0, 0],
+      [2, 1, 1, 0],
+      [3, 2, 1, 0],
+    ]);
+    this.currentGrenadeLightDistance = budgetAt([
+      [16, 14, 12, 0],
+      [22, 18, 16, 0],
+      [28, 24, 20, 0],
+    ]);
+    this.currentGrenadeLightIntensityScale = [1.0, 0.82, 0.68, 0.52][tier] ?? 1.0;
+
+    this.currentPickupLightBudget = budgetAt([
+      [2, 1, 0, 0],
+      [4, 3, 2, 0],
+      [6, 5, 4, 1],
+    ]);
+    this.currentPickupLightDistance = budgetAt([
+      [16, 14, 0, 0],
+      [22, 18, 16, 0],
+      [28, 24, 20, 16],
+    ]);
+
+    const lanternBudget = budgetAt([
+      [2, 1, 1, 1],
+      [4, 3, 2, 1],
+      [6, 5, 4, 2],
+    ]);
+    const lanternAddDistance = budgetAt([
+      [22, 20, 18, 16],
+      [30, 27, 24, 20],
+      [36, 32, 28, 24],
+    ]);
+    const lanternKeepDistance = budgetAt([
+      [32, 30, 28, 24],
+      [44, 40, 34, 30],
+      [56, 50, 44, 38],
+    ]);
+    const lanternIntensityScale = [1.0, 0.88, 0.76, 0.64][tier] ?? 1.0;
+
+    const muzzleScales = [
+      [0.75, 0.6, 0, 0],
+      [0.9, 0.72, 0.55, 0],
+      [1.0, 0.85, 0.65, 0],
+    ];
+    this.currentMuzzleLightIntensityScale = budgetAt(muzzleScales);
+    this.currentMuzzleLightEnabled = this.currentMuzzleLightIntensityScale > 0.01;
+
+    this.projectileManager.setLightBudget(
+      this.currentProjectileLightBudget,
+      this.currentProjectileLightDistance,
+      this.currentProjectileLightIntensityScale,
+    );
+    this.abilityPickups.setLightBudget(
+      this.currentPickupLightBudget,
+      this.currentPickupLightDistance,
+    );
+    this.vfx.setMuzzleLightBudget(
+      this.currentMuzzleLightEnabled,
+      this.currentMuzzleLightIntensityScale,
+    );
+    this.lanterns.setRenderBudget(
+      lanternBudget,
+      lanternAddDistance,
+      lanternKeepDistance,
+      lanternIntensityScale,
+    );
+
+    const postFxQuality: PostFXQuality = !postFxActive
+      ? "off"
+      : tier >= 1
+        ? "simple"
+        : "full";
+    this.postfx.setQuality(postFxQuality);
+    this.applyDynamicLightBudget();
+    this.updateGrenadeLightVisibility();
+  }
+
+  getActiveSceneLightCount(): number {
+    let total = 0;
+    for (const entry of this.dynamicLights.values()) {
+      if (entry.light.visible && entry.light.intensity > 0.01) total++;
+    }
+    for (const vis of this.grenadeVisuals.values()) {
+      if (vis.light?.visible && vis.light.intensity > 0.01) total++;
+    }
+    for (const ghost of this.predictedGrenadeGhosts) {
+      if (ghost.light?.visible && ghost.light.intensity > 0.01) total++;
+    }
+    total += this.projectileManager.getActiveLightCount();
+    total += this.abilityPickups.getActiveLightCount();
+    total += this.vfx.getActiveLightCount();
+    return total;
+  }
+
+  private applyDynamicLightBudget(): void {
+    const maxDistanceSq =
+      this.currentDynamicLightCullDistance * this.currentDynamicLightCullDistance;
+    const candidates: Array<{ id: string; d2: number }> = [];
+
+    for (const [id, entry] of this.dynamicLights) {
+      const light = entry.light;
+      const dx = light.position.x - this.camera.position.x;
+      const dy = light.position.y - this.camera.position.y;
+      const dz = light.position.z - this.camera.position.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+
+      if (entry.baseIntensity > 0.01 && d2 <= maxDistanceSq) {
+        candidates.push({ id, d2 });
+      } else {
+        light.visible = false;
+        if (entry.target) entry.target.visible = false;
+      }
+    }
+
+    candidates.sort((a, b) => a.d2 - b.d2);
+    const visibleIds = new Set<string>();
+    for (let i = 0; i < candidates.length && i < this.currentVisibleDynamicLights; i++) {
+      visibleIds.add(candidates[i]!.id);
+    }
+
+    for (const [id, entry] of this.dynamicLights) {
+      const visible = visibleIds.has(id) && entry.baseIntensity > 0.01;
+      entry.light.visible = visible;
+      if (entry.target) entry.target.visible = visible;
+      if (!visible) continue;
+      entry.light.distance = Math.max(
+        4,
+        entry.baseDistance * this.currentDynamicLightDistanceScale,
+      );
+    }
+  }
+
+  private updateGrenadeLightVisibility(): void {
+    const maxDistanceSq =
+      this.currentGrenadeLightDistance * this.currentGrenadeLightDistance;
+    const candidates: Array<{ light: THREE.PointLight; d2: number }> = [];
+    const scale = this.currentGrenadeLightIntensityScale;
+
+    for (const vis of this.grenadeVisuals.values()) {
+      if (!vis.light) continue;
+      const dx = vis.light.position.x - this.camera.position.x;
+      const dy = vis.light.position.y - this.camera.position.y;
+      const dz = vis.light.position.z - this.camera.position.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 <= maxDistanceSq) candidates.push({ light: vis.light, d2 });
+    }
+    for (const ghost of this.predictedGrenadeGhosts) {
+      if (!ghost.light) continue;
+      const dx = ghost.light.position.x - this.camera.position.x;
+      const dy = ghost.light.position.y - this.camera.position.y;
+      const dz = ghost.light.position.z - this.camera.position.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 <= maxDistanceSq) candidates.push({ light: ghost.light, d2 });
+    }
+
+    candidates.sort((a, b) => a.d2 - b.d2);
+    const visibleLights = new Set<THREE.PointLight>();
+    for (let i = 0; i < candidates.length && i < this.currentGrenadeLightBudget; i++) {
+      visibleLights.add(candidates[i]!.light);
+    }
+
+    const grenadeBaseIntensity = WEAPONS[4].projectile.lightIntensity;
+    for (const vis of this.grenadeVisuals.values()) {
+      if (!vis.light) continue;
+      const visible = visibleLights.has(vis.light);
+      vis.light.visible = visible;
+      vis.light.intensity = visible ? grenadeBaseIntensity * scale : 0;
+    }
+    for (const ghost of this.predictedGrenadeGhosts) {
+      if (!ghost.light) continue;
+      const visible = visibleLights.has(ghost.light);
+      ghost.light.visible = visible;
+      ghost.light.intensity = visible ? grenadeBaseIntensity * scale : 0;
+    }
   }
 
   private refreshAdaptiveScaling(delta: number): void {
@@ -1518,8 +2041,10 @@ export class Engine {
         ttl: options.ttl ?? null,
         kind,
         baseIntensity: options.intensity,
+        baseDistance: options.distance,
         phase,
       });
+      this.applyDynamicLightBudget();
       return id;
     }
 
@@ -1537,8 +2062,10 @@ export class Engine {
       ttl: options.ttl ?? null,
       kind,
       baseIntensity: options.intensity,
+      baseDistance: options.distance,
       phase,
     });
+    this.applyDynamicLightBudget();
     return id;
   }
 
@@ -1553,7 +2080,10 @@ export class Engine {
       light.intensity = patch.intensity;
       entry.baseIntensity = patch.intensity;
     }
-    if (patch.distance !== undefined) light.distance = patch.distance;
+    if (patch.distance !== undefined) {
+      light.distance = patch.distance;
+      entry.baseDistance = patch.distance;
+    }
     if (patch.decay !== undefined) light.decay = patch.decay;
     if (patch.castShadow !== undefined) light.castShadow = patch.castShadow;
     if (patch.ttl !== undefined) entry.ttl = patch.ttl;
@@ -1582,6 +2112,7 @@ export class Engine {
     }
     entry.light.dispose();
     this.dynamicLights.delete(id);
+    this.applyDynamicLightBudget();
   }
 
   private getLanternContext(): LanternContext {
@@ -1627,6 +2158,8 @@ export class Engine {
       entry.ttl -= delta;
       if (entry.ttl <= 0) this.removeDynamicLight(id);
     }
+
+    this.applyDynamicLightBudget();
   }
 
   private playRemoteWeaponAudio(
@@ -2026,6 +2559,7 @@ export class Engine {
         const id = player.identity.toHexString();
 
         if (this.localIdentity && id === this.localIdentity) {
+          this.localPlayerEntityId = BigInt(player.entityId ?? 0);
           const wasMounted = this.mountedVehicleId !== 0;
           const serverWeapon = Number(player.currentWeapon);
           const localSwitchAgeMs =
@@ -2171,7 +2705,10 @@ export class Engine {
 
     this.conn.db.player.onInsert((_ctx: unknown, player: any) => {
       const id = player.identity.toHexString();
-      if (id === this.localIdentity) return;
+      if (id === this.localIdentity) {
+        this.localPlayerEntityId = BigInt(player.entityId ?? 0);
+        return;
+      }
       if (this.remotePlayers.shouldRenderRemotePlayer(player)) {
         const pvel = player.vel || { x: 0, y: 0, z: 0 };
         this.remotePlayers.updateOtherPlayer(
@@ -2188,6 +2725,12 @@ export class Engine {
     });
 
     this.conn.db.player.onDelete((_ctx: unknown, player: any) => {
+      if (
+        this.localIdentity &&
+        player.identity.toHexString() === this.localIdentity
+      ) {
+        this.localPlayerEntityId = 0n;
+      }
       this.remotePlayers.removeOtherPlayer(player.identity.toHexString());
     });
 
@@ -2195,7 +2738,10 @@ export class Engine {
     for (const player of this.conn.db.player.iter()) {
       const p = player as any;
       const id = p.identity.toHexString();
-      if (id === this.localIdentity) continue;
+      if (id === this.localIdentity) {
+        this.localPlayerEntityId = BigInt(p.entityId ?? 0);
+        continue;
+      }
       if (p.username && this.remotePlayers.shouldRenderRemotePlayer(p)) {
         const pvel = p.vel || { x: 0, y: 0, z: 0 };
         this.remotePlayers.updateOtherPlayer(
@@ -3118,11 +3664,13 @@ export class Engine {
   }
 
   private findLocalPlayerEntityId(): bigint {
+    if (this.localPlayerEntityId !== 0n) return this.localPlayerEntityId;
     if (!this.conn || !this.localIdentity) return 0n;
     for (const row of this.conn.db.player.iter()) {
       const p = row as any;
       if (p.identity.toHexString() !== this.localIdentity) continue;
-      return BigInt(p.entityId ?? 0);
+      this.localPlayerEntityId = BigInt(p.entityId ?? 0);
+      return this.localPlayerEntityId;
     }
     return 0n;
   }
@@ -3224,13 +3772,19 @@ export class Engine {
     }
 
     const startupLocked = !this.chunkStreamer.startupWorldReady;
+
+    const inputStartMs = performance.now();
     this.updateInputState(delta, startupLocked);
+    const afterInputMs = performance.now();
+
     this.applySandboxMotion(delta);
     this.updateGameSystems(delta);
     this.updateFeedback(delta);
+    const afterGameplayMs = performance.now();
 
     // Interpolate remote players every frame (delta for sniper glint animation)
     this.remotePlayers.interpolateAll(delta);
+    const afterRemotePlayersMs = performance.now();
 
     // Vehicle per-frame update FIRST so mesh positions are current before camera sync.
     // Old order (camera → mesh update) caused one-frame lag on the camera.
@@ -3244,6 +3798,10 @@ export class Engine {
       }
     }
 
+    // Vehicle breakup piece physics (delegated to VehicleManager)
+    this.vehicleManager.updateBreakupPieces(delta);
+    const afterVehiclesMs = performance.now();
+
     // Chunk streaming (every N frames to load quickly)
     this.chunkStreamer.chunkLoadFrame++;
     if (
@@ -3255,15 +3813,9 @@ export class Engine {
     }
 
     this.chunkStreamer.ensureSpawnGroundReady();
-
     this.chunkBoundaryViewer.update(this.camera, this.world);
 
-    // Vehicle breakup piece physics (delegated to VehicleManager)
-    this.vehicleManager.updateBreakupPieces(delta);
-
-    const startupProgress = this.chunkStreamer.startupWorldReady
-      ? 1
-      : this.chunkStreamer.getStartupLoadProgress();
+    const startupProgress = this.chunkStreamer.startupWorldReady ? 1 : this.chunkStreamer.getStartupLoadProgress();
     if (!this.chunkStreamer.startupWorldReady) {
       if (startupProgress > this.chunkStreamer.startupProgressPrev + 0.0005) {
         this.chunkStreamer.startupProgressStallTime = 0;
@@ -3288,10 +3840,12 @@ export class Engine {
     const sp = this.camera.position;
     this.sun.position.set(sp.x + 50, 80, sp.z + 30);
     this.sun.target.position.set(sp.x, 0, sp.z);
+    const afterWorldStreamingMs = performance.now();
 
     // Position sync — always send while alive (gating on pointer-lock caused
     // desync when lock dropped but local movement continued)
     this.sendPositionUpdate();
+    const afterNetSyncMs = performance.now();
 
     // Rebuild dirty chunks with distance-prioritized budget
     this.world.setRebuildAnchor(
@@ -3299,44 +3853,57 @@ export class Engine {
       this.camera.position.y,
       this.camera.position.z,
     );
-    const isMoving =
-      this.controls.moveForward ||
-      this.controls.moveBackward ||
-      this.controls.moveLeft ||
-      this.controls.moveRight ||
-      this.controls.isSliding ||
-      !this.controls.onGround;
-    const maxBuildChunks = isMoving
-      ? this.currentRebuildBudgetMoving
-      : this.currentRebuildBudgetIdle;
-    const maxApplyMs = isMoving
-      ? this.currentMeshApplyBudgetMsMoving
-      : this.currentMeshApplyBudgetMsIdle;
+
+    const isMoving = this.controls.moveForward || this.controls.moveBackward
+      || this.controls.moveLeft || this.controls.moveRight
+      || this.controls.isSliding || !this.controls.onGround;
+    const maxBuildChunks = isMoving ? this.currentRebuildBudgetMoving : this.currentRebuildBudgetIdle;
+    const maxApplyMs = isMoving ? this.currentMeshApplyBudgetMsMoving : this.currentMeshApplyBudgetMsIdle;
     this.world.rebuildDirtyChunks(this.scene, {
       maxChunks: maxBuildChunks,
       maxBuildChunks,
       maxApplyMs,
     });
+    const afterChunkRebuildMs = performance.now();
 
-    this.shadowRefreshTimer -= delta;
-    if (this.shadowRefreshTimer <= 0) {
-      this.shadowRefreshTimer = 0.25;
-      this.world.updateChunkShadowCasting(
-        this.camera.position.x,
-        this.camera.position.z,
-        this.currentShadowCastRadiusChunks,
-      );
-    }
+    this.world.updateChunkShadowCasting(
+      this.camera.position.x,
+      this.camera.position.z,
+      this.currentShadowCastRadiusChunks,
+    );
+    const afterShadowUpdateMs = performance.now();
 
     // Measure CPU time = everything before the render pass (game logic, scene graph, chunk rebuilds)
-    const preRenderMs = performance.now();
+    const preRenderMs = afterShadowUpdateMs;
     this.__perfLastState.cpuFrameMs = preRenderMs - frameStartMs;
 
     this.renderFrame(delta);
+    const afterRenderMs = performance.now();
+
     this.pushHudState(startupProgress);
     this.netDiag.refreshOverlay();
-    this.__perfLastState.frameMs = performance.now() - frameStartMs;
+    const frameEndMs = performance.now();
+    this.__perfLastState.frameMs = frameEndMs - frameStartMs;
     this.__perfLastState.playerCount = this.cachedPlayerCount;
+
+    this.recordLivePerfFrame({
+      frameEndMs,
+      frameMs: frameEndMs - frameStartMs,
+      cpuFrameMs: preRenderMs - frameStartMs,
+      renderMs: afterRenderMs - preRenderMs,
+      phases: [
+        { key: 'input', label: PERF_PHASE_LABELS.input, ms: afterInputMs - inputStartMs },
+        { key: 'gameplay', label: PERF_PHASE_LABELS.gameplay, ms: afterGameplayMs - afterInputMs },
+        { key: 'remotePlayers', label: PERF_PHASE_LABELS.remotePlayers, ms: afterRemotePlayersMs - afterGameplayMs },
+        { key: 'vehicles', label: PERF_PHASE_LABELS.vehicles, ms: afterVehiclesMs - afterRemotePlayersMs },
+        { key: 'worldStreaming', label: PERF_PHASE_LABELS.worldStreaming, ms: afterWorldStreamingMs - afterVehiclesMs },
+        { key: 'netSync', label: PERF_PHASE_LABELS.netSync, ms: afterNetSyncMs - afterWorldStreamingMs },
+        { key: 'chunkRebuild', label: PERF_PHASE_LABELS.chunkRebuild, ms: afterChunkRebuildMs - afterNetSyncMs },
+        { key: 'shadowUpdate', label: PERF_PHASE_LABELS.shadowUpdate, ms: afterShadowUpdateMs - afterChunkRebuildMs },
+        { key: 'render', label: PERF_PHASE_LABELS.render, ms: afterRenderMs - preRenderMs },
+        { key: 'hud', label: PERF_PHASE_LABELS.hud, ms: frameEndMs - afterRenderMs },
+      ],
+    });
   };
 
   private updateInputState(delta: number, startupLocked: boolean): void {
@@ -3482,6 +4049,8 @@ export class Engine {
         }
       }
     }
+
+    this.updateGrenadeLightVisibility();
 
     // Sky & environment
     this.sky.update(delta, this.camera.position);
