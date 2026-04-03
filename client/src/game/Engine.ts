@@ -1377,14 +1377,28 @@ export class Engine {
   setTacticalMapOpen(open: boolean): void {
     if (this.tacticalMapOpen === open) return;
 
+    const hadOverlayOpen = this.hasBlockingOverlayOpen();
+
     this.tacticalMapOpen = open;
     this.controls.inputEnabled = !this.hasBlockingOverlayOpen();
     this.weapons.setInputEnabled(!this.hasBlockingOverlayOpen());
     this.mouseDown = false;
 
     if (open) {
+      if (!hadOverlayOpen) {
+        this.relockAfterOverlay = this.controls.locked;
+        if (this.controls.locked) this.controls.unlock();
+      }
       this.controls.releaseAllInput();
       return;
+    }
+
+    if (!this.hasBlockingOverlayOpen() && this.relockAfterOverlay && !this.controls.locked) {
+      this.controls.lock();
+    }
+
+    if (!this.hasBlockingOverlayOpen()) {
+      this.relockAfterOverlay = false;
     }
   }
 
