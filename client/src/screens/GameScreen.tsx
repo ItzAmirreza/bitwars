@@ -31,6 +31,7 @@ interface GameScreenProps {
 export function GameScreen({ active }: GameScreenProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
+  const tacticalMapShouldRelockRef = useRef(false);
   const { connection, setScreen, settings, showSettings, setShowSettings, identity, username } = useGameStore();
   const activeConnection = active ? connection : null;
   const activeRef = useRef(active);
@@ -112,6 +113,7 @@ export function GameScreen({ active }: GameScreenProps) {
   const [showPerfPanel, setShowPerfPanel] = useState(false);
   const [showLivePerfOverlay, setShowLivePerfOverlay] = useState(false);
   const [tacticalMapOpen, setTacticalMapOpen] = useState(false);
+  const [suppressDeployOverlay, setSuppressDeployOverlay] = useState(false);
   const [perfRunning, setPerfRunning] = useState(false);
   const [perfProgress, setPerfProgress] = useState(0);
   const [perfLastRun, setPerfLastRun] = useState<PerfRunResult | null>(null);
@@ -131,8 +133,12 @@ export function GameScreen({ active }: GameScreenProps) {
     engineRef.current?.setLoadoutMenuOpen(false);
   }, []);
 
-  const closeTacticalMap = useCallback(() => {
+  const closeTacticalMap = useCallback((restoreGameplay = true) => {
     setTacticalMapOpen(false);
+    if (!restoreGameplay || !tacticalMapShouldRelockRef.current) return;
+
+    setSuppressDeployOverlay(true);
+    canvasRef.current?.requestPointerLock();
   }, []);
 
   const openLoadout = useCallback(() => {
@@ -142,7 +148,7 @@ export function GameScreen({ active }: GameScreenProps) {
       engineRef.current?.setChatOpen(false);
     }
     if (tacticalMapOpen) {
-      closeTacticalMap();
+      closeTacticalMap(false);
     }
     setLoadoutDraft(state.loadout);
     setActiveLoadoutSlot(0);
@@ -185,7 +191,7 @@ export function GameScreen({ active }: GameScreenProps) {
       closeLoadout();
     }
     if (tacticalMapOpen) {
-      closeTacticalMap();
+      closeTacticalMap(false);
     }
     setChatDraft(initialText);
     setChatOpen(true);
@@ -205,8 +211,9 @@ export function GameScreen({ active }: GameScreenProps) {
     if (loadoutOpen) {
       closeLoadout();
     }
+    tacticalMapShouldRelockRef.current = !tacticalMapOpen && state.locked;
     setTacticalMapOpen((value) => !value);
-  }, [chatOpen, loadoutOpen, closeChat, closeLoadout]);
+  }, [chatOpen, loadoutOpen, tacticalMapOpen, state.locked, closeChat, closeLoadout]);
 
   const handleSendChatMessage = useCallback(
     async (text: string) => {
@@ -404,10 +411,26 @@ export function GameScreen({ active }: GameScreenProps) {
   }, [tacticalMapOpen]);
 
   useEffect(() => {
-    if (showSettings && tacticalMapOpen) {
-      setTacticalMapOpen(false);
+    if (tacticalMapOpen || !suppressDeployOverlay) return;
+
+    const timeout = window.setTimeout(() => setSuppressDeployOverlay(false), 250);
+    return () => window.clearTimeout(timeout);
+  }, [tacticalMapOpen, suppressDeployOverlay]);
+
+  useEffect(() => {
+    if (state.locked) {
+      setSuppressDeployOverlay(false);
+      if (!tacticalMapOpen) {
+        tacticalMapShouldRelockRef.current = false;
+      }
     }
-  }, [showSettings, tacticalMapOpen]);
+  }, [state.locked, tacticalMapOpen]);
+
+  useEffect(() => {
+    if (showSettings && tacticalMapOpen) {
+      closeTacticalMap(false);
+    }
+  }, [showSettings, tacticalMapOpen, closeTacticalMap]);
 
   // Global key handler: Escape (menus), T (chat), E (loadout), M (map)
   const handleGlobalKey = useCallback(
@@ -874,7 +897,7 @@ export function GameScreen({ active }: GameScreenProps) {
       )}
 
       {/* Click to deploy overlay */}
-      {!state.locked && state.worldReady && !showSettings && !hudOverlayOpen && (
+      {!state.locked && !suppressDeployOverlay && state.worldReady && !showSettings && !hudOverlayOpen && (
         <div
           className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer"
           onClick={() => canvasRef.current?.requestPointerLock()}

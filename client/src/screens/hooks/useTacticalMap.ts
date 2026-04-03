@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { DbConnection } from '../../module_bindings';
 import { getCharacterPreset, colorHex } from '../../characterPresets';
-import { ABILITY_COLORS, ABILITY_NAMES } from '../../game/AbilityPickupManager';
 import { WORLD, VEHICLE_TYPES } from '../../shared-config';
 
 export interface TacticalMapPlayer {
@@ -28,28 +27,19 @@ export interface TacticalMapVehicle {
   color: string;
 }
 
-export interface TacticalMapMarker {
-  id: string;
-  label: string;
-  x: number;
-  z: number;
-  color: string;
-  kind: 'pickup' | 'zone';
-}
-
 export interface TacticalMapSnapshot {
   width: number;
   height: number;
   players: TacticalMapPlayer[];
   vehicles: TacticalMapVehicle[];
-  markers: TacticalMapMarker[];
+  selfX: number;
+  selfZ: number;
   stats: {
     players: number;
     vehicles: number;
     helicopters: number;
     jets: number;
     antiAir: number;
-    pickups: number;
   };
 }
 
@@ -87,13 +77,6 @@ interface EntityRow {
   active: boolean;
 }
 
-interface AbilityPickupRow {
-  id: bigint | number;
-  abilityType: number;
-  pos: Vec3Like;
-  active: boolean;
-}
-
 interface IterableTable<Row> {
   iter?: () => Iterable<Row>;
 }
@@ -102,13 +85,12 @@ interface TacticalMapTables {
   player?: IterableTable<PlayerRow>;
   vehicle?: IterableTable<VehicleRow>;
   entity?: IterableTable<EntityRow>;
-  ability_pickup?: IterableTable<AbilityPickupRow>;
 }
 
 const VEHICLE_MARKER_STYLE: Record<number, { label: string; shortLabel: string; color: string }> = {
-  [VEHICLE_TYPES.Helicopter]: { label: 'Helicopter', shortLabel: 'H', color: '#7cf6ff' },
-  [VEHICLE_TYPES.FighterJet]: { label: 'Fighter Jet', shortLabel: 'J', color: '#ff8f5a' },
-  [VEHICLE_TYPES.AntiAir]: { label: 'Anti-Air', shortLabel: 'AA', color: '#ffe66d' },
+  [VEHICLE_TYPES.Helicopter]: { label: 'Helicopter', shortLabel: 'H', color: '#00e5ff' },
+  [VEHICLE_TYPES.FighterJet]: { label: 'Fighter Jet', shortLabel: 'J', color: '#ff6b35' },
+  [VEHICLE_TYPES.AntiAir]: { label: 'Anti-Air', shortLabel: 'AA', color: '#ffd600' },
 };
 
 const DEFAULT_SNAPSHOT: TacticalMapSnapshot = {
@@ -116,14 +98,14 @@ const DEFAULT_SNAPSHOT: TacticalMapSnapshot = {
   height: WORLD.sizeZ,
   players: [],
   vehicles: [],
-  markers: [],
+  selfX: WORLD.sizeX * 0.5,
+  selfZ: WORLD.sizeZ * 0.5,
   stats: {
     players: 0,
     vehicles: 0,
     helicopters: 0,
     jets: 0,
     antiAir: 0,
-    pickups: 0,
   },
 };
 
@@ -148,7 +130,8 @@ function clampToWorldZ(z: number): number {
 }
 
 function yawToDegrees(yaw: number): number {
-  return ((yaw * 180) / Math.PI + 360) % 360;
+  // Negate to match Engine.ts heading convention (0=North, 90=East compass style)
+  return ((((-yaw * 180) / Math.PI) % 360) + 360) % 360;
 }
 
 export function useTacticalMap(connection: DbConnection | null, identity: string | null, enabled = true) {
@@ -169,6 +152,9 @@ export function useTacticalMap(connection: DbConnection | null, identity: string
         entityById.set(toNumber(row.id), row);
       }
 
+      let selfX = WORLD.sizeX * 0.5;
+      let selfZ = WORLD.sizeZ * 0.5;
+
       const players: TacticalMapPlayer[] = [];
       for (const row of db.player?.iter?.() ?? []) {
         if (!row.online) continue;
@@ -178,15 +164,24 @@ export function useTacticalMap(connection: DbConnection | null, identity: string
         const mountedEntity = mountedVehicleId !== 0 ? entityById.get(mountedVehicleId) : null;
         const sourcePos = mountedEntity?.pos ?? row.pos;
         const preset = getCharacterPreset(Number(row.characterPreset ?? 0));
+        const isSelf = !!identity && id === identity;
+
+        const px = clampToWorldX(Number(sourcePos?.x ?? 0));
+        const pz = clampToWorldZ(Number(sourcePos?.z ?? 0));
+
+        if (isSelf) {
+          selfX = px;
+          selfZ = pz;
+        }
 
         players.push({
           id,
           name: row.username || 'PLAYER',
-          x: clampToWorldX(Number(sourcePos?.x ?? 0)),
-          z: clampToWorldZ(Number(sourcePos?.z ?? 0)),
+          x: px,
+          z: pz,
           yaw: yawToDegrees(Number(row.rot?.yaw ?? 0)),
           color: colorHex(preset.accentColor),
-          isSelf: !!identity && id === identity,
+          isSelf,
           isMounted: mountedVehicleId !== 0,
           alive: Number(row.health ?? 0) > 0,
         });
@@ -211,7 +206,7 @@ export function useTacticalMap(connection: DbConnection | null, identity: string
         const style = VEHICLE_MARKER_STYLE[type] ?? {
           label: 'Vehicle',
           shortLabel: 'V',
-          color: '#c9d6df',
+          color: '#6b7080',
         };
         if (type === VEHICLE_TYPES.Helicopter) helicopters++;
         if (type === VEHICLE_TYPES.FighterJet) jets++;
@@ -230,43 +225,19 @@ export function useTacticalMap(connection: DbConnection | null, identity: string
         });
       }
 
-      const markers: TacticalMapMarker[] = [
-        {
-          id: 'center-grid',
-          label: 'CENTER GRID',
-          x: WORLD.sizeX * 0.5,
-          z: WORLD.sizeZ * 0.5,
-          color: '#ffd166',
-          kind: 'zone',
-        },
-      ];
-
-      for (const row of db.ability_pickup?.iter?.() ?? []) {
-        if (!row.active) continue;
-        const colorValue = ABILITY_COLORS[Number(row.abilityType ?? -1)] ?? 0xffffff;
-        markers.push({
-          id: `pickup-${String(row.id)}`,
-          label: ABILITY_NAMES[Number(row.abilityType ?? -1)] ?? 'Support',
-          x: clampToWorldX(Number(row.pos?.x ?? 0)),
-          z: clampToWorldZ(Number(row.pos?.z ?? 0)),
-          color: colorHex(colorValue),
-          kind: 'pickup',
-        });
-      }
-
       setSnapshot({
         width: WORLD.sizeX,
         height: WORLD.sizeZ,
         players,
         vehicles,
-        markers,
+        selfX,
+        selfZ,
         stats: {
           players: players.length,
           vehicles: vehicles.length,
           helicopters,
           jets,
           antiAir,
-          pickups: Math.max(0, markers.length - 1),
         },
       });
     };
