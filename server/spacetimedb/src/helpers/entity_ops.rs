@@ -40,6 +40,15 @@ pub fn sync_player_entity(ctx: &ReducerContext, player: &Player) {
     }
 }
 
+pub fn emit_player_teleport_event(ctx: &ReducerContext, player: spacetimedb::Identity, pos: &Vec3) {
+    ctx.db.admin_teleport_event().insert(AdminTeleportEvent {
+        id: 0,
+        player,
+        pos: pos.clone(),
+        created_at: ctx.timestamp,
+    });
+}
+
 pub fn ensure_player_entity(ctx: &ReducerContext, player: &Player) -> u64 {
     if player.entity_id != 0 {
         if ctx.db.entity().id().find(&player.entity_id).is_some() {

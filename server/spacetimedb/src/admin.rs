@@ -35,15 +35,6 @@ fn insert_system_message(ctx: &ReducerContext, text: &str) {
     });
 }
 
-fn insert_admin_teleport_event(ctx: &ReducerContext, player: Identity, pos: &Vec3) {
-    ctx.db.admin_teleport_event().insert(AdminTeleportEvent {
-        id: 0,
-        player,
-        pos: pos.clone(),
-        created_at: ctx.timestamp,
-    });
-}
-
 pub fn insert_admin_help(ctx: &ReducerContext) {
     insert_system_message(ctx, ADMIN_HELP_TEXT);
 }
@@ -92,7 +83,7 @@ pub fn process_admin_command(
                 ctx.db.player().identity().update(next.clone());
                 sync_player_entity(ctx, &next);
                 init_movement_state(ctx, sender, &new_pos);
-                insert_admin_teleport_event(ctx, sender, &new_pos);
+                emit_player_teleport_event(ctx, sender, &new_pos);
                 insert_system_message(
                     ctx,
                     &format!("Teleported to ({:.1}, {:.1}, {:.1})", x, y, z),
@@ -116,7 +107,7 @@ pub fn process_admin_command(
                 ctx.db.player().identity().update(next.clone());
                 sync_player_entity(ctx, &next);
                 init_movement_state(ctx, sender, &target_pos);
-                insert_admin_teleport_event(ctx, sender, &target_pos);
+                emit_player_teleport_event(ctx, sender, &target_pos);
                 insert_system_message(ctx, &format!("Teleported to {}", target_name));
             } else {
                 insert_command_help(ctx, "Usage: /tp <player> or /tp <x> <y> <z>");

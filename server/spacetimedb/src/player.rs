@@ -1,6 +1,8 @@
 // ── Player Reducers ──
 // Position updates, respawn, username, loadout management.
 
+use std::collections::HashMap;
+
 use spacetimedb::{reducer, ReducerContext, Table};
 
 use crate::admin::is_admin;
@@ -24,16 +26,10 @@ pub fn set_username(
     let character_preset = normalize_character_preset(character_preset);
 
     let sender = ctx.sender();
-    let mut profile = ensure_player_profile(ctx, sender);
+    let profile = ensure_player_profile(ctx, sender);
     if let Some(conflicting_profile) = find_profile_by_display_name(ctx, &username) {
         if conflicting_profile.profile_id != profile.profile_id {
-            if is_profile_online(ctx, conflicting_profile.profile_id) {
-                return Err("Username already taken".to_string());
-            }
-            let previous_profile_id = profile.profile_id;
-            relink_identity_to_profile(ctx, sender, conflicting_profile.profile_id);
-            profile = conflicting_profile;
-            prune_profile_if_unlinked(ctx, previous_profile_id);
+            return Err("Username already taken".to_string());
         }
     }
 
@@ -312,4 +308,113 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
 
     init_movement_state(ctx, sender, &spawn_pos);
     Ok(())
+}
+
+#[reducer]
+pub fn portal_arrive(ctx: &ReducerContext) -> Result<(), String> {
+    let sender = ctx.sender();
+    let player = ctx
+        .db
+        .player()
+        .identity()
+        .find(sender)
+        .ok_or("Not registered")?;
+
+    let player = dismount_player_internal(ctx, player, true);
+    let (spawn_pos, spawn_rot) =
+        portal_arrival_pose(ctx).ok_or("Portal landing zone is unavailable")?;
+
+    let arrived = Player {
+        pos: spawn_pos.clone(),
+        vel: ZERO_VEL,
+        rot: spawn_rot,
+        spawn_protected: true,
+        last_damage_time: ctx.timestamp,
+        ..player
+    };
+    ctx.db.player().identity().update(arrived.clone());
+    sync_player_entity(ctx, &arrived);
+    emit_player_teleport_event(ctx, sender, &spawn_pos);
+    init_movement_state(ctx, sender, &spawn_pos);
+    Ok(())
+}
+
+const PORTAL_CLEARANCE_HEIGHT: i32 = 7;
+const PORTAL_SURFACE_TOLERANCE: i32 = 1;
+const PORTAL_PAD_HALF_WIDTH_X: i32 = 1;
+const PORTAL_PAD_HALF_WIDTH_Z: i32 = 2;
+const PORTAL_CANDIDATES: &[(i32, i32)] =
+    &[(-12, 0), (-14, 4), (-14, -4), (-18, 0), (-10, 6), (-10, -6)];
+
+fn portal_arrival_pose(ctx: &ReducerContext) -> Option<(Vec3, Rotation)> {
+    let center_x = crate::worldgen::WORLD_SIZE_X as i32 / 2;
+    let center_z = crate::worldgen::WORLD_SIZE_Z as i32 / 2;
+    let mut chunk_cache = HashMap::new();
+
+    for (offset_x, offset_z) in PORTAL_CANDIDATES {
+        let portal_x = center_x + offset_x;
+        let portal_z = center_z + offset_z;
+        let Some(base_y) = portal_base_y_if_fit(ctx, portal_x, portal_z, &mut chunk_cache) else {
+            continue;
+        };
+
+        let spawn_pos = Vec3 {
+            x: portal_x as f32 + 3.5,
+            y: base_y as f32 + player_eye_height(),
+            z: portal_z as f32 + 0.5,
+        };
+        let spawn_rot = Rotation {
+            yaw: std::f32::consts::FRAC_PI_2,
+            pitch: 0.0,
+        };
+        return Some((clamp_pos(&spawn_pos), spawn_rot));
+    }
+
+    None
+}
+
+fn portal_base_y_if_fit(
+    ctx: &ReducerContext,
+    portal_x: i32,
+    portal_z: i32,
+    chunk_cache: &mut HashMap<u32, [u8; 4096]>,
+) -> Option<i32> {
+    let mut min_surface = i32::MAX;
+    let mut max_surface = i32::MIN;
+
+    for dx in -PORTAL_PAD_HALF_WIDTH_X..=PORTAL_PAD_HALF_WIDTH_X {
+        for dz in -PORTAL_PAD_HALF_WIDTH_Z..=PORTAL_PAD_HALF_WIDTH_Z {
+            let sx = portal_x + dx;
+            let sz = portal_z + dz;
+            let surface = crate::chunks::get_surface_height_generated(ctx, sx, sz, chunk_cache)?;
+            min_surface = min_surface.min(surface);
+            max_surface = max_surface.max(surface);
+        }
+    }
+
+    if min_surface == i32::MAX || max_surface - min_surface > PORTAL_SURFACE_TOLERANCE {
+        return None;
+    }
+
+    let base_y = max_surface + 1;
+    if base_y + PORTAL_CLEARANCE_HEIGHT >= crate::worldgen::WORLD_SIZE_Y as i32 - 1 {
+        return None;
+    }
+
+    for dx in -2..=2 {
+        for dz in -3..=3 {
+            let sx = portal_x + dx;
+            let sz = portal_z + dz;
+            for y in base_y..=base_y + PORTAL_CLEARANCE_HEIGHT {
+                if !matches!(
+                    crate::chunks::get_block_type_generated_cached(ctx, sx, y, sz, chunk_cache),
+                    Some(crate::worldgen::AIR)
+                ) {
+                    return None;
+                }
+            }
+        }
+    }
+
+    Some(base_y)
 }
