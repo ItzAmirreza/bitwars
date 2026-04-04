@@ -579,6 +579,12 @@ function App() {
     reloadForUpdate,
   ]);
 
+  // Sync screen state to body so CSS can hide overlapping third-party widgets (e.g. Vibe Jam badge)
+  useEffect(() => {
+    document.body.setAttribute("data-screen", screen);
+    return () => document.body.removeAttribute("data-screen");
+  }, [screen]);
+
   if (!connected && !error) {
     return <LoadingScreen />;
   }
