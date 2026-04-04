@@ -395,10 +395,12 @@ export class Engine {
   private adaptiveSampleTimer = 0;
   private adaptivePressureTime = 0;
   private adaptiveReliefTime = 0;
+  private adaptiveResumeAtMs = 0;
   private appliedPixelRatio = -1;
   private appliedShadowMapSize = 0;
   private shadowsActive = true;
   private currentShadowCastRadiusChunks = 7;
+  private shadowWarmupStartedAtMs = 0;
   private currentRebuildBudgetMoving = CHUNK_REBUILD_BUDGET_MOVING;
   private currentRebuildBudgetIdle = CHUNK_REBUILD_BUDGET_IDLE;
   private currentMeshApplyBudgetMsMoving = 1.25;
@@ -754,6 +756,7 @@ export class Engine {
     this.adaptiveSampleTimer = 0;
     this.adaptivePressureTime = 0;
     this.adaptiveReliefTime = 0;
+    this.adaptiveResumeAtMs = performance.now() + 2000;
     this.applyGraphicsTier(true);
   }
 
@@ -963,19 +966,18 @@ export class Engine {
           : 8;
 
     const dprScale = [1.0, 0.9, 0.78, 0.66][this.adaptiveTier] ?? 1.0;
-    const shadowScale = [1.0, 0.75, 0.5, 0.25][this.adaptiveTier] ?? 1.0;
     const budgetScale = [1.0, 0.85, 0.7, 0.55][this.adaptiveTier] ?? 1.0;
 
     const wantedDpr = Math.max(
       0.6,
       Math.min(window.devicePixelRatio, baseDpr * dprScale),
     );
-    const shadowMapSize = this.roundShadowMapSize(baseShadowMap * shadowScale);
-    const shadowsActive = this.userShadowsEnabled && this.adaptiveTier < 3;
+    const shadowMapSize = this.roundShadowMapSize(baseShadowMap);
+    const shadowsActive = this.userShadowsEnabled;
     const postFxActive = this.userPostFxEnabled && this.adaptiveTier < 2;
 
     this.currentShadowCastRadiusChunks = shadowsActive
-      ? Math.max(2, baseCastRadius - this.adaptiveTier)
+      ? baseCastRadius
       : 0;
     this.currentRebuildBudgetMoving = Math.max(
       4,
@@ -1253,6 +1255,15 @@ export class Engine {
   }
 
   private refreshAdaptiveScaling(delta: number): void {
+    const nowMs = performance.now();
+    if (!this.chunkStreamer.startupWorldReady || nowMs < this.adaptiveResumeAtMs) {
+      this.adaptiveFrameMsEma = 16.7;
+      this.adaptiveSampleTimer = 0;
+      this.adaptivePressureTime = 0;
+      this.adaptiveReliefTime = 0;
+      return;
+    }
+
     const frameMs = delta * 1000;
     const emaLerp = 1 - Math.pow(0.001, delta);
     this.adaptiveFrameMsEma += (frameMs - this.adaptiveFrameMsEma) * emaLerp;
@@ -1307,6 +1318,31 @@ export class Engine {
       this.adaptiveReliefTime = 0;
       this.applyGraphicsTier();
     }
+  }
+
+  private markStartupWorldNotReady(): void {
+    this.shadowWarmupStartedAtMs = 0;
+  }
+
+  private markStartupWorldReady(): void {
+    const nowMs = performance.now();
+    this.shadowWarmupStartedAtMs = nowMs;
+    this.adaptiveResumeAtMs = nowMs + 5000;
+    this.adaptiveFrameMsEma = 16.7;
+    this.adaptiveSampleTimer = 0;
+    this.adaptivePressureTime = 0;
+    this.adaptiveReliefTime = 0;
+  }
+
+  private getEffectiveShadowCastRadiusChunks(): number {
+    if (!this.shadowsActive || !this.chunkStreamer.startupWorldReady) return 0;
+    const targetRadius = this.currentShadowCastRadiusChunks;
+    if (targetRadius <= 0) return 0;
+    if (this.shadowWarmupStartedAtMs <= 0) return Math.min(2, targetRadius);
+
+    const elapsedMs = performance.now() - this.shadowWarmupStartedAtMs;
+    const warmupRadius = 2 + Math.floor(elapsedMs / 350);
+    return Math.min(targetRadius, warmupRadius);
   }
 
   /** Toggle fly mode (admin) */
@@ -1548,6 +1584,7 @@ export class Engine {
     this.sandboxBlockBreakCount = 0;
 
     this.chunkStreamer.startupWorldReady = false;
+    this.markStartupWorldNotReady();
     this.chunkStreamer.startupProgressPrev = 0;
     this.chunkStreamer.startupProgressStallTime = 0;
     this.chunkStreamer.chunkLoadFrame = 0;
@@ -3897,14 +3934,10 @@ export class Engine {
 
     if (!this.chunkStreamer.startupWorldReady && startupProgress >= 1) {
       this.chunkStreamer.startupWorldReady = true;
+      this.markStartupWorldReady();
       this.chunkStreamer.startupProgressPrev = 1;
       this.chunkStreamer.startupProgressStallTime = 0;
     }
-
-    // Shadow camera follows player
-    const sp = this.camera.position;
-    this.sun.position.set(sp.x + 50, 80, sp.z + 30);
-    this.sun.target.position.set(sp.x, 0, sp.z);
     const portalProbe = this.getPortalProbeState();
     this.portalSystem.update(
       delta,
@@ -3943,7 +3976,7 @@ export class Engine {
     this.world.updateChunkShadowCasting(
       this.camera.position.x,
       this.camera.position.z,
-      this.currentShadowCastRadiusChunks,
+      this.getEffectiveShadowCastRadiusChunks(),
     );
     const afterShadowUpdateMs = performance.now();
 

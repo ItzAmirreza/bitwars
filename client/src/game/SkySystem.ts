@@ -238,7 +238,7 @@ export class SkySystem {
       this.sunLight.target.updateMatrixWorld();
 
       // Snap shadow camera to texel grid to prevent swimming/flickering
-      this.stabilizeShadows(sunDir);
+      this.stabilizeShadows();
     } else {
       this.sunLight.position.set(sunDir.x * 80, Math.max(sunDir.y * 80, 5), sunDir.z * 80);
       this.sunLight.target.position.set(0, 0, 0);
@@ -355,38 +355,48 @@ export class SkySystem {
   // Reusable vectors for shadow stabilization (avoid per-frame allocations)
   private _shadowRight = new THREE.Vector3();
   private _shadowUp = new THREE.Vector3();
+  private _shadowWorldUp = new THREE.Vector3();
+  private _shadowLightDir = new THREE.Vector3();
 
   /**
    * Snap shadow camera position to texel boundaries so the shadow map
    * stays grid-aligned as the camera moves. Prevents shadow swimming/flickering.
    */
-  private stabilizeShadows(lightDir: THREE.Vector3): void {
+  private stabilizeShadows(): void {
     const shadowCam = this.sunLight.shadow.camera;
-    const mapSize = this.sunLight.shadow.mapSize.x;
+    const mapWidth = Math.max(1, this.sunLight.shadow.mapSize.x);
+    const mapHeight = Math.max(1, this.sunLight.shadow.mapSize.y);
     const frustumWidth = shadowCam.right - shadowCam.left;
-    const texelSize = frustumWidth / mapSize;
+    const frustumHeight = shadowCam.top - shadowCam.bottom;
+    const texelWidth = frustumWidth / mapWidth;
+    const texelHeight = frustumHeight / mapHeight;
 
-    // Build shadow camera's right/up axes from the light direction
+    const target = this.sunLight.target.position;
+    const lightDir = this._shadowLightDir.subVectors(target, this.sunLight.position);
+    if (lightDir.lengthSq() <= 1e-8) return;
+    lightDir.normalize();
+
+    // Build the snap axes from the real light direction, not the idealized sun vector.
     const worldUp = Math.abs(lightDir.y) > 0.99
-      ? this._shadowRight.set(1, 0, 0)
-      : this._shadowRight.set(0, 1, 0);
+      ? this._shadowWorldUp.set(1, 0, 0)
+      : this._shadowWorldUp.set(0, 1, 0);
     const right = this._shadowRight.crossVectors(worldUp, lightDir).normalize();
     const up = this._shadowUp.crossVectors(lightDir, right).normalize();
 
     // Project target onto shadow plane axes
-    const target = this.sunLight.target.position;
     const projR = target.dot(right);
     const projU = target.dot(up);
 
-    // Snap to nearest texel
-    const snapR = Math.round(projR / texelSize) * texelSize - projR;
-    const snapU = Math.round(projU / texelSize) * texelSize - projU;
+    // Snap to nearest texel along each shadow-map axis.
+    const snapR = Math.round(projR / texelWidth) * texelWidth - projR;
+    const snapU = Math.round(projU / texelHeight) * texelHeight - projU;
 
     // Shift both light and target by the snap offset
     this.sunLight.position.addScaledVector(right, snapR);
     this.sunLight.position.addScaledVector(up, snapU);
     target.addScaledVector(right, snapR);
     target.addScaledVector(up, snapU);
+    this.sunLight.target.updateMatrixWorld();
   }
 
   /** Lerp in 24h circular space */
