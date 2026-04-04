@@ -39,6 +39,7 @@ import DestroyBlocksPhysicsReducer from "./destroy_blocks_physics_reducer";
 import FireVehicleWeaponReducer from "./fire_vehicle_weapon_reducer";
 import FireWeaponReducer from "./fire_weapon_reducer";
 import InteractVehicleReducer from "./interact_vehicle_reducer";
+import PortalArriveReducer from "./portal_arrive_reducer";
 import ProjectileImpactReducer from "./projectile_impact_reducer";
 import ReloadVehicleWeaponReducer from "./reload_vehicle_weapon_reducer";
 import ReloadWeaponReducer from "./reload_weapon_reducer";
@@ -370,6 +371,7 @@ const reducersSchema = __reducers(
   __reducerSchema("fire_vehicle_weapon", FireVehicleWeaponReducer),
   __reducerSchema("fire_weapon", FireWeaponReducer),
   __reducerSchema("interact_vehicle", InteractVehicleReducer),
+  __reducerSchema("portal_arrive", PortalArriveReducer),
   __reducerSchema("projectile_impact", ProjectileImpactReducer),
   __reducerSchema("reload_vehicle_weapon", ReloadVehicleWeaponReducer),
   __reducerSchema("reload_weapon", ReloadWeaponReducer),

@@ -8,8 +8,8 @@ use crate::helpers::*;
 use crate::tables::*;
 use crate::types::*;
 use crate::worldgen::{
-    self, AIR, ASPHALT, BRICK, CONCRETE, DARK_CONCRETE, DIRT, GRASS, METAL, RUBBLE,
-    SAND, SNOW, STONE, WORLD_SIZE_X, WORLD_SIZE_Z,
+    self, AIR, ASPHALT, BRICK, CONCRETE, DARK_CONCRETE, DIRT, GRASS, METAL, RUBBLE, SAND, SNOW,
+    STONE, WORLD_SIZE_X, WORLD_SIZE_Z,
 };
 
 /// Spawn initial ability pickups scattered across the map.

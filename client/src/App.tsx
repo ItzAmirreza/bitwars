@@ -12,6 +12,7 @@ import { LobbyScreen } from "./screens/LobbyScreen";
 import { GameScreen } from "./screens/GameScreen";
 import { useMatchSession } from "./screens/hooks/useMatchSession";
 import { consumeAuthCallback } from "./auth";
+import { getPortalContext, getPortalUsernameCandidates } from "./portal";
 
 const UPDATE_RELOAD_AT_KEY = "bitwars-update-reload-at";
 const UPDATE_RELOAD_TARGET_KEY = "bitwars-update-reload-target";
@@ -226,6 +227,11 @@ function pendingUpdateFingerprint(update: PendingUpdate): string {
 }
 
 function App() {
+  const portalContextRef = useRef(getPortalContext());
+  const portalAutoJoinAttemptedRef = useRef(false);
+  const portalAutoEnterConsumedRef = useRef(
+    !portalContextRef.current.isPortalArrival,
+  );
   const [connectAttempt, setConnectAttempt] = useState(0);
   const [authReady, setAuthReady] = useState(false);
   const [pendingUpdate, setPendingUpdate] = useState<PendingUpdate | null>(null);
@@ -242,6 +248,7 @@ function App() {
     setScreen,
     setUsername,
     resetSession,
+    selectedCharacterPreset,
   } = useGameStore();
   const handlingSessionLossRef = useRef(false);
   const matchSession = useMatchSession(connection, identity);
@@ -309,6 +316,65 @@ function App() {
     resetConnection();
     window.location.reload();
   }, [pendingUpdate, setError]);
+
+  const autoJoinPortalVisitor = useCallback(async () => {
+    if (
+      !connection ||
+      !identity ||
+      !portalContextRef.current.isPortalArrival ||
+      portalAutoJoinAttemptedRef.current
+    ) {
+      return;
+    }
+
+    for (const row of connection.db.player.iter()) {
+      const player = row as {
+        identity: { toHexString: () => string };
+        username?: string;
+      };
+      if (player.identity.toHexString() !== identity) continue;
+      if (player.username?.trim()) {
+        return;
+      }
+      break;
+    }
+
+    portalAutoJoinAttemptedRef.current = true;
+    const candidates = getPortalUsernameCandidates(
+      portalContextRef.current,
+      identity,
+    );
+    let lastError: string | null = null;
+
+    for (const candidate of candidates) {
+      try {
+        await (connection.reducers as any).setUsername({
+          username: candidate,
+          characterPreset: selectedCharacterPreset,
+        });
+        setError(null);
+        setUsername(candidate);
+        portalAutoEnterConsumedRef.current = true;
+        setScreen("game");
+        return;
+      } catch (error) {
+        lastError =
+          error instanceof Error ? error.message : "Failed to set username";
+        if (!/taken/i.test(lastError)) {
+          break;
+        }
+      }
+    }
+
+    setError(lastError ?? "Portal auto-join failed. Enter a username to continue.");
+  }, [
+    connection,
+    identity,
+    selectedCharacterPreset,
+    setError,
+    setScreen,
+    setUsername,
+  ]);
 
   useEffect(() => {
     const result = consumeAuthCallback();
@@ -399,6 +465,14 @@ function App() {
   useEffect(() => {
     if (!connected || !connection || !identity) return;
 
+    if (portalContextRef.current.isPortalArrival) {
+      void autoJoinPortalVisitor();
+    }
+  }, [connected, connection, identity, autoJoinPortalVisitor]);
+
+  useEffect(() => {
+    if (!connected || !connection || !identity) return;
+
     const checkLocalPlayer = () => {
       let localPlayer: { online?: boolean; username?: string } | null = null;
 
@@ -427,7 +501,13 @@ function App() {
 
       if (localPlayer.username?.trim()) {
         setUsername(localPlayer.username);
-        if (screen === "login") {
+        if (
+          !portalAutoEnterConsumedRef.current &&
+          (screen === "login" || screen === "lobby")
+        ) {
+          portalAutoEnterConsumedRef.current = true;
+          setScreen("game");
+        } else if (screen === "login") {
           setScreen("lobby");
         }
       }
