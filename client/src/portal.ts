@@ -15,6 +15,140 @@ const FORWARDED_PARAM_KEYS = [
   "rotation_z",
 ] as const;
 
+const PORTAL_ADJECTIVES = [
+  "amber",
+  "aqua",
+  "ash",
+  "azure",
+  "birch",
+  "blue",
+  "bold",
+  "brisk",
+  "bronze",
+  "calm",
+  "cedar",
+  "clear",
+  "cloud",
+  "cobalt",
+  "coral",
+  "crisp",
+  "dawn",
+  "drift",
+  "dune",
+  "ember",
+  "fern",
+  "flint",
+  "frost",
+  "ghost",
+  "glade",
+  "gold",
+  "granite",
+  "green",
+  "hazel",
+  "hollow",
+  "indigo",
+  "ivory",
+  "jade",
+  "lilac",
+  "lunar",
+  "maple",
+  "meadow",
+  "mist",
+  "moss",
+  "navy",
+  "nova",
+  "ocean",
+  "olive",
+  "opal",
+  "pearl",
+  "pine",
+  "plum",
+  "quiet",
+  "rain",
+  "river",
+  "rose",
+  "ruby",
+  "sage",
+  "scarlet",
+  "silver",
+  "sky",
+  "slate",
+  "solar",
+  "spruce",
+  "stone",
+  "sun",
+  "swift",
+  "teal",
+  "velvet",
+] as const;
+
+const PORTAL_NOUNS = [
+  "antler",
+  "badger",
+  "beacon",
+  "bear",
+  "bloom",
+  "brook",
+  "cedar",
+  "cloud",
+  "comet",
+  "creek",
+  "crow",
+  "dawn",
+  "dune",
+  "falcon",
+  "field",
+  "finch",
+  "flame",
+  "flower",
+  "fox",
+  "glade",
+  "glen",
+  "grove",
+  "harbor",
+  "hawk",
+  "heron",
+  "hill",
+  "ibis",
+  "isle",
+  "lake",
+  "lark",
+  "lion",
+  "lynx",
+  "maple",
+  "marsh",
+  "meadow",
+  "moon",
+  "otter",
+  "owl",
+  "pine",
+  "raven",
+  "reed",
+  "ridge",
+  "river",
+  "robin",
+  "rose",
+  "shadow",
+  "shore",
+  "spark",
+  "spruce",
+  "star",
+  "stone",
+  "storm",
+  "sun",
+  "surf",
+  "swan",
+  "tide",
+  "trail",
+  "vale",
+  "wave",
+  "whale",
+  "willow",
+  "wind",
+  "wolf",
+  "wren",
+] as const;
+
 export interface PortalContext {
   isPortalArrival: boolean;
   refUrl: string | null;
@@ -112,15 +246,35 @@ function pushCandidate(
   candidates.push(trimmed);
 }
 
-function identitySuffix(identity: string | null): string {
-  if (!identity) return "PORTAL";
-  const compact = identity.replace(/[^a-fA-F0-9]/g, "");
-  const suffix = compact.slice(-8).toUpperCase();
-  return suffix || "PORTAL";
+function identityBytes(identity: string | null): number[] {
+  const compact = (identity ?? "portal-user").replace(/[^a-fA-F0-9]/g, "");
+  if (compact.length >= 2 && compact.length % 2 === 0) {
+    const bytes: number[] = [];
+    for (let i = 0; i < compact.length; i += 2) {
+      bytes.push(Number.parseInt(compact.slice(i, i + 2), 16));
+    }
+    if (bytes.length > 0) {
+      return bytes;
+    }
+  }
+
+  return Array.from(identity ?? "portal-user").map((char, index) =>
+    (char.charCodeAt(0) + index * 17) & 0xff
+  );
+}
+
+function portalWordTag(identity: string | null, variant: number): string {
+  const bytes = identityBytes(identity);
+  const byte = (offset: number) => bytes[(variant * 3 + offset) % bytes.length] ?? 0;
+  const adjectiveSeed = byte(0) ^ byte(5);
+  const nounSeed = (byte(1) + byte(3) * 3 + byte(7)) & 0xff;
+  const adjective = PORTAL_ADJECTIVES[adjectiveSeed % PORTAL_ADJECTIVES.length];
+  const noun = PORTAL_NOUNS[nounSeed % PORTAL_NOUNS.length];
+  return `${adjective}-${noun}`;
 }
 
 function withSuffix(base: string, suffix: string): string {
-  const safeSuffix = suffix.trim().slice(0, 8);
+  const safeSuffix = suffix.trim().slice(0, 14);
   if (!safeSuffix) return base.slice(0, 20);
   const rootBudget = Math.max(1, 20 - safeSuffix.length - 1);
   const root = (base.trim().slice(0, rootBudget) || "Pilot").trim();
@@ -131,15 +285,14 @@ export function getPortalUsernameCandidates(
   context: PortalContext,
   identity: string | null,
 ): string[] {
-  const base = context.incomingUsername ?? "Portal Pilot";
-  const suffix = identitySuffix(identity);
+  const base = context.incomingUsername ?? "Portal";
   const candidates: string[] = [];
   const seen = new Set<string>();
 
-  pushCandidate(candidates, seen, withSuffix(base, suffix));
-  pushCandidate(candidates, seen, withSuffix("Portal", suffix));
-  pushCandidate(candidates, seen, withSuffix("Pilot", suffix));
-  pushCandidate(candidates, seen, `P-${suffix}`);
+  pushCandidate(candidates, seen, withSuffix(base, portalWordTag(identity, 0)));
+  pushCandidate(candidates, seen, withSuffix(base, portalWordTag(identity, 1)));
+  pushCandidate(candidates, seen, withSuffix("Portal", portalWordTag(identity, 2)));
+  pushCandidate(candidates, seen, withSuffix("Pilot", portalWordTag(identity, 3)));
 
   return candidates;
 }
