@@ -26,16 +26,10 @@ pub fn set_username(
     let character_preset = normalize_character_preset(character_preset);
 
     let sender = ctx.sender();
-    let mut profile = ensure_player_profile(ctx, sender);
+    let profile = ensure_player_profile(ctx, sender);
     if let Some(conflicting_profile) = find_profile_by_display_name(ctx, &username) {
         if conflicting_profile.profile_id != profile.profile_id {
-            if is_profile_online(ctx, conflicting_profile.profile_id) {
-                return Err("Username already taken".to_string());
-            }
-            let previous_profile_id = profile.profile_id;
-            relink_identity_to_profile(ctx, sender, conflicting_profile.profile_id);
-            profile = conflicting_profile;
-            prune_profile_if_unlinked(ctx, previous_profile_id);
+            return Err("Username already taken".to_string());
         }
     }
 

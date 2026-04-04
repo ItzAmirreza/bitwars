@@ -56,9 +56,13 @@ pub fn require_active_match(ctx: &ReducerContext) -> Result<(), String> {
 }
 
 pub fn set_waiting_match_state(ctx: &ReducerContext) {
+    set_waiting_match_state_for_round(ctx, 1);
+}
+
+pub fn set_waiting_match_state_for_round(ctx: &ReducerContext, round_number: u32) {
     let state = MatchState {
         id: 1,
-        round_number: 1,
+        round_number: round_number.max(1),
         state: MATCH_STATE_WAITING,
         phase_started_at: ctx.timestamp,
         phase_ends_at: ctx.timestamp,
@@ -70,6 +74,13 @@ pub fn set_waiting_match_state(ctx: &ReducerContext) {
     } else {
         ctx.db.match_state().insert(state);
     }
+}
+
+fn has_ready_players(ctx: &ReducerContext) -> bool {
+    ctx.db
+        .player()
+        .iter()
+        .any(|player| player.online && !player.username.trim().is_empty())
 }
 
 pub fn start_round(ctx: &ReducerContext, round_number: u32) {
@@ -355,17 +366,14 @@ pub fn tick_match(ctx: &ReducerContext, _job: MatchTick) {
 
     match state.state {
         MATCH_STATE_WAITING => {
-            if ctx
-                .db
-                .player()
-                .iter()
-                .any(|player| player.online && !player.username.trim().is_empty())
-            {
+            if has_ready_players(ctx) {
                 start_round(ctx, state.round_number.max(1));
             }
         }
         MATCH_STATE_ACTIVE => {
-            if state.time_remaining_secs <= 1 {
+            if !has_ready_players(ctx) {
+                set_waiting_match_state_for_round(ctx, state.round_number.max(1));
+            } else if state.time_remaining_secs <= 1 {
                 enter_intermission(ctx, state);
             } else {
                 ctx.db.match_state().id().update(MatchState {
@@ -375,7 +383,9 @@ pub fn tick_match(ctx: &ReducerContext, _job: MatchTick) {
             }
         }
         MATCH_STATE_ENDED => {
-            if state.time_remaining_secs <= 1 {
+            if !has_ready_players(ctx) {
+                set_waiting_match_state_for_round(ctx, state.round_number.max(1));
+            } else if state.time_remaining_secs <= 1 {
                 reset_map(
                     ctx,
                     MapResetTimer {
