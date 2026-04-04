@@ -112,6 +112,13 @@ function pushCandidate(
   candidates.push(trimmed);
 }
 
+function identitySuffix(identity: string | null): string {
+  if (!identity) return "PORTAL";
+  const compact = identity.replace(/[^a-fA-F0-9]/g, "");
+  const suffix = compact.slice(-8).toUpperCase();
+  return suffix || "PORTAL";
+}
+
 function withSuffix(base: string, suffix: string): string {
   const safeSuffix = suffix.trim().slice(0, 8);
   if (!safeSuffix) return base.slice(0, 20);
@@ -125,21 +132,21 @@ export function getPortalUsernameCandidates(
   identity: string | null,
 ): string[] {
   const base = context.incomingUsername ?? "Portal Pilot";
-  const suffix = identity ? identity.slice(-4).toUpperCase() : "PORT";
+  const suffix = identitySuffix(identity);
   const candidates: string[] = [];
   const seen = new Set<string>();
 
-  pushCandidate(candidates, seen, base);
   pushCandidate(candidates, seen, withSuffix(base, suffix));
+  pushCandidate(candidates, seen, withSuffix("Portal", suffix));
   pushCandidate(candidates, seen, withSuffix("Pilot", suffix));
-  pushCandidate(candidates, seen, `Pilot${suffix}`);
+  pushCandidate(candidates, seen, `P-${suffix}`);
 
   return candidates;
 }
 
-export function getPortalSuggestedUsername(): string {
+export function getPortalSuggestedUsername(identity: string | null = null): string {
   const context = getPortalContext();
-  return getPortalUsernameCandidates(context, null)[0] ?? "";
+  return getPortalUsernameCandidates(context, identity)[0] ?? "";
 }
 
 function applyTravelState(

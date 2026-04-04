@@ -183,7 +183,8 @@ function ProviderIcon({
 }
 
 export function LoginScreen() {
-  const [input, setInput] = useState(() => getPortalSuggestedUsername());
+  const identity = useGameStore((s) => s.identity);
+  const [input, setInput] = useState(() => getPortalSuggestedUsername(identity));
   const [focused, setFocused] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
