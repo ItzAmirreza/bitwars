@@ -59,6 +59,11 @@ import { ChunkBoundaryViewer } from "./ChunkBoundaryViewer";
 import type { HarnessMode } from "./PerfHarness";
 import { buildPlayerMovementFlags } from "./playerMovementFlags";
 import { PortalSystem } from "./PortalSystem";
+import {
+  createProjectileRenderable,
+  disposeProjectileRenderable,
+  type ProjectileRenderable,
+} from "./projectileVisuals";
 
 const ENTITY_KIND_VEHICLE = ENTITY_KINDS.Vehicle;
 
@@ -238,7 +243,8 @@ export class Engine {
   private grenadeVisuals: Map<
     bigint,
     {
-      mesh: THREE.Mesh;
+      mesh: THREE.Group;
+      visual: ProjectileRenderable;
       light: THREE.PointLight | null;
       pos: THREE.Vector3; // last known server position
       vel: THREE.Vector3; // last known server velocity
@@ -249,7 +255,8 @@ export class Engine {
 
   // Local-predicted grenade ghosts for instant shooter feedback.
   private predictedGrenadeGhosts: Array<{
-    mesh: THREE.Mesh;
+    mesh: THREE.Group;
+    visual: ProjectileRenderable;
     light: THREE.PointLight | null;
     pos: THREE.Vector3;
     vel: THREE.Vector3;
@@ -3278,9 +3285,7 @@ export class Engine {
         // ── Projectiles + Grenades ──
         this.projectileManager.clearAll();
         for (const ghost of this.predictedGrenadeGhosts) {
-          this.scene.remove(ghost.mesh);
-          ghost.mesh.geometry.dispose();
-          (ghost.mesh.material as THREE.Material).dispose();
+          disposeProjectileRenderable(ghost.visual);
           if (ghost.light) {
             this.scene.remove(ghost.light);
             ghost.light.dispose();
@@ -3288,9 +3293,7 @@ export class Engine {
         }
         this.predictedGrenadeGhosts.length = 0;
         for (const vis of this.grenadeVisuals.values()) {
-          this.scene.remove(vis.mesh);
-          vis.mesh.geometry.dispose();
-          (vis.mesh.material as THREE.Material).dispose();
+          disposeProjectileRenderable(vis.visual);
           if (vis.light) {
             this.scene.remove(vis.light);
             vis.light.dispose();
@@ -3377,9 +3380,8 @@ export class Engine {
         if (this.grenadeVisuals.has(id)) return;
 
         const cfg = WEAPONS[4].projectile;
-        const geo = new THREE.SphereGeometry(cfg.size, 8, 6);
-        const mat = new THREE.MeshBasicMaterial({ color: cfg.lightColor });
-        const mesh = new THREE.Mesh(geo, mat);
+        const visual = createProjectileRenderable(cfg.size, cfg.lightColor);
+        const mesh = visual.root;
         mesh.position.set(g.pos.x, g.pos.y, g.pos.z);
         this.scene.add(mesh);
 
@@ -3396,6 +3398,7 @@ export class Engine {
 
         this.grenadeVisuals.set(id, {
           mesh,
+          visual,
           light,
           pos: new THREE.Vector3(g.pos.x, g.pos.y, g.pos.z),
           vel: new THREE.Vector3(g.vel.x, g.vel.y, g.vel.z),
@@ -3420,9 +3423,7 @@ export class Engine {
         const id = BigInt(g.id);
         const vis = this.grenadeVisuals.get(id);
         if (!vis) return;
-        this.scene.remove(vis.mesh);
-        vis.mesh.geometry.dispose();
-        (vis.mesh.material as THREE.Material).dispose();
+        disposeProjectileRenderable(vis.visual);
         if (vis.light) {
           this.scene.remove(vis.light);
           vis.light.dispose();
@@ -3436,9 +3437,8 @@ export class Engine {
         if (this.grenadeVisuals.has(id)) continue;
 
         const cfg = WEAPONS[4].projectile;
-        const geo = new THREE.SphereGeometry(cfg.size, 8, 6);
-        const mat = new THREE.MeshBasicMaterial({ color: cfg.lightColor });
-        const mesh = new THREE.Mesh(geo, mat);
+        const visual = createProjectileRenderable(cfg.size, cfg.lightColor);
+        const mesh = visual.root;
         mesh.position.set(g.pos.x, g.pos.y, g.pos.z);
         this.scene.add(mesh);
 
@@ -3455,6 +3455,7 @@ export class Engine {
 
         this.grenadeVisuals.set(id, {
           mesh,
+          visual,
           light,
           pos: new THREE.Vector3(g.pos.x, g.pos.y, g.pos.z),
           vel: new THREE.Vector3(g.vel.x, g.vel.y, g.vel.z),
@@ -3554,9 +3555,7 @@ export class Engine {
     ) {
       const oldest = this.predictedGrenadeGhosts.shift();
       if (oldest) {
-        this.scene.remove(oldest.mesh);
-        oldest.mesh.geometry.dispose();
-        (oldest.mesh.material as THREE.Material).dispose();
+        disposeProjectileRenderable(oldest.visual);
         if (oldest.light) {
           this.scene.remove(oldest.light);
           oldest.light.dispose();
@@ -3574,10 +3573,8 @@ export class Engine {
       return false;
     }
 
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(cfg.size, 8, 6),
-      new THREE.MeshBasicMaterial({ color: cfg.lightColor }),
-    );
+    const visual = createProjectileRenderable(cfg.size, cfg.lightColor);
+    const mesh = visual.root;
     mesh.position.copy(origin);
     this.scene.add(mesh);
 
@@ -3595,6 +3592,7 @@ export class Engine {
     const speed = WEAPONS[4].projectile.speed;
     this.predictedGrenadeGhosts.push({
       mesh,
+      visual,
       light,
       pos: origin.clone(),
       vel: dir.multiplyScalar(speed),
@@ -3631,9 +3629,7 @@ export class Engine {
 
     if (bestIdx >= 0) {
       const ghost = this.predictedGrenadeGhosts[bestIdx];
-      this.scene.remove(ghost.mesh);
-      ghost.mesh.geometry.dispose();
-      (ghost.mesh.material as THREE.Material).dispose();
+      disposeProjectileRenderable(ghost.visual);
       if (ghost.light) {
         this.scene.remove(ghost.light);
         ghost.light.dispose();
@@ -3650,9 +3646,7 @@ export class Engine {
       const ghost = this.predictedGrenadeGhosts[i];
       ghost.age += delta;
       if (ghost.age >= ghost.ttl) {
-        this.scene.remove(ghost.mesh);
-        ghost.mesh.geometry.dispose();
-        (ghost.mesh.material as THREE.Material).dispose();
+        disposeProjectileRenderable(ghost.visual);
         if (ghost.light) {
           this.scene.remove(ghost.light);
           ghost.light.dispose();
@@ -4784,9 +4778,7 @@ export class Engine {
     this.netDiag.dispose();
     this.chunkBoundaryViewer.dispose();
     for (const ghost of this.predictedGrenadeGhosts) {
-      this.scene.remove(ghost.mesh);
-      ghost.mesh.geometry.dispose();
-      (ghost.mesh.material as THREE.Material).dispose();
+      disposeProjectileRenderable(ghost.visual);
       if (ghost.light) {
         this.scene.remove(ghost.light);
         ghost.light.dispose();
@@ -4795,9 +4787,7 @@ export class Engine {
     this.predictedGrenadeGhosts.length = 0;
     // Clean up grenade visuals
     for (const vis of this.grenadeVisuals.values()) {
-      this.scene.remove(vis.mesh);
-      vis.mesh.geometry.dispose();
-      (vis.mesh.material as THREE.Material).dispose();
+      disposeProjectileRenderable(vis.visual);
       if (vis.light) {
         this.scene.remove(vis.light);
         vis.light.dispose();

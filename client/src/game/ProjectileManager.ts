@@ -6,6 +6,12 @@ import { COMBAT } from '../shared-config';
 import { VFX } from './VFX';
 import type { AudioSystem } from './AudioSystem';
 import { collectCappedEllipsoidCoords } from './explosionPattern';
+import {
+  createProjectileRenderable,
+  disposeProjectileRenderable,
+  updateProjectileRenderable,
+  type ProjectileRenderable,
+} from './projectileVisuals';
 
 const MAX_PROJECTILES = 64;
 const MAX_LIGHTS = 4;
@@ -28,23 +34,23 @@ interface VehicleProjectileVisual {
 const VEHICLE_PROJECTILE_VISUALS: Record<number, VehicleProjectileVisual> = {
   // Rockets (index 1): same as existing RPG-style
   1: {
-    speed: 80, gravity: 3, size: 0.15, trailLength: 0.5,
-    trailColor: 0xff6600, lightIntensity: 3, lightColor: 0xff4400, lightRange: 8, lifetime: 5,
+    speed: 80, gravity: 3, size: 0.11, trailLength: 0.7,
+    trailColor: 0xff6600, lightIntensity: 2.2, lightColor: 0xff4400, lightRange: 6, lifetime: 5,
   },
   // Carpet Bomb (index 3): medium, orange trail
   3: {
-    speed: 5, gravity: 20, size: 0.3, trailLength: 0.3,
-    trailColor: 0xff6600, lightIntensity: 2.5, lightColor: 0xff4400, lightRange: 6, lifetime: 10,
+    speed: 5, gravity: 20, size: 0.2, trailLength: 0.48,
+    trailColor: 0xff6600, lightIntensity: 1.8, lightColor: 0xff4400, lightRange: 5, lifetime: 10,
   },
   // SAM Missile (index 5): red trail
   5: {
-    speed: 90, gravity: 2, size: 0.15, trailLength: 0.5,
-    trailColor: 0xff3333, lightIntensity: 3, lightColor: 0xff3333, lightRange: 8, lifetime: 5,
+    speed: 90, gravity: 2, size: 0.12, trailLength: 0.72,
+    trailColor: 0xff3333, lightIntensity: 2.4, lightColor: 0xff3333, lightRange: 6, lifetime: 5,
   },
   // Air Missile (index 6): cyan trail
   6: {
-    speed: 120, gravity: 2, size: 0.15, trailLength: 0.6,
-    trailColor: 0x00ccff, lightIntensity: 3.5, lightColor: 0x00ccff, lightRange: 10, lifetime: 5,
+    speed: 120, gravity: 2, size: 0.12, trailLength: 0.75,
+    trailColor: 0x00ccff, lightIntensity: 2.8, lightColor: 0x00ccff, lightRange: 7, lifetime: 5,
   },
 };
 
@@ -83,10 +89,12 @@ interface ActiveProjectile {
   lightIntensity: number;
   trailTimer: number;
   trailSpacing: number;
+  visualSize: number;
   // State
   isLocal: boolean;
   shooterId: string | null;
-  mesh: THREE.Mesh;
+  mesh: THREE.Group;
+  visual: ProjectileRenderable;
   light: THREE.PointLight | null;
   // Vehicle metadata
   isVehicle: boolean;
@@ -96,9 +104,6 @@ interface ActiveProjectile {
   flybyPlayed: boolean;
   prevDistToListener: number;
 }
-
-// Shared geometry/material for all projectile meshes
-const _boxGeo = new THREE.BoxGeometry(1, 1, 1);
 
 export class ProjectileManager {
   private projectiles: ActiveProjectile[] = [];
@@ -306,14 +311,9 @@ export class ProjectileManager {
     const dir = direction.clone().normalize();
     const vel = dir.clone().multiplyScalar(cfg.speed);
 
-    // Create mesh
-    const mat = new THREE.MeshBasicMaterial({
-      color: cfg.trailColor || 0xff4444,
-      transparent: true,
-      opacity: 0.9,
-    });
-    const mesh = new THREE.Mesh(_boxGeo, mat);
-    mesh.scale.setScalar(cfg.size);
+    const projectileColor = cfg.lightColor || cfg.trailColor || 0xff4444;
+    const visual = createProjectileRenderable(cfg.size, projectileColor);
+    const mesh = visual.root;
     mesh.position.copy(origin);
     this.scene.add(mesh);
 
@@ -345,9 +345,11 @@ export class ProjectileManager {
       lightIntensity: cfg.lightIntensity,
       trailTimer: 0,
       trailSpacing: cfg.trailLength,
+      visualSize: cfg.size,
       isLocal,
       shooterId,
       mesh,
+      visual,
       light,
       isVehicle,
       vehicleWeaponIndex: vehWepIdx,
@@ -475,10 +477,8 @@ export class ProjectileManager {
       const speed = p.vel.length();
       if (speed > 1) {
         p.mesh.lookAt(p.pos.clone().add(p.vel));
-        const stretch = Math.min(3, speed / p.speed * 2);
-        const vehVis = p.isVehicle ? VEHICLE_PROJECTILE_VISUALS[p.vehicleWeaponIndex] : null;
-        const projSize = vehVis?.size ?? WEAPONS[p.weaponIndex].projectile.size;
-        p.mesh.scale.set(projSize, projSize, projSize * stretch);
+        const stretch = Math.min(1, speed / p.speed);
+        updateProjectileRenderable(p.visual, p.visualSize, stretch);
       }
 
       // Trail particles
@@ -799,8 +799,7 @@ export class ProjectileManager {
   private removeProjectile(index: number): void {
     const p = this.projectiles[index];
 
-    this.scene.remove(p.mesh);
-    (p.mesh.material as THREE.Material).dispose();
+    disposeProjectileRenderable(p.visual);
 
     if (p.light) {
       this.scene.remove(p.light);

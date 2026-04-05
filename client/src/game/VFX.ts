@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 /**
  * GPU-optimized particle system with custom shader.
- * Renders soft glowing circles instead of hard squares.
+ * Renders softened square particles that fit the voxel look.
  * Single draw call for all particles.
  */
 
@@ -31,7 +31,7 @@ void main() {
     vAlpha = aAlpha;
     vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
     gl_PointSize = aSize * (280.0 / -mvPos.z);
-    gl_PointSize = clamp(gl_PointSize, 1.0, 80.0);
+    gl_PointSize = clamp(gl_PointSize, 1.0, 48.0);
     gl_Position = projectionMatrix * mvPos;
 }
 `;
@@ -41,14 +41,16 @@ varying vec3 vColor;
 varying float vAlpha;
 
 void main() {
-    vec2 uv = gl_PointCoord;
+    vec2 centered = abs(gl_PointCoord - vec2(0.5));
+    float squareDist = max(centered.x, centered.y);
+    float radialDist = length(centered * vec2(1.12, 1.12));
+    float edgeFade = 1.0 - smoothstep(0.18, 0.46, squareDist);
+    float cornerFade = 1.0 - smoothstep(0.34, 0.58, radialDist);
+    float coreGlow = 1.0 - smoothstep(0.07, 0.22, squareDist);
+    float alpha = edgeFade * cornerFade;
 
-    // Hard-edged square with slight inner brightness
-    float inner = step(0.2, uv.x) * step(0.2, uv.y)
-                * step(0.2, 1.0 - uv.x) * step(0.2, 1.0 - uv.y);
-
-    vec3 color = vColor + vColor * inner * 0.3;
-    gl_FragColor = vec4(color, vAlpha);
+    vec3 color = vColor * (0.78 + coreGlow * 0.34);
+    gl_FragColor = vec4(color, vAlpha * alpha);
 }
 `;
 
@@ -136,8 +138,8 @@ export class VFX {
         g: col.g * (0.8 + Math.random() * 0.4),
         b: col.b * (0.8 + Math.random() * 0.4),
         life: 0,
-        maxLife: 0.4 + Math.random() * 0.5,
-        size: 8 + Math.random() * 6,
+        maxLife: 0.32 + Math.random() * 0.34,
+        size: 5.5 + Math.random() * 3.5,
         gravity: true,
       });
     }
@@ -145,7 +147,7 @@ export class VFX {
 
   // ── Explosion (fire + smoke) ──
   emitExplosion(x: number, y: number, z: number, radius: number): void {
-    const count = Math.min(80, Math.floor(radius * 22));
+    const count = Math.min(64, Math.floor(radius * 18));
 
     for (let i = 0; i < count && this.particles.length < MAX_PARTICLES; i++) {
       const theta = Math.random() * Math.PI * 2;
@@ -179,8 +181,8 @@ export class VFX {
         vz: dirZ * speed,
         r, g, b,
         life: 0,
-        maxLife: 0.3 + Math.random() * 0.7,
-        size: isFire ? 14 + Math.random() * 10 : 18 + Math.random() * 12,
+        maxLife: 0.24 + Math.random() * 0.48,
+        size: isFire ? 8 + Math.random() * 5 : 10 + Math.random() * 6,
         gravity: isFire,
       });
     }
@@ -210,7 +212,7 @@ export class VFX {
         r: 1, g: 0.7 + Math.random() * 0.3, b: 0.1 + Math.random() * 0.2,
         life: 0,
         maxLife: 0.03 + Math.random() * 0.04,
-        size: 6 + Math.random() * 8,
+        size: 4 + Math.random() * 4,
         gravity: false,
       });
     }
@@ -230,7 +232,7 @@ export class VFX {
         r: col.r, g: col.g, b: col.b,
         life: 0,
         maxLife: 0.03 + Math.random() * 0.05,
-        size: 8 + Math.random() * 10,
+        size: 5 + Math.random() * 5,
         gravity: false,
       });
     }
@@ -259,8 +261,8 @@ export class VFX {
         vz: (Math.random() - 0.5) * 3,
         r: 0.55, g: 0.55, b: 0.5,
         life: 0,
-        maxLife: 0.25 + Math.random() * 0.2,
-        size: 5 + Math.random() * 5,
+        maxLife: 0.18 + Math.random() * 0.14,
+        size: 3 + Math.random() * 3,
         gravity: true,
       });
     }
@@ -269,18 +271,20 @@ export class VFX {
   // ── Projectile trail ──
   emitProjectileTrail(x: number, y: number, z: number, colorHex: number): void {
     const col = new THREE.Color(colorHex);
-    for (let i = 0; i < 2 && this.particles.length < MAX_PARTICLES; i++) {
+    for (let i = 0; i < 1 && this.particles.length < MAX_PARTICLES; i++) {
       this.particles.push({
-        x: x + (Math.random() - 0.5) * 0.15,
-        y: y + (Math.random() - 0.5) * 0.15,
-        z: z + (Math.random() - 0.5) * 0.15,
-        vx: (Math.random() - 0.5) * 1.5,
-        vy: (Math.random() - 0.5) * 1.5 + 0.3,
-        vz: (Math.random() - 0.5) * 1.5,
-        r: col.r, g: col.g, b: col.b,
+        x: x + (Math.random() - 0.5) * 0.08,
+        y: y + (Math.random() - 0.5) * 0.08,
+        z: z + (Math.random() - 0.5) * 0.08,
+        vx: (Math.random() - 0.5) * 0.9,
+        vy: (Math.random() - 0.5) * 0.9 + 0.1,
+        vz: (Math.random() - 0.5) * 0.9,
+        r: Math.min(1, col.r * 0.95 + 0.05),
+        g: Math.min(1, col.g * 0.95 + 0.05),
+        b: Math.min(1, col.b * 0.95 + 0.05),
         life: 0,
-        maxLife: 0.15 + Math.random() * 0.2,
-        size: 4 + Math.random() * 4,
+        maxLife: 0.06 + Math.random() * 0.08,
+        size: 2.2 + Math.random() * 1.4,
         gravity: false,
       });
     }
@@ -316,7 +320,7 @@ export class VFX {
         r, g, b,
         life: 0,
         maxLife: 0.3 + Math.random() * 0.4,
-        size: 8 + Math.random() * 10,
+        size: 5 + Math.random() * 5,
         gravity: false,
       });
     }
@@ -335,7 +339,7 @@ export class VFX {
         r: 0.1, g: 0.8, b: 1.0,
         life: 0,
         maxLife: 0.4 + Math.random() * 0.5,
-        size: 12 + Math.random() * 8,
+        size: 8 + Math.random() * 5,
         gravity: true,
       });
     }
@@ -364,7 +368,7 @@ export class VFX {
         r: 1.0 * bright, g: (0.5 + Math.random() * 0.4) * bright, b: 0.1 * bright,
         life: 0,
         maxLife: 0.15 + Math.random() * 0.35,
-        size: 4 + Math.random() * 8,
+        size: 3 + Math.random() * 4,
         gravity: true,
       });
     }
@@ -382,8 +386,8 @@ export class VFX {
         vz: (Math.random() - 0.5) * 6,
         r: v, g: v, b: v * 0.9,
         life: 0,
-        maxLife: 0.3 + Math.random() * 0.5,
-        size: 12 + Math.random() * 10,
+        maxLife: 0.24 + Math.random() * 0.34,
+        size: 7 + Math.random() * 5,
         gravity: true,
       });
     }
@@ -484,7 +488,7 @@ export class VFX {
       this.colArr[idx3] = p.r * fade;
       this.colArr[idx3 + 1] = p.g * fade;
       this.colArr[idx3 + 2] = p.b * fade;
-      this.sizeArr[alive] = p.size * (0.5 + fade * 0.5);
+      this.sizeArr[alive] = p.size * (0.42 + fade * 0.42);
       this.alphaArr[alive] = fade;
       alive++;
     }
