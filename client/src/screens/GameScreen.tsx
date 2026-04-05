@@ -130,7 +130,6 @@ export function GameScreen({ active }: GameScreenProps) {
   const tacticalMap = useTacticalMap(activeConnection, identity, active);
 
   const dismissTutorial = useCallback(() => {
-    localStorage.setItem(TUTORIAL_SEEN_KEY, '1');
     setShowTutorial(false);
     canvasRef.current?.requestPointerLock();
   }, []);
@@ -403,6 +402,13 @@ export function GameScreen({ active }: GameScreenProps) {
     }, 16);
   }, [perfRunning, refreshPerfHistory, showPerfPanel]);
 
+  // Persist tutorial dismissal only after pointer lock succeeds
+  useEffect(() => {
+    if (!showTutorial && state.locked && !localStorage.getItem(TUTORIAL_SEEN_KEY)) {
+      localStorage.setItem(TUTORIAL_SEEN_KEY, '1');
+    }
+  }, [showTutorial, state.locked]);
+
   // Sync settings to engine when they change
   useEffect(() => {
     if (engineRef.current) {
@@ -429,7 +435,7 @@ export function GameScreen({ active }: GameScreenProps) {
         return;
       }
 
-      if (showTutorial && state.worldReady) {
+      if (showTutorial && state.worldReady && !showSettings && !chatOpen && !loadoutOpen && !tacticalMapOpen) {
         e.preventDefault();
         dismissTutorial();
         return;
