@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { DbConnection } from '../../module_bindings';
 import { MATCH } from '../../shared-config';
+import { getRemainingMs, syncServerClockOffset } from '../../serverClock';
 
 const MATCH_STATE_WAITING = 0;
 const MATCH_STATE_ACTIVE = 1;
@@ -97,9 +98,12 @@ function formatKd(kills: number, deaths: number): string {
 }
 
 function deriveRemainingSeconds(rawState: MatchStateRow): number {
-  if (typeof rawState.phaseEndsAt?.toMillis === 'function') {
-    const endsAtMs = Number(rawState.phaseEndsAt.toMillis());
-    return Math.max(0, Math.ceil((endsAtMs - Date.now()) / 1000));
+  const nowMs = Date.now();
+  syncServerClockOffset(rawState, nowMs);
+
+  const remainingMs = getRemainingMs(rawState.phaseEndsAt, nowMs);
+  if (remainingMs !== null) {
+    return Math.max(0, Math.ceil(remainingMs / 1000));
   }
   return Math.max(0, Number(rawState.timeRemainingSecs ?? 0));
 }

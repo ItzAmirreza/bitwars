@@ -54,6 +54,7 @@ import { AbilityPickupManager } from "./AbilityPickupManager";
 import type { ActiveBuff } from "../screens/hud/BuffIndicators";
 import type { DbConnection } from "../module_bindings";
 import type { GameSettings } from "../store";
+import { getRemainingMs, syncServerClockOffset } from "../serverClock";
 import { NetDiagnostics } from "./NetDiagnostics";
 import { ChunkBoundaryViewer } from "./ChunkBoundaryViewer";
 import type { HarnessMode } from "./PerfHarness";
@@ -4769,16 +4770,16 @@ export class Engine {
   private getActiveBuffs(): ActiveBuff[] {
     if (!this.conn || !this.localIdentity) return [];
     const buffTable = (this.conn.db as any).player_buff;
+    const matchStateTable = (this.conn.db as any).match_state;
     if (!buffTable) return [];
     const now = Date.now();
+    const matchState =
+      matchStateTable?.id?.find?.(1) ?? matchStateTable?.iter?.().next?.().value ?? null;
+    syncServerClockOffset(matchState, now);
     const buffs: ActiveBuff[] = [];
     for (const b of buffTable.iter()) {
       if (b.identity.toHexString() !== this.localIdentity) continue;
-      const expiresMs =
-        b.expiresAt && typeof b.expiresAt.toMillis === "function"
-          ? Number(b.expiresAt.toMillis())
-          : Date.now();
-      const remaining = expiresMs - now;
+      const remaining = getRemainingMs(b.expiresAt, now) ?? 0;
       if (remaining > 0) {
         buffs.push({ type: b.abilityType, remainingMs: remaining });
       }
