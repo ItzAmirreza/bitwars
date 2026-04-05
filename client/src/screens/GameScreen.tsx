@@ -85,6 +85,7 @@ export function GameScreen({ active }: GameScreenProps) {
     nearVehicleName: null,
     activeBuffs: [],
     damageIndicators: [],
+    sniperScoped: false,
   });
 
   // ── Kill tracking hook ──
@@ -773,6 +774,7 @@ export function GameScreen({ active }: GameScreenProps) {
           vehicleWeapon={state.vehicleWeapon}
           vehicleWeaponColor={state.vehicleWeaponSlots[state.vehicleWeapon]?.color}
           damageIndicators={state.damageIndicators}
+          sniperScoped={state.sniperScoped}
         />
       )}
 

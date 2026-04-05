@@ -127,6 +127,7 @@ export interface EngineState {
   nearVehicleName: string | null;
   activeBuffs: ActiveBuff[];
   damageIndicators: DamageIndicatorState[];
+  sniperScoped: boolean;
 }
 
 export interface DamageIndicatorState {
@@ -383,6 +384,8 @@ export class Engine {
   private baseFov = 75;
   private wasSliding = false;
   private relockAfterOverlay = false;
+  private sniperScoped = false;
+  private scopeFovLerp = 0; // 0 = unscoped, 1 = fully scoped
   chatOpen = false;
   private loadoutMenuOpen = false;
   private tacticalMapOpen = false;
@@ -1473,6 +1476,9 @@ export class Engine {
       if (this.mountedVehicleId !== 0) this.tryVehicleFire();
       else this.tryFire();
     }
+    if (e.button === 2 && this.controls.locked && this.mountedVehicleId === 0) {
+      this.toggleSniperScope();
+    }
   };
 
   private onContextMenu = (e: Event): void => {
@@ -2304,10 +2310,21 @@ export class Engine {
 
   private applyLocalWeaponSwitch(weaponIndex: number): void {
     if (weaponIndex === this.lastWeaponIndex) return;
+    this.unscopeSniper();
     this.weaponModel.switchWeapon(weaponIndex);
     this.audio.playSwitch(this.localAudioSource(-0.1));
     this.lastWeaponIndex = weaponIndex;
     this.noteLocalWeaponSwitch();
+  }
+
+  private toggleSniperScope(): void {
+    if (this.weapons.currentWeapon !== 5) return;
+    if (this.health <= 0) return;
+    this.sniperScoped = !this.sniperScoped;
+  }
+
+  private unscopeSniper(): void {
+    this.sniperScoped = false;
   }
 
   private getServerCurrentWeapon(): number | undefined {
@@ -2694,6 +2711,7 @@ export class Engine {
           this.deaths = player.deaths;
           this.mountedVehicleId = Number(player.mountedVehicleId ?? 0);
           if (wasMounted !== (this.mountedVehicleId !== 0)) {
+            this.unscopeSniper();
             this.vehicleManager.resetLocalPilotSmoothing();
             if (this.mountedVehicleId !== 0) {
               const pose = this.vehicleManager.getMountedVehiclePose();
@@ -2760,6 +2778,9 @@ export class Engine {
               this.controls.resetVelocity();
               this.vehicleManager.jetThrottle = 0;
             }
+          }
+          if (player.health <= 0 && oldHealth > 0) {
+            this.unscopeSniper();
           }
           if (player.health < oldHealth) {
             // Defer indicator trigger so shot_event callbacks from the same
@@ -4095,6 +4116,11 @@ export class Engine {
     }
     this.wasSliding = this.controls.isSliding;
 
+    // Unscope when sprinting
+    if (this.sniperScoped && this.controls.isSprinting) {
+      this.unscopeSniper();
+    }
+
     // Auto-fire
     if ((this.mouseDown || this.autoFireHeld) && this.controls.locked) {
       if (this.mountedVehicleId === 0) this.tryFire();
@@ -4238,16 +4264,29 @@ export class Engine {
     const savedFov = this.camera.fov;
     let fovChanged = false;
 
-    // Sprint/Slide FOV effect
-    if (Math.abs(this.controls.sprintFovOffset) > 0.01) {
-      this.camera.fov = this.baseFov + this.controls.sprintFovOffset;
+    // Sniper scope FOV lerp
+    const scopeTarget = this.sniperScoped ? 1 : 0;
+    const scopeLerpSpeed = this.sniperScoped ? 12 : 16; // zoom in slightly slower than zoom out
+    this.scopeFovLerp += (scopeTarget - this.scopeFovLerp) * Math.min(1, delta * scopeLerpSpeed);
+    if (Math.abs(this.scopeFovLerp - scopeTarget) < 0.005) this.scopeFovLerp = scopeTarget;
+
+    // Reduce sensitivity when scoped
+    const scopeSensScale = 1 - this.scopeFovLerp * 0.65;
+    this.controls.sensitivityScale = scopeSensScale;
+
+    // Sprint/Slide FOV effect (disabled when scoped)
+    const scopeFovOffset = -this.scopeFovLerp * (this.baseFov - 20); // zoom to ~20 FOV
+    const sprintOffset = this.sniperScoped ? 0 : this.controls.sprintFovOffset;
+    if (Math.abs(sprintOffset) > 0.01 || Math.abs(scopeFovOffset) > 0.01) {
+      this.camera.fov = this.baseFov + sprintOffset + scopeFovOffset;
       this.camera.updateProjectionMatrix();
       fovChanged = true;
     }
 
-    // Head bob offset
-    this.camera.position.y += this.controls.headBobY;
-    this.camera.position.x += this.controls.headBobX;
+    // Head bob offset (suppressed when scoped)
+    const bobScale = 1 - this.scopeFovLerp;
+    this.camera.position.y += this.controls.headBobY * bobScale;
+    this.camera.position.x += this.controls.headBobX * bobScale;
 
     // Camera tilt (strafe roll)
     if (Math.abs(this.controls.cameraTiltZ) > 0.0001) {
@@ -4270,7 +4309,7 @@ export class Engine {
     this.renderer.render(this.scene, this.camera);
     this.renderer.autoClear = false;
     this.renderer.clearDepth();
-    if (this.mountedVehicleId === 0) {
+    if (this.mountedVehicleId === 0 && this.scopeFovLerp < 0.5) {
       this.renderer.render(this.weaponModel.scene, this.weaponModel.camera);
     }
     this.postfx.render(this.renderer);
@@ -4475,6 +4514,7 @@ export class Engine {
       nearVehicleName,
       activeBuffs: this.getActiveBuffs(),
       damageIndicators: this.buildDamageIndicatorHudState(),
+      sniperScoped: this.sniperScoped,
     });
   }
 

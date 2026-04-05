@@ -59,6 +59,7 @@ export class FPSControls {
   gravity = -40;
   gravityAscending = -22;
   sensitivity = 0.002;
+  sensitivityScale = 1;
   locked = false;
   speedMultiplier = 1.0;
 
@@ -261,8 +262,9 @@ export class FPSControls {
     if (this.perfSandboxExclusive) return;
     if (!this.locked) return;
     this.euler.setFromQuaternion(this.camera.quaternion);
-    this.euler.y -= event.movementX * this.sensitivity;
-    this.euler.x -= event.movementY * this.sensitivity;
+    const sens = this.sensitivity * this.sensitivityScale;
+    this.euler.y -= event.movementX * sens;
+    this.euler.x -= event.movementY * sens;
     this.euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.euler.x));
     this.camera.quaternion.setFromEuler(this.euler);
   };
