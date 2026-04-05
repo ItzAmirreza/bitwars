@@ -7,6 +7,7 @@ export interface CrosshairProps {
   vehicleWeapon: number;
   vehicleWeaponColor?: string;
   damageIndicators: DamageIndicatorState[];
+  sniperScoped?: boolean;
 }
 
 function HitMarkerX({ type }: { type: string }) {
@@ -30,6 +31,59 @@ function HitMarkerX({ type }: { type: string }) {
   );
 }
 
+function SniperScope({ hitMarker, hitMarkerType }: { hitMarker: boolean; hitMarkerType: string }) {
+  const scopeColor = '#e040ff';
+  const scopeColorDim = 'rgba(224,64,255,0.3)';
+  return (
+    <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 11 }}>
+      {/* Scope vignette - dark corners */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'radial-gradient(circle at center, transparent 28%, rgba(0,0,0,0.7) 52%, rgba(0,0,0,0.95) 60%)',
+      }} />
+      {/* Scope reticle */}
+      <svg
+        style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
+        width="300" height="300" viewBox="0 0 300 300" fill="none"
+      >
+        {/* Outer ring */}
+        <rect x="20" y="20" width="260" height="260" stroke={scopeColorDim} strokeWidth="2" fill="none" />
+        {/* Inner ring */}
+        <rect x="80" y="80" width="140" height="140" stroke={scopeColorDim} strokeWidth="1.5" fill="none" />
+        {/* Crosshair lines - vertical */}
+        <line x1="150" y1="10" x2="150" y2="120" stroke={scopeColor} strokeWidth="2" opacity="0.7" />
+        <line x1="150" y1="180" x2="150" y2="290" stroke={scopeColor} strokeWidth="2" opacity="0.7" />
+        {/* Crosshair lines - horizontal */}
+        <line x1="10" y1="150" x2="120" y2="150" stroke={scopeColor} strokeWidth="2" opacity="0.7" />
+        <line x1="180" y1="150" x2="290" y2="150" stroke={scopeColor} strokeWidth="2" opacity="0.7" />
+        {/* Range tick marks */}
+        <line x1="145" y1="190" x2="155" y2="190" stroke={scopeColor} strokeWidth="1.5" opacity="0.5" />
+        <line x1="145" y1="210" x2="155" y2="210" stroke={scopeColor} strokeWidth="1.5" opacity="0.4" />
+        <line x1="145" y1="230" x2="155" y2="230" stroke={scopeColor} strokeWidth="1.5" opacity="0.3" />
+        {/* Center dot */}
+        <rect x="148" y="148" width="4" height="4" fill={scopeColor} opacity="0.95" />
+        {/* Corner brackets */}
+        <path d="M24 40 L24 24 L40 24" stroke={scopeColor} strokeWidth="2" opacity="0.5" fill="none" />
+        <path d="M276 40 L276 24 L260 24" stroke={scopeColor} strokeWidth="2" opacity="0.5" fill="none" />
+        <path d="M24 260 L24 276 L40 276" stroke={scopeColor} strokeWidth="2" opacity="0.5" fill="none" />
+        <path d="M276 260 L276 276 L260 276" stroke={scopeColor} strokeWidth="2" opacity="0.5" fill="none" />
+      </svg>
+      {/* Zoom label */}
+      <div style={{
+        position: 'absolute', bottom: 'calc(50% - 170px)', left: '50%', transform: 'translateX(-50%)',
+        fontFamily: 'var(--font-pixel)', fontSize: '7px', letterSpacing: '0.15em',
+        color: scopeColor, opacity: 0.6,
+      }}>4X SCOPE</div>
+      {/* Hit marker */}
+      {hitMarker && (
+        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
+          <HitMarkerX type={hitMarkerType} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Crosshair({
   hitMarker,
   hitMarkerType,
@@ -37,9 +91,42 @@ export function Crosshair({
   vehicleWeapon,
   vehicleWeaponColor,
   damageIndicators,
+  sniperScoped,
 }: CrosshairProps) {
   const isAirMissile = mountedVehicleName === 'Fighter Jet' && vehicleWeapon === 2;
   const missileColor = '#00e5ff';
+
+  if (sniperScoped) {
+    return (
+      <>
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+          {damageIndicators.map((indicator) => {
+            const scale = 0.9 + indicator.intensity * 0.18;
+            return (
+              <div
+                key={indicator.id}
+                style={{
+                  position: 'absolute', left: '50%', top: '50%',
+                  width: '152px', height: '152px',
+                  transform: `translate(-50%, -50%) rotate(${indicator.angle}deg) scale(${scale})`,
+                  transformOrigin: 'center', opacity: indicator.opacity,
+                  filter: `drop-shadow(0 0 ${8 + indicator.intensity * 10}px rgba(255,45,120,0.35))`,
+                }}
+              >
+                <svg width="56" height="36" viewBox="0 0 56 36" fill="none"
+                  style={{ position: 'absolute', left: '50%', top: '6px', transform: 'translateX(-50%)', overflow: 'visible' }}>
+                  <path d="M8 25 C15 12 21 9 28 9 C35 9 41 12 48 25" stroke="rgba(255,45,120,0.32)" strokeWidth="3" strokeLinecap="round" />
+                  <path d="M18 28 L28 14 L38 28" stroke="#ff5d8f" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M22 28 L28 20 L34 28" stroke="rgba(255,232,240,0.95)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+            );
+          })}
+        </div>
+        <SniperScope hitMarker={hitMarker} hitMarkerType={hitMarkerType} />
+      </>
+    );
+  }
 
   return (
     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
