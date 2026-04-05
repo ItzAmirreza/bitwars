@@ -22,7 +22,7 @@ export function createProjectileRenderable(
     new THREE.MeshBasicMaterial({
       color: shellColor,
       transparent: true,
-      opacity: 0.3,
+      opacity: 0.45,
       depthWrite: false,
     }),
   );
@@ -51,14 +51,14 @@ export function updateProjectileRenderable(
   const stretch = THREE.MathUtils.clamp(motionStretch, 0, 1);
 
   renderable.shell.scale.set(
-    size * 1.12,
-    size * 1.12,
-    size * (1.15 + stretch * 0.55),
+    size * 1.6,
+    size * 1.6,
+    size * (1.3 + stretch * 1.2),
   );
   renderable.core.scale.set(
-    size * 0.52,
-    size * 0.52,
-    size * (0.85 + stretch * 0.3),
+    size * 0.7,
+    size * 0.7,
+    size * (0.9 + stretch * 0.7),
   );
 }
 

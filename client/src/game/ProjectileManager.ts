@@ -34,23 +34,23 @@ interface VehicleProjectileVisual {
 const VEHICLE_PROJECTILE_VISUALS: Record<number, VehicleProjectileVisual> = {
   // Rockets (index 1): same as existing RPG-style
   1: {
-    speed: 80, gravity: 3, size: 0.11, trailLength: 0.7,
-    trailColor: 0xff6600, lightIntensity: 2.2, lightColor: 0xff4400, lightRange: 6, lifetime: 5,
+    speed: 80, gravity: 3, size: 0.18, trailLength: 0.55,
+    trailColor: 0xff6600, lightIntensity: 3.0, lightColor: 0xff4400, lightRange: 8, lifetime: 5,
   },
   // Carpet Bomb (index 3): medium, orange trail
   3: {
-    speed: 5, gravity: 20, size: 0.2, trailLength: 0.48,
-    trailColor: 0xff6600, lightIntensity: 1.8, lightColor: 0xff4400, lightRange: 5, lifetime: 10,
+    speed: 5, gravity: 20, size: 0.28, trailLength: 0.35,
+    trailColor: 0xff6600, lightIntensity: 2.5, lightColor: 0xff4400, lightRange: 7, lifetime: 10,
   },
   // SAM Missile (index 5): red trail
   5: {
-    speed: 90, gravity: 2, size: 0.12, trailLength: 0.72,
-    trailColor: 0xff3333, lightIntensity: 2.4, lightColor: 0xff3333, lightRange: 6, lifetime: 5,
+    speed: 90, gravity: 2, size: 0.18, trailLength: 0.55,
+    trailColor: 0xff3333, lightIntensity: 3.0, lightColor: 0xff3333, lightRange: 8, lifetime: 5,
   },
   // Air Missile (index 6): cyan trail
   6: {
-    speed: 120, gravity: 2, size: 0.12, trailLength: 0.75,
-    trailColor: 0x00ccff, lightIntensity: 2.8, lightColor: 0x00ccff, lightRange: 7, lifetime: 5,
+    speed: 120, gravity: 2, size: 0.18, trailLength: 0.6,
+    trailColor: 0x00ccff, lightIntensity: 3.5, lightColor: 0x00ccff, lightRange: 9, lifetime: 5,
   },
 };
 

@@ -90,18 +90,18 @@ const HITSCAN_PROJECTILE: ProjectileConfig = {
 const CLIENT_PROJECTILE_CONFIGS: Record<number, ProjectileConfig> = {
   // RPG (index 2)
   2: {
-    speed: 120, gravity: 2, size: 0.11, trailLength: 0.72,
-    trailColor: 0xff6600, lightIntensity: 2.2, lightColor: 0xff4400, lightRange: 6, lifetime: 5,
+    speed: 120, gravity: 2, size: 0.2, trailLength: 0.55,
+    trailColor: 0xff6600, lightIntensity: 3.0, lightColor: 0xff4400, lightRange: 8, lifetime: 5,
   },
   // Grenade Launcher (index 4)
   4: {
-    speed: 48, gravity: 8, size: 0.13, trailLength: 0.55,
-    trailColor: 0x8dff66, lightIntensity: 2.0, lightColor: 0x9dff44, lightRange: 7, lifetime: 5,
+    speed: 48, gravity: 8, size: 0.24, trailLength: 0.4,
+    trailColor: 0x8dff66, lightIntensity: 2.8, lightColor: 0x9dff44, lightRange: 9, lifetime: 5,
   },
   // Sniper (index 5) — fast bullet, bright purple tracer, no gravity
   5: {
-    speed: 280, gravity: 0, size: 0.05, trailLength: 0.38,
-    trailColor: 0xd060ff, lightIntensity: 2.0, lightColor: 0xe040ff, lightRange: 5, lifetime: 3,
+    speed: 280, gravity: 0, size: 0.07, trailLength: 0.32,
+    trailColor: 0xd060ff, lightIntensity: 2.5, lightColor: 0xe040ff, lightRange: 6, lifetime: 3,
   },
 };
 
