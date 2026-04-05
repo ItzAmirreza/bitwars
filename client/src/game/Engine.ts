@@ -2311,8 +2311,8 @@ export class Engine {
   }
 
   private toggleSniperScope(): void {
-    // Only sniper (index 5) can scope
     if (this.weapons.currentWeapon !== 5) return;
+    if (this.health <= 0) return;
     this.sniperScoped = !this.sniperScoped;
   }
 
