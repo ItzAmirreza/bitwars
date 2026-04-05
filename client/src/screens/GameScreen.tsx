@@ -19,10 +19,13 @@ import { BuffIndicators } from './hud/BuffIndicators';
 import { MatchVictoryOverlay } from './hud/MatchVictoryOverlay';
 import { LivePerfOverlay } from './hud/LivePerfOverlay';
 import { TacticalMapOverlay, TacticalMinimap } from './hud/TacticalMap';
+import { TutorialOverlay } from './hud/TutorialOverlay';
 import { useKillTracking } from './hooks/useKillTracking';
 import { useChat } from './hooks/useChat';
 import { useMatchSession } from './hooks/useMatchSession';
 import { useTacticalMap } from './hooks/useTacticalMap';
+
+const TUTORIAL_SEEN_KEY = 'bitwars-tutorial-seen';
 
 interface GameScreenProps {
   active: boolean;
@@ -109,6 +112,7 @@ export function GameScreen({ active }: GameScreenProps) {
   const [loadoutDraft, setLoadoutDraft] = useState<[number, number, number]>([0, 1, 2]);
   const [activeLoadoutSlot, setActiveLoadoutSlot] = useState(0);
   const [savingLoadout, setSavingLoadout] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(() => !localStorage.getItem(TUTORIAL_SEEN_KEY));
   const [showPerfPanel, setShowPerfPanel] = useState(false);
   const [showLivePerfOverlay, setShowLivePerfOverlay] = useState(false);
   const [tacticalMapOpen, setTacticalMapOpen] = useState(false);
@@ -124,6 +128,12 @@ export function GameScreen({ active }: GameScreenProps) {
   const perfTickerRef = useRef<number | null>(null);
   const matchSession = useMatchSession(activeConnection, identity);
   const tacticalMap = useTacticalMap(activeConnection, identity, active);
+
+  const dismissTutorial = useCallback(() => {
+    localStorage.setItem(TUTORIAL_SEEN_KEY, '1');
+    setShowTutorial(false);
+    canvasRef.current?.requestPointerLock();
+  }, []);
 
   const closeLoadout = useCallback(() => {
     setLoadoutOpen(false);
@@ -419,6 +429,12 @@ export function GameScreen({ active }: GameScreenProps) {
         return;
       }
 
+      if (showTutorial && state.worldReady) {
+        e.preventDefault();
+        dismissTutorial();
+        return;
+      }
+
       if (e.code === 'F7') {
         e.preventDefault();
         setShowLivePerfOverlay((value) => {
@@ -488,7 +504,7 @@ export function GameScreen({ active }: GameScreenProps) {
         openChat(e.code === 'Slash' ? '/' : '');
       }
     },
-    [active, chatOpen, loadoutOpen, tacticalMapOpen, showSettings, setShowSettings, state.locked, state.mountedVehicleName, state.worldReady, openChat, openLoadout, closeChat, closeLoadout, closeTacticalMap, toggleTacticalMap],
+    [active, chatOpen, loadoutOpen, tacticalMapOpen, showSettings, setShowSettings, showTutorial, dismissTutorial, state.locked, state.mountedVehicleName, state.worldReady, openChat, openLoadout, closeChat, closeLoadout, closeTacticalMap, toggleTacticalMap],
   );
 
   useEffect(() => {
@@ -874,68 +890,72 @@ export function GameScreen({ active }: GameScreenProps) {
         </div>
       )}
 
-      {/* Click to deploy overlay */}
+      {/* Click to deploy / Tutorial overlay */}
       {!state.locked && state.worldReady && !showSettings && !hudOverlayOpen && (
-        <div
-          className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer"
-          onClick={() => canvasRef.current?.requestPointerLock()}
-          style={{ background: 'rgba(10,12,20,0.8)' }}
-        >
-          <div className="text-center pointer-events-none">
-            <div
-              className="anim-fade-up"
-              style={{
-                fontFamily: 'var(--font-pixel)',
-                fontSize: '16px',
-                color: '#ff6b35',
-                letterSpacing: '0.08em',
-                marginBottom: '12px',
-                textShadow: '3px 3px 0 #000',
-              }}
-            >
-              CLICK TO DEPLOY
-            </div>
-            {/* Pixel divider */}
-            <div style={{
-              display: 'flex', gap: '3px', justifyContent: 'center',
-              margin: '14px auto',
-            }}>
-              {['#ff6b35', '#ffd600', '#76ff03', '#00e5ff', '#7c4dff'].map((c, i) => (
-                <div key={i} style={{ width: '12px', height: '3px', background: c, opacity: 0.5 }} />
-              ))}
-            </div>
-            <div
-              className="anim-fade-up"
-              style={{
-                fontFamily: 'var(--font-pixel)',
-                fontSize: '6px',
-                color: '#6b7080',
-                letterSpacing: '0.1em',
-                lineHeight: '2.6',
-                animationDelay: '0.2s',
-              }}
-            >
-              <div className="flex justify-center gap-8">
-                <span><span style={{ color: '#e8e8f0' }}>WASD</span> MOVE</span>
-                <span><span style={{ color: '#e8e8f0' }}>MOUSE</span> AIM</span>
-                <span><span style={{ color: '#e8e8f0' }}>LMB</span> FIRE</span>
+        showTutorial ? (
+          <TutorialOverlay onDeploy={dismissTutorial} />
+        ) : (
+          <div
+            className="absolute inset-0 flex items-center justify-center z-20 cursor-pointer"
+            onClick={() => canvasRef.current?.requestPointerLock()}
+            style={{ background: 'rgba(10,12,20,0.8)' }}
+          >
+            <div className="text-center pointer-events-none">
+              <div
+                className="anim-fade-up"
+                style={{
+                  fontFamily: 'var(--font-pixel)',
+                  fontSize: '16px',
+                  color: '#ff6b35',
+                  letterSpacing: '0.08em',
+                  marginBottom: '12px',
+                  textShadow: '3px 3px 0 #000',
+                }}
+              >
+                CLICK TO DEPLOY
               </div>
-              <div className="flex justify-center gap-8">
-                <span><span style={{ color: '#e8e8f0' }}>SPACE</span> JUMP</span>
-                <span><span style={{ color: '#e8e8f0' }}>R</span> RELOAD</span>
-                <span><span style={{ color: '#e8e8f0' }}>1-3</span> WEAPONS</span>
+              {/* Pixel divider */}
+              <div style={{
+                display: 'flex', gap: '3px', justifyContent: 'center',
+                margin: '14px auto',
+              }}>
+                {['#ff6b35', '#ffd600', '#76ff03', '#00e5ff', '#7c4dff'].map((c, i) => (
+                  <div key={i} style={{ width: '12px', height: '3px', background: c, opacity: 0.5 }} />
+                ))}
               </div>
-              <div className="flex justify-center gap-8">
-                <span><span style={{ color: '#e8e8f0' }}>SHIFT</span> SPRINT</span>
-                <span><span style={{ color: '#e8e8f0' }}>CTRL</span> CROUCH</span>
-                <span><span style={{ color: '#e8e8f0' }}>F</span> VEHICLE</span>
-                <span><span style={{ color: '#e8e8f0' }}>E</span> LOADOUT</span>
-                <span><span style={{ color: '#e8e8f0' }}>T</span> CHAT</span>
-                <span><span style={{ color: '#e8e8f0' }}>ESC</span> SETTINGS</span>
+              <div
+                className="anim-fade-up"
+                style={{
+                  fontFamily: 'var(--font-pixel)',
+                  fontSize: '6px',
+                  color: '#6b7080',
+                  letterSpacing: '0.1em',
+                  lineHeight: '2.6',
+                  animationDelay: '0.2s',
+                }}
+              >
+                <div className="flex justify-center gap-8">
+                  <span><span style={{ color: '#e8e8f0' }}>WASD</span> MOVE</span>
+                  <span><span style={{ color: '#e8e8f0' }}>MOUSE</span> AIM</span>
+                  <span><span style={{ color: '#e8e8f0' }}>LMB</span> FIRE</span>
+                </div>
+                <div className="flex justify-center gap-8">
+                  <span><span style={{ color: '#e8e8f0' }}>SPACE</span> JUMP</span>
+                  <span><span style={{ color: '#e8e8f0' }}>R</span> RELOAD</span>
+                  <span><span style={{ color: '#e8e8f0' }}>1-3</span> WEAPONS</span>
+                </div>
+                <div className="flex justify-center gap-8">
+                  <span><span style={{ color: '#e8e8f0' }}>SHIFT</span> SPRINT</span>
+                  <span><span style={{ color: '#e8e8f0' }}>CTRL</span> CROUCH</span>
+                  <span><span style={{ color: '#e8e8f0' }}>F</span> VEHICLE</span>
+                  <span><span style={{ color: '#e8e8f0' }}>E</span> LOADOUT</span>
+                  <span><span style={{ color: '#e8e8f0' }}>T</span> CHAT</span>
+                  <span><span style={{ color: '#e8e8f0' }}>ESC</span> SETTINGS</span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )
       )}
 
       {/* ═══ CHAT OVERLAY ═══ */}
