@@ -36,6 +36,8 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
             jet_mount_range()
         } else if v.vehicle_type == vehicle_type_anti_air() {
             aa_mount_range()
+        } else if v.vehicle_type == vehicle_type_apc() {
+            apc_mount_range()
         } else {
             continue; // unknown vehicle type
         };
@@ -72,6 +74,8 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
         heli_pilot_seat_height()
     } else if vehicle.vehicle_type == vehicle_type_anti_air() {
         aa_pilot_seat_height()
+    } else if vehicle.vehicle_type == vehicle_type_apc() {
+        apc_pilot_seat_height()
     } else {
         jet_pilot_seat_height()
     };

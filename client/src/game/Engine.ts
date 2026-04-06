@@ -4461,6 +4461,11 @@ export class Engine {
         const mountedType = this.vehicleManager.getMountedVehicleType();
         const isJet = mountedType?.name === "Fighter Jet";
         const isAA = mountedType?.typeId === VEHICLE_TYPES.AntiAir;
+        const isAPC = mountedType?.typeId === VEHICLE_TYPES.APC;
+        if (isAPC) {
+          // APC has no weapons — driver cannot fire
+          return [];
+        }
         if (isAA) {
           // AA has only 1 weapon slot (CRAM)
           return [

@@ -15,6 +15,7 @@ export const VEHICLE_WEAPONS_CONFIG = config.vehicleWeapons;
 export const HELICOPTER = config.helicopter;
 export const FIGHTER_JET = config.fighterJet;
 export const ANTI_AIR = config.antiAir;
+export const APC = config.apc;
 export const GRENADE = config.grenade;
 export const VEHICLE_BLOCK_COLLISION = config.vehicleBlockCollision;
 export const COMBAT = config.combat;

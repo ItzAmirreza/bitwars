@@ -7,7 +7,10 @@ use crate::constants::*;
 use crate::helpers::*;
 use crate::matchmaking::{reset_players_for_new_round, start_round};
 use crate::tables::*;
-use crate::vehicles::{spawn_aa_at_outposts, spawn_jets_at_airstrips, spawn_sandbox_helicopters};
+use crate::vehicles::{
+    spawn_aa_at_outposts, spawn_apcs_on_flat_ground, spawn_jets_at_airstrips,
+    spawn_sandbox_helicopters,
+};
 
 use crate::worldgen::{self, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
 
@@ -119,6 +122,7 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
     spawn_sandbox_helicopters(ctx);
     spawn_jets_at_airstrips(ctx, new_seed);
     spawn_aa_at_outposts(ctx, new_seed);
+    spawn_apcs_on_flat_ground(ctx);
 
     // Clean up in-flight grenades (they must not survive into the new round)
     let grenade_ids: Vec<u64> = ctx.db.grenade_projectile().iter().map(|g| g.id).collect();

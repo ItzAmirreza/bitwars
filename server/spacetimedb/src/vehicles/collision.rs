@@ -178,6 +178,13 @@ fn collision_half_extents(entity: &Entity, scale: f32) -> (f32, f32, f32, f32) {
             aa_hitbox_half_z() * scale,
             aa_hitbox_center_y(),
         )
+    } else if entity.subtype == vehicle_type_apc() {
+        (
+            apc_hitbox_half_x() * scale,
+            apc_hitbox_half_y() * scale,
+            apc_hitbox_half_z() * scale,
+            apc_hitbox_center_y(),
+        )
     } else {
         (
             heli_hitbox_half_x() * scale,

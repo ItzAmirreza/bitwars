@@ -32,6 +32,7 @@ import type {
 import { HelicopterType } from './HelicopterType';
 import { FighterJetType } from './FighterJetType';
 import { AntiAirType } from './AntiAirType';
+import { APCType } from './APCType';
 import { VehiclePrediction } from './VehiclePhysics';
 import type { PhysicsInput } from './VehiclePhysics';
 
@@ -163,6 +164,7 @@ export default class VehicleManager {
     this.registerVehicleType(new HelicopterType());
     this.registerVehicleType(new FighterJetType());
     this.registerVehicleType(new AntiAirType());
+    this.registerVehicleType(new APCType());
   }
 
   // ── Registry ──
@@ -213,6 +215,10 @@ export default class VehicleManager {
    */
   getResolvedVehicleWeaponIndex(): number {
     const vt = this.getMountedVehicleType();
+    if (vt && vt.typeId === VEHICLE_TYPES.APC) {
+      // APC has no weapons — driver cannot fire
+      return -1;
+    }
     if (vt && vt.typeId === VEHICLE_TYPES.FighterJet) {
       // Jet slot 0→2 (Kinetic Penetrator), 1→3 (Carpet Bomb), 2→6 (Air Missile)
       if (this.vehicleWeaponIndex === 2) return 6;
@@ -231,6 +237,9 @@ export default class VehicleManager {
    */
   getResolvedWeaponIndexForSlot(slot: number): number {
     const vt = this.getMountedVehicleType();
+    if (vt && vt.typeId === VEHICLE_TYPES.APC) {
+      return -1; // APC has no weapons
+    }
     if (vt && vt.typeId === VEHICLE_TYPES.FighterJet) {
       if (slot === 2) return 6; // Air Missile
       return slot + 2;
