@@ -160,6 +160,7 @@ pub fn client_connected(ctx: &ReducerContext) {
             session_started_at: ctx.timestamp,
             ..player
         });
+        emit_player_teleport_event(ctx, sender, &spawn_pos);
         if let Some(updated) = ctx.db.player().identity().find(sender) {
             sync_player_entity(ctx, &updated);
         }
@@ -201,6 +202,7 @@ pub fn client_connected(ctx: &ReducerContext) {
         });
         init_weapon_state(ctx, sender);
         init_movement_state(ctx, sender, &spawn_pos);
+        emit_player_teleport_event(ctx, sender, &spawn_pos);
         if let Some(created) = ctx.db.player().identity().find(sender) {
             sync_player_entity(ctx, &created);
         }

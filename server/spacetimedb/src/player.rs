@@ -89,6 +89,7 @@ pub fn set_username(
             last_damage_time: ctx.timestamp,
         });
         init_weapon_state(ctx, sender);
+        emit_player_teleport_event(ctx, sender, &spawn_pos);
     }
 
     if let Some(updated) = ctx.db.player().identity().find(sender) {
@@ -302,6 +303,7 @@ pub fn respawn(ctx: &ReducerContext) -> Result<(), String> {
     };
     ctx.db.player().identity().update(respawned.clone());
     sync_player_entity(ctx, &respawned);
+    emit_player_teleport_event(ctx, sender, &spawn_pos);
 
     weapons::reset_all_ammo(ctx, sender);
     crate::abilities::clear_buffs(ctx, sender);
