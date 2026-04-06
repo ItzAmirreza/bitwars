@@ -45,7 +45,7 @@ jobs:
 
       - name: Publish to SpacetimeDB
         working-directory: server
-        run: spacetime publish bitwars --clear-database -y --module-path ./spacetimedb
+        run: spacetime publish bitwars --server maincloud --no-config --clear-database -y --module-path ./spacetimedb
 
       - name: Write deployed server build manifest
         run: |
@@ -58,7 +58,7 @@ jobs:
 
       - name: Regenerate client bindings
         working-directory: server
-        run: spacetime generate --lang typescript --out-dir ../client/src/module_bindings --module-path ./spacetimedb
+        run: spacetime generate --no-config --lang typescript --out-dir ../client/src/module_bindings --module-path ./spacetimedb
 
       - name: Check for deploy artifact changes
         id: deploy_artifacts
