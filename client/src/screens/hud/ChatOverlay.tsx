@@ -74,6 +74,24 @@ export function ChatOverlay({
     return () => window.cancelAnimationFrame(frame);
   }, [chatMessages, chatOpen]);
 
+  // Re-focus the input whenever it loses focus while chat is open
+  useEffect(() => {
+    if (!chatOpen) return;
+    const input = chatInputRef.current;
+    if (!input) return;
+    const handleBlur = () => {
+      // Small delay so close() can clear chatOpen before we refocus
+      const timer = window.setTimeout(() => {
+        if (chatInputRef.current && document.activeElement !== chatInputRef.current) {
+          chatInputRef.current.focus();
+        }
+      }, 16);
+      return () => window.clearTimeout(timer);
+    };
+    input.addEventListener('blur', handleBlur);
+    return () => input.removeEventListener('blur', handleBlur);
+  }, [chatOpen]);
+
   return (
     <div
       className="absolute z-20"
@@ -90,6 +108,7 @@ export function ChatOverlay({
     >
       <div
         ref={chatListRef}
+        onMouseDown={chatOpen ? (e) => e.preventDefault() : undefined}
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -167,6 +186,10 @@ export function ChatOverlay({
             onKeyDown={async (e) => {
               e.stopPropagation();
               e.nativeEvent.stopImmediatePropagation();
+              if (e.key === 'Tab') {
+                e.preventDefault();
+                return;
+              }
               if (e.key === 'Enter') {
                 e.preventDefault();
                 if (!chatDraft.trim()) {
