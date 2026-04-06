@@ -314,7 +314,7 @@ export class HeadlessBitBot {
         'SELECT * FROM player',
         'SELECT * FROM player_loadout',
         'SELECT * FROM player_ammo',
-        'SELECT * FROM entity WHERE kind = 2',
+        `SELECT * FROM entity WHERE kind = ${ENTITY_KINDS.Vehicle}`,
         'SELECT * FROM vehicle',
         'SELECT * FROM shot_event',
         'SELECT * FROM explosion_event',

@@ -13,7 +13,6 @@ type CliConfig = {
 };
 
 function parseArgs(argv: string[]): CliConfig {
-  const localEnv = loadClientDevEnv();
   const envCount = Number(process.env.BOT_COUNT ?? 10);
   const envTickMs = Number(process.env.BOT_TICK_MS ?? 100);
   const config: CliConfig = {
@@ -22,12 +21,10 @@ function parseArgs(argv: string[]): CliConfig {
     uri:
       process.env.SPACETIMEDB_URI ??
       process.env.VITE_SPACETIMEDB_URI ??
-      localEnv.VITE_SPACETIMEDB_URI ??
       'wss://maincloud.spacetimedb.com',
     moduleName:
       process.env.SPACETIMEDB_MODULE ??
       process.env.VITE_MODULE_NAME ??
-      localEnv.VITE_MODULE_NAME ??
       'bitwars',
     tickMs: Number.isFinite(envTickMs) && envTickMs > 0 ? Math.floor(envTickMs) : 100,
     usernameFile:
@@ -76,24 +73,6 @@ function parseArgs(argv: string[]): CliConfig {
   }
 
   return config;
-}
-
-function loadClientDevEnv(): Record<string, string> {
-  const currentDir = path.dirname(fileURLToPath(import.meta.url));
-  const envPath = path.resolve(currentDir, '../../client/.env.development.local');
-  if (!fs.existsSync(envPath)) return {};
-  const text = fs.readFileSync(envPath, 'utf8');
-  const values: Record<string, string> = {};
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const eq = line.indexOf('=');
-    if (eq <= 0) continue;
-    const key = line.slice(0, eq).trim();
-    const value = line.slice(eq + 1).trim();
-    values[key] = value;
-  }
-  return values;
 }
 
 function loadUsernames(filePath: string): string[] {

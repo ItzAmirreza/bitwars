@@ -16,7 +16,9 @@ cd client
 npm run bots -- --count 10
 ```
 
-Local dev uses the same database as `bun dev` by default in this workspace:
+`bots` defaults to maincloud (`wss://maincloud.spacetimedb.com` / `bitwars`) unless you pass `--uri` / `--module` or set env vars.
+
+Use `bots:local` for the local dev database:
 
 ```bash
 cd client
