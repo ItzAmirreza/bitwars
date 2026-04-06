@@ -473,6 +473,11 @@ export function GameScreen({ active }: GameScreenProps) {
           else if (loadoutOpen) closeLoadout();
           else closeTacticalMap();
         }
+        // Fallback: Enter closes chat even if the input lost focus
+        if (chatOpen && e.code === 'Enter') {
+          e.preventDefault();
+          closeChat();
+        }
         if (loadoutOpen && e.code === 'KeyE') {
           e.preventDefault();
           closeLoadout();

@@ -137,7 +137,9 @@ export class FPSControls {
     this.minZ = 0.5;
     this.maxZ = worldSizeZ - 0.5;
 
-    domElement.addEventListener('click', () => this.lock());
+    domElement.addEventListener('click', () => {
+      if (this.inputEnabled) this.lock();
+    });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === domElement;
     });
