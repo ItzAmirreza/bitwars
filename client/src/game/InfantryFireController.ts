@@ -288,16 +288,17 @@ export class InfantryFireController {
     const dz = this.ctx.camera.position.z - cz;
     const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-    const maxEffectDist = radius * 11 + 10;
+    // Keep blast shake local to nearby explosions and fade fully out at the edge.
+    const maxEffectDist = 10;
     if (dist >= maxEffectDist) return;
 
     const proximity = 1 - dist / maxEffectDist;
     const shaped = proximity * proximity;
     const weaponPower = THREE.MathUtils.clamp(damage / 90, 0.55, 1.4);
+    const radiusPower = THREE.MathUtils.clamp(radius / 4, 0.55, 1.1);
 
-    // Keep explosion shake readable but not overwhelming at any distance.
-    const shake = (0.03 + shaped * 0.65 + proximity * 0.12) * weaponPower;
-    this.ctx.vfx.shake(Math.min(0.8, shake));
+    const shake = shaped * 0.65 * weaponPower * radiusPower;
+    if (shake > 0.01) this.ctx.vfx.shake(Math.min(0.8, shake));
   }
 
   /** Apply explosion knockback to the local player based on distance from blast center */
