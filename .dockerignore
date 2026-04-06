@@ -1,0 +1,13 @@
+node_modules
+.context
+.git
+server
+client/src/game/**
+!client/src/game/playerMovementFlags.ts
+client/src/screens
+client/src/App.tsx
+client/src/store.ts
+client/src/db.ts
+client/src/index.css
+client/public
+*.md
