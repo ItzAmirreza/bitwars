@@ -207,6 +207,19 @@ pub fn client_connected(ctx: &ReducerContext) {
         log::info!("Player resumed from profile: {:?}", sender);
     }
 
+    // Broadcast join message to all players
+    if let Some(p) = ctx.db.player().identity().find(sender) {
+        if p.online {
+            ctx.db.chat_message().insert(ChatMessage {
+                id: 0,
+                sender: p.identity,
+                sender_name: "[SERVER]".to_string(),
+                text: format!("{} joined the game", p.username),
+                sent_at: ctx.timestamp,
+            });
+        }
+    }
+
     touch_player_profile(ctx, profile.profile_id);
 }
 
