@@ -1,0 +1,27 @@
+FROM oven/bun:1 AS deps
+WORKDIR /app
+COPY client/package.json client/bun.lock client/
+RUN cd client && bun install --frozen-lockfile
+
+FROM oven/bun:1
+WORKDIR /app
+COPY --from=deps /app/client/node_modules client/node_modules
+COPY client/package.json client/package.json
+COPY client/src/module_bindings client/src/module_bindings
+COPY client/src/shared-config.ts client/src/shared-config.ts
+COPY client/src/game/playerMovementFlags.ts client/src/game/playerMovementFlags.ts
+COPY shared/game-constants.json shared/game-constants.json
+COPY bots/ bots/
+
+# Token persistence – mount a volume at /app/.context/bot-tokens to keep identities across deploys
+RUN mkdir -p /app/.context/bot-tokens
+
+WORKDIR /app/client
+
+ENV BOT_COUNT=10
+ENV BOT_PREFIX=BOT
+ENV SPACETIMEDB_URI=wss://maincloud.spacetimedb.com
+ENV SPACETIMEDB_MODULE=bitwars
+ENV BOT_TICK_MS=100
+
+CMD ["bun", "run", "bots"]

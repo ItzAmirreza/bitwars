@@ -11,6 +11,8 @@ const LEGACY_TOKEN_KEY = "bitwars_token";
 const GUEST_TOKEN_KEY = "bitwars_guest_token";
 const ACCOUNT_SESSION_KEY = "bitwars_account_session";
 const PENDING_PROVIDER_KEY = "bitwars_pending_auth_provider";
+const DEFAULT_SPACETIMEDB_URI = "wss://maincloud.spacetimedb.com";
+const DEFAULT_MODULE_NAME = "bitwars";
 
 const CALLBACK_TOKEN_KEYS = [
   "token",
@@ -27,12 +29,30 @@ const PROVIDER_URLS: Record<AuthProvider, string | undefined> = {
   steam: import.meta.env.VITE_STEAM_AUTH_URL,
 };
 
+function currentStorageNamespace(): string {
+  const uri = import.meta.env.VITE_SPACETIMEDB_URI || DEFAULT_SPACETIMEDB_URI;
+  const moduleName = import.meta.env.VITE_MODULE_NAME || DEFAULT_MODULE_NAME;
+  if (uri === DEFAULT_SPACETIMEDB_URI && moduleName === DEFAULT_MODULE_NAME) {
+    return "";
+  }
+  const normalized = `${uri}__${moduleName}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized ? `_${normalized}` : "";
+}
+
+function scopedKey(baseKey: string): string {
+  return `${baseKey}${currentStorageNamespace()}`;
+}
+
 function migrateLegacyGuestToken(): void {
+  if (currentStorageNamespace()) return;
   try {
     const legacy = localStorage.getItem(LEGACY_TOKEN_KEY);
     if (!legacy) return;
-    if (!localStorage.getItem(GUEST_TOKEN_KEY)) {
-      localStorage.setItem(GUEST_TOKEN_KEY, legacy);
+    if (!localStorage.getItem(scopedKey(GUEST_TOKEN_KEY))) {
+      localStorage.setItem(scopedKey(GUEST_TOKEN_KEY), legacy);
     }
     localStorage.removeItem(LEGACY_TOKEN_KEY);
   } catch {
@@ -42,7 +62,7 @@ function migrateLegacyGuestToken(): void {
 
 function readAccountSession(): AccountSession | null {
   try {
-    const raw = localStorage.getItem(ACCOUNT_SESSION_KEY);
+    const raw = localStorage.getItem(scopedKey(ACCOUNT_SESSION_KEY));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<AccountSession>;
     if (
@@ -66,12 +86,12 @@ function readAccountSession(): AccountSession | null {
 }
 
 function writeAccountSession(session: AccountSession): void {
-  localStorage.setItem(ACCOUNT_SESSION_KEY, JSON.stringify(session));
+  localStorage.setItem(scopedKey(ACCOUNT_SESSION_KEY), JSON.stringify(session));
 }
 
 function readPendingProvider(): AuthProvider | null {
   try {
-    const raw = localStorage.getItem(PENDING_PROVIDER_KEY);
+    const raw = localStorage.getItem(scopedKey(PENDING_PROVIDER_KEY));
     return isAuthProvider(raw) ? raw : null;
   } catch {
     return null;
@@ -80,7 +100,7 @@ function readPendingProvider(): AuthProvider | null {
 
 function clearPendingProvider(): void {
   try {
-    localStorage.removeItem(PENDING_PROVIDER_KEY);
+    localStorage.removeItem(scopedKey(PENDING_PROVIDER_KEY));
   } catch {
     // ignore
   }
@@ -149,7 +169,7 @@ export function getConnectionToken(): string | undefined {
   migrateLegacyGuestToken();
   const account = readAccountSession();
   if (account?.token) return account.token;
-  const guest = localStorage.getItem(GUEST_TOKEN_KEY);
+  const guest = localStorage.getItem(scopedKey(GUEST_TOKEN_KEY));
   return guest || undefined;
 }
 
@@ -163,7 +183,7 @@ export function saveConnectionToken(token: string): void {
     });
     return;
   }
-  localStorage.setItem(GUEST_TOKEN_KEY, token);
+  localStorage.setItem(scopedKey(GUEST_TOKEN_KEY), token);
 }
 
 export function hasConfiguredProvider(provider: AuthProvider): boolean {
@@ -205,14 +225,14 @@ export function getProviderAuthUrl(provider: AuthProvider): string | null {
 export function beginProviderSignIn(provider: AuthProvider): string | null {
   const url = getProviderAuthUrl(provider);
   if (!url) return null;
-  localStorage.setItem(PENDING_PROVIDER_KEY, provider);
+  localStorage.setItem(scopedKey(PENDING_PROVIDER_KEY), provider);
   window.location.assign(url);
   return url;
 }
 
 export function useGuestProfile(): void {
   clearPendingProvider();
-  localStorage.removeItem(ACCOUNT_SESSION_KEY);
+  localStorage.removeItem(scopedKey(ACCOUNT_SESSION_KEY));
 }
 
 export function consumeAuthCallback(): {
