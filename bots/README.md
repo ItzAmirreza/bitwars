@@ -18,6 +18,13 @@ npm run bots -- --count 10
 
 `bots` defaults to maincloud (`wss://maincloud.spacetimedb.com` / `bitwars`) unless you pass `--uri` / `--module` or set env vars.
 
+For Bun-only production environments like Coolify, use the Bun-native runtime command so the process does not depend on the `tsx` dev dependency:
+
+```bash
+cd client
+npm run bots:runtime -- --count 10
+```
+
 Use `bots:local` for the local dev database:
 
 ```bash

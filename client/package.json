@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "bots": "tsx ../bots/src/main.ts",
+    "bots:runtime": "bun ../bots/src/main.ts",
     "bots:typecheck": "tsc -p ../bots/tsconfig.json --noEmit",
     "bots:local": "tsx ../bots/src/main.ts --module bitwars-local --uri ws://127.0.0.1:3000"
   },
