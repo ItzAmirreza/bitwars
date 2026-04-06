@@ -388,6 +388,7 @@ pub fn process_admin_command(
                     };
                     ctx.db.player().identity().update(respawned.clone());
                     sync_player_entity(ctx, &respawned);
+                    emit_player_teleport_event(ctx, id, &spawn_pos);
                     init_movement_state(ctx, id, &spawn_pos);
                 }
             }

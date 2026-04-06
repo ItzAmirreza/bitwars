@@ -187,6 +187,7 @@ fn respawn_player_for_intermission(ctx: &ReducerContext, player: Player) {
     };
     ctx.db.player().identity().update(revived.clone());
     sync_player_entity(ctx, &revived);
+    emit_player_teleport_event(ctx, revived.identity, &spawn_pos);
     weapons::reset_all_ammo(ctx, revived.identity);
     crate::abilities::clear_buffs(ctx, revived.identity);
     init_movement_state(ctx, revived.identity, &spawn_pos);
@@ -264,6 +265,7 @@ pub fn reset_players_for_new_round(ctx: &ReducerContext) {
         };
         ctx.db.player().identity().update(reset.clone());
         sync_player_entity(ctx, &reset);
+        emit_player_teleport_event(ctx, identity, &spawn_pos);
         weapons::reset_all_ammo(ctx, identity);
         crate::abilities::clear_buffs(ctx, identity);
         init_movement_state(ctx, identity, &spawn_pos);
