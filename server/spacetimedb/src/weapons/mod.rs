@@ -36,6 +36,10 @@ pub struct WeaponDef {
     pub max_range: f32,
     pub projectile_speed: f32,
     pub delivery: DeliveryMethod,
+    /// Distance below which damage starts scaling down (0 = no close-range penalty).
+    pub close_range_threshold: f32,
+    /// Damage multiplier at point-blank range (linearly scales to 1.0 at threshold).
+    pub close_range_damage_mult: f32,
 }
 
 impl WeaponDef {
@@ -50,6 +54,19 @@ impl WeaponDef {
     }
     pub fn is_server_projectile(&self) -> bool {
         self.delivery == DeliveryMethod::ServerProjectile
+    }
+
+    /// Returns damage scaled by close-range penalty based on travel distance.
+    /// At point-blank: damage * close_range_damage_mult.
+    /// At threshold distance or beyond: full damage.
+    /// Linear interpolation in between.
+    pub fn close_range_damage(&self, travel_dist: f32) -> i32 {
+        if self.close_range_threshold <= 0.0 {
+            return self.damage;
+        }
+        let t = (travel_dist / self.close_range_threshold).clamp(0.0, 1.0);
+        let mult = self.close_range_damage_mult + t * (1.0 - self.close_range_damage_mult);
+        ((self.damage as f32) * mult) as i32
     }
 }
 
@@ -110,6 +127,8 @@ fn weapons_registry() -> &'static [WeaponDef] {
                 max_range: w.max_range,
                 projectile_speed: w.projectile_speed,
                 delivery: parse_delivery(&w.delivery),
+                close_range_threshold: w.close_range_threshold,
+                close_range_damage_mult: w.close_range_damage_mult,
             })
             .collect()
     })

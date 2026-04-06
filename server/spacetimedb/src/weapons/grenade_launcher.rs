@@ -13,4 +13,6 @@ pub const DEF: WeaponDef = WeaponDef {
     max_range: 85.0,
     projectile_speed: 48.0,
     delivery: DeliveryMethod::ServerProjectile,
+    close_range_threshold: 0.0,
+    close_range_damage_mult: 1.0,
 };

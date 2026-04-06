@@ -430,8 +430,12 @@ pub fn projectile_impact(
         travel_time_ms,
     );
 
+    // Compute travel distance for close-range damage scaling
+    let travel_dist = dist_sq(&shot.origin, &impact_pos).sqrt();
+
     consume_projectile_shot(ctx, shot, &impact_pos);
 
+    let effective_damage = def.close_range_damage(travel_dist);
     let hit_players = collect_all_player_ids(ctx);
     let hit_vehicles = collect_all_vehicle_ids(ctx);
 
@@ -440,7 +444,7 @@ pub fn projectile_impact(
         sender,
         &impact_pos,
         &hit_players,
-        def.damage,
+        effective_damage,
         def.radius,
         weapon,
     );
@@ -450,7 +454,7 @@ pub fn projectile_impact(
         &impact_pos,
         &hit_vehicles,
         0,
-        def.damage,
+        effective_damage,
         def.radius,
         weapon,
     );

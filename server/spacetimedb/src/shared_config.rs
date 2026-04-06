@@ -113,6 +113,14 @@ pub struct WeaponConfig {
     pub pellets: u8,
     #[serde(default)]
     pub spread: f32,
+    #[serde(default)]
+    pub close_range_threshold: f32,
+    #[serde(default = "default_close_range_mult")]
+    pub close_range_damage_mult: f32,
+}
+
+fn default_close_range_mult() -> f32 {
+    1.0
 }
 
 #[derive(Deserialize, Debug)]
