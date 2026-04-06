@@ -36,6 +36,10 @@ pub struct WeaponDef {
     pub max_range: f32,
     pub projectile_speed: f32,
     pub delivery: DeliveryMethod,
+    /// Distance below which damage starts scaling down (0 = no close-range penalty).
+    pub close_range_threshold: f32,
+    /// Damage multiplier at point-blank range (linearly scales to 1.0 at threshold).
+    pub close_range_damage_mult: f32,
 }
 
 impl WeaponDef {
@@ -110,6 +114,8 @@ fn weapons_registry() -> &'static [WeaponDef] {
                 max_range: w.max_range,
                 projectile_speed: w.projectile_speed,
                 delivery: parse_delivery(&w.delivery),
+                close_range_threshold: w.close_range_threshold,
+                close_range_damage_mult: w.close_range_damage_mult,
             })
             .collect()
     })

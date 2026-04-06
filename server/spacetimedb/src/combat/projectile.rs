@@ -430,6 +430,7 @@ pub fn projectile_impact(
         travel_time_ms,
     );
 
+    let shot_origin = shot.origin.clone();
     consume_projectile_shot(ctx, shot, &impact_pos);
 
     let hit_players = collect_all_player_ids(ctx);
@@ -443,6 +444,9 @@ pub fn projectile_impact(
         def.damage,
         def.radius,
         weapon,
+        Some(&shot_origin),
+        def.close_range_threshold,
+        def.close_range_damage_mult,
     );
     apply_splash_vehicle_damage(
         ctx,
@@ -453,6 +457,9 @@ pub fn projectile_impact(
         def.damage,
         def.radius,
         weapon,
+        Some(&shot_origin),
+        def.close_range_threshold,
+        def.close_range_damage_mult,
     );
 
     let actually_destroyed = destroy_spherical_blocks(ctx, &impact_pos, def.radius, def.radius);

@@ -132,7 +132,9 @@
       "projectileSpeed": 280.0,
       "delivery": "projectile",
       "color": "#e040ff",
-      "recoil": 0.14
+      "recoil": 0.14,
+      "closeRangeThreshold": 30.0,
+      "closeRangeDamageMult": 0.35
     }
   ],
 

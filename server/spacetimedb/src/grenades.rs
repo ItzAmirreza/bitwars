@@ -74,6 +74,9 @@ fn explode_grenade(ctx: &ReducerContext, grenade: &GrenadeProjectile) {
         def.damage,
         def.radius,
         grenade_weapon_index(),
+        None,
+        0.0,
+        1.0,
     );
 
     // Damage vehicles
@@ -87,6 +90,9 @@ fn explode_grenade(ctx: &ReducerContext, grenade: &GrenadeProjectile) {
         def.damage,
         def.radius,
         grenade_weapon_index(),
+        None,
+        0.0,
+        1.0,
     );
 
     // Destroy blocks

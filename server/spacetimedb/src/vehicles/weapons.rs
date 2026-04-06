@@ -476,6 +476,9 @@ pub fn vehicle_projectile_impact(
         def.player_damage(),
         def.radius,
         weapon_code,
+        None,
+        0.0,
+        1.0,
     );
     apply_splash_vehicle_damage(
         ctx,
@@ -486,6 +489,9 @@ pub fn vehicle_projectile_impact(
         def.damage,
         def.radius,
         weapon_code,
+        None,
+        0.0,
+        1.0,
     );
 
     let actually_destroyed =

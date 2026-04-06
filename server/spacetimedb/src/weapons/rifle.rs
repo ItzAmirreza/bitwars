@@ -13,4 +13,6 @@ pub const DEF: WeaponDef = WeaponDef {
     max_range: 80.0,
     projectile_speed: 0.0,
     delivery: DeliveryMethod::Hitscan,
+    close_range_threshold: 0.0,
+    close_range_damage_mult: 1.0,
 };
