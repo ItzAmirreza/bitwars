@@ -74,7 +74,23 @@ pub fn apply_hitscan_player_damage(
     }
 }
 
+/// Compute close-range damage multiplier based on origin-to-target distance.
+/// Returns 1.0 when no falloff applies.
+fn close_range_mult(origin: Option<&Vec3>, target_pos: &Vec3, threshold: f32, min_mult: f32) -> f32 {
+    if threshold <= 0.0 {
+        return 1.0;
+    }
+    let Some(origin) = origin else {
+        return 1.0;
+    };
+    let dist = dist_sq(origin, target_pos).sqrt();
+    let t = (dist / threshold).clamp(0.0, 1.0);
+    min_mult + t * (1.0 - min_mult)
+}
+
 /// Apply splash damage to players within a radius.
+/// When `shot_origin` is provided with non-zero `close_range_threshold`,
+/// damage is scaled per-target using the authoritative origin-to-target distance.
 pub fn apply_splash_player_damage(
     ctx: &ReducerContext,
     sender: Identity,
@@ -83,6 +99,9 @@ pub fn apply_splash_player_damage(
     damage: i32,
     radius: f32,
     weapon: u8,
+    shot_origin: Option<&Vec3>,
+    close_range_threshold: f32,
+    close_range_damage_mult: f32,
 ) {
     let hit_range_sq = (radius + 5.0).powi(2);
 
@@ -106,9 +125,16 @@ pub fn apply_splash_player_damage(
                 continue;
             }
 
+            let range_mult = close_range_mult(
+                shot_origin,
+                &target.pos,
+                close_range_threshold,
+                close_range_damage_mult,
+            );
             let attack_mult = crate::abilities::damage_multiplier(ctx, sender);
             let defense_mult = crate::abilities::defense_multiplier(ctx, *target_id);
-            let effective_damage = ((damage as f32) * attack_mult * defense_mult) as i32;
+            let effective_damage =
+                ((damage as f32) * range_mult * attack_mult * defense_mult).round() as i32;
             let new_health = (target.health - effective_damage).max(0);
             ctx.db.player().identity().update(Player {
                 health: new_health,
@@ -187,6 +213,8 @@ pub fn apply_hitscan_vehicle_damage(
 }
 
 /// Apply splash damage to vehicles within a radius.
+/// When `shot_origin` is provided with non-zero `close_range_threshold`,
+/// damage is scaled per-target using the authoritative origin-to-vehicle distance.
 pub fn apply_splash_vehicle_damage(
     ctx: &ReducerContext,
     sender: Identity,
@@ -196,6 +224,9 @@ pub fn apply_splash_vehicle_damage(
     damage: i32,
     radius: f32,
     weapon: u8,
+    shot_origin: Option<&Vec3>,
+    close_range_threshold: f32,
+    close_range_damage_mult: f32,
 ) {
     let mut seen = HashSet::new();
 
@@ -225,8 +256,14 @@ pub fn apply_splash_vehicle_damage(
             continue;
         }
 
+        let range_mult = close_range_mult(
+            shot_origin,
+            &center,
+            close_range_threshold,
+            close_range_damage_mult,
+        );
         let attack_mult = crate::abilities::damage_multiplier(ctx, sender);
-        let effective_damage = ((damage as f32) * attack_mult) as i32;
+        let effective_damage = ((damage as f32) * range_mult * attack_mult).round() as i32;
         apply_vehicle_damage(
             ctx,
             sender,

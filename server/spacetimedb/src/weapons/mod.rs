@@ -55,19 +55,6 @@ impl WeaponDef {
     pub fn is_server_projectile(&self) -> bool {
         self.delivery == DeliveryMethod::ServerProjectile
     }
-
-    /// Returns damage scaled by close-range penalty based on travel distance.
-    /// At point-blank: damage * close_range_damage_mult.
-    /// At threshold distance or beyond: full damage.
-    /// Linear interpolation in between.
-    pub fn close_range_damage(&self, travel_dist: f32) -> i32 {
-        if self.close_range_threshold <= 0.0 {
-            return self.damage;
-        }
-        let t = (travel_dist / self.close_range_threshold).clamp(0.0, 1.0);
-        let mult = self.close_range_damage_mult + t * (1.0 - self.close_range_damage_mult);
-        ((self.damage as f32) * mult) as i32
-    }
 }
 
 // ── Vehicle Weapon Definition ──

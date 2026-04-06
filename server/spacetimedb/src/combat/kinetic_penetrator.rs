@@ -100,6 +100,9 @@ pub fn kinetic_penetrator_strike(
         player_damage,
         radius,
         weapon_code,
+        None,
+        0.0,
+        1.0,
     );
     apply_splash_vehicle_damage(
         ctx,
@@ -110,6 +113,9 @@ pub fn kinetic_penetrator_strike(
         damage,
         radius,
         weapon_code,
+        None,
+        0.0,
+        1.0,
     );
 
     // Phase 4: Emit explosion events
