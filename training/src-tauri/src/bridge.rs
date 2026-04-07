@@ -4,6 +4,7 @@
 //! The actual training thread integration will be wired in a later task;
 //! for now the commands operate on the shared state struct.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -34,7 +35,7 @@ pub struct LiveBotState {
     pub health: f32,
     pub weapon: u8,
     pub on_ground: bool,
-    pub action: [f32; 9],
+    pub action: [f32; 8],
 }
 
 /// Hyperparameters that can be adjusted at runtime.
@@ -75,7 +76,15 @@ pub struct TrainingState {
     pub live_bot_states: Vec<LiveBotState>,
     /// Shared base terrain for chunk visualization.
     pub base_terrain: Option<Arc<BaseTerrain>>,
+    /// Which environment's terrain to show in the preview (set by frontend).
+    pub preview_bot: usize,
+    /// Snapshot of the preview bot's modified terrain chunks (overlaid on base).
+    pub preview_modified_chunks: HashMap<u32, [u8; 4096]>,
     pub checkpoint_dir: PathBuf,
+    /// Signal from frontend to save a checkpoint (training loop reads & clears).
+    pub checkpoint_save_requested: bool,
+    /// Signal from frontend to load a checkpoint (training loop reads & clears).
+    pub checkpoint_load_path: Option<String>,
 }
 
 impl Default for TrainingState {
@@ -90,7 +99,11 @@ impl Default for TrainingState {
             reward_history: Vec::new(),
             live_bot_states: Vec::new(),
             base_terrain: None,
+            preview_bot: 0,
+            preview_modified_chunks: HashMap::new(),
             checkpoint_dir,
+            checkpoint_save_requested: false,
+            checkpoint_load_path: None,
         }
     }
 }
@@ -293,26 +306,12 @@ fn parse_checkpoint_stem(stem: &str) -> (u64, f32) {
 pub async fn save_checkpoint_now(
     state: State<'_, SharedState>,
 ) -> Result<String, String> {
-    let s = lock_state(&state)?;
+    let mut s = lock_state(&state)?;
     if !s.is_running {
         return Err("Training is not running -- nothing to checkpoint".to_string());
     }
-
-    // Create checkpoint directory if it doesn't exist
-    let dir = &s.checkpoint_dir;
-    if !dir.exists() {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| format!("Failed to create checkpoint dir: {}", e))?;
-    }
-
-    let filename = format!(
-        "checkpoint_ep{}_r{:.1}.safetensors",
-        s.stats.episode, s.stats.mean_reward
-    );
-    let path = dir.join(&filename);
-
-    // Actual save will be triggered via training thread signal in integration
-    Ok(format!("Checkpoint save requested: {}", path.display()))
+    s.checkpoint_save_requested = true;
+    Ok("Checkpoint save requested".to_string())
 }
 
 #[tauri::command]
@@ -320,18 +319,12 @@ pub async fn load_checkpoint(
     state: State<'_, SharedState>,
     path: String,
 ) -> Result<String, String> {
-    let s = lock_state(&state)?;
-    if s.is_running {
-        return Err("Cannot load checkpoint while training is running".to_string());
-    }
-    drop(s); // Release lock before filesystem access
-
+    let mut s = lock_state(&state)?;
     let checkpoint_path = PathBuf::from(&path);
     if !checkpoint_path.exists() {
         return Err(format!("Checkpoint not found: {}", path));
     }
-
-    // Actual load will be wired when the training thread is integrated
+    s.checkpoint_load_path = Some(path.clone());
     Ok(format!("Checkpoint load requested: {}", path))
 }
 
@@ -354,8 +347,20 @@ pub async fn get_training_status(
     })
 }
 
+/// Set which bot's environment terrain to show in the 3D preview.
+#[tauri::command]
+pub async fn set_preview_bot(
+    state: State<'_, SharedState>,
+    bot_index: usize,
+) -> Result<(), String> {
+    let mut s = lock_state(&state)?;
+    s.preview_bot = bot_index;
+    Ok(())
+}
+
 /// Get terrain chunk data around a world position for 3D preview rendering.
 /// Returns a list of (chunk_x, chunk_y, chunk_z, block_data[4096]) tuples.
+/// Uses modified terrain from the preview bot's environment when available.
 #[tauri::command]
 pub async fn get_terrain_chunks(
     state: State<'_, SharedState>,
@@ -381,7 +386,10 @@ pub async fn get_terrain_chunks(
         for cy in 0..3usize {
             for cz in cz_min..=cz_max {
                 let id = crate::sim::world::pack_chunk_id(cx as u8, cy as u8, cz as u8);
-                if let Some(data) = terrain.chunks.get(&id) {
+                // Use modified chunk if available, otherwise fall back to base
+                let data = s.preview_modified_chunks.get(&id)
+                    .or_else(|| terrain.chunks.get(&id));
+                if let Some(data) = data {
                     chunks.push((cx as u8, cy as u8, cz as u8, data.to_vec()));
                 }
             }

@@ -38,6 +38,7 @@ fn main() {
             bridge::load_checkpoint,
             bridge::get_live_bot_state,
             bridge::get_training_status,
+            bridge::set_preview_bot,
             bridge::get_terrain_chunks,
             bridge::get_episode_replay,
             bridge::update_hyperparams,

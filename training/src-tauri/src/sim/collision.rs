@@ -179,28 +179,3 @@ pub fn get_ground_level(world: &EnvTerrain, pos_x: f32, pos_z: f32, foot_y: f32)
     max_ground
 }
 
-/// Check if there's headroom to stand up.
-/// Matches client's canStandUp() exactly.
-pub fn can_stand_up(
-    world: &EnvTerrain,
-    pos_x: f32,
-    pos_z: f32,
-    foot_y: f32,
-    stand_height: f32,
-) -> bool {
-    let hw = PLAYER_HALF_WIDTH - 0.01;
-    let head_y = (foot_y + stand_height).floor() as i32;
-    let points = [
-        (pos_x, pos_z),
-        (pos_x - hw, pos_z - hw),
-        (pos_x + hw, pos_z - hw),
-        (pos_x - hw, pos_z + hw),
-        (pos_x + hw, pos_z + hw),
-    ];
-    for (sx, sz) in points {
-        if world.get_block(sx.floor() as i32, head_y, sz.floor() as i32) != AIR {
-            return false;
-        }
-    }
-    true
-}

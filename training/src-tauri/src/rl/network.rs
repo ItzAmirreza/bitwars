@@ -3,11 +3,11 @@ use candle_nn::{linear, Linear, Module, VarBuilder, VarMap};
 use std::path::Path;
 
 /// Observation space dimension (matches sim::environment::OBSERVATION_DIM).
-pub const OBS_DIM: usize = 106;
-/// Continuous action dimension (move_dir x2, look_dir x2, jump, sprint, crouch, fire).
-pub const CONTINUOUS_ACTION_DIM: usize = 8;
-/// Discrete weapon count.
-pub const NUM_WEAPONS: usize = 6;
+pub const OBS_DIM: usize = 103;
+/// Continuous action dimension (move_dir x2, look_dir x2, jump, sprint, fire).
+pub const CONTINUOUS_ACTION_DIM: usize = 7;
+/// Discrete weapon count (grenade launcher excluded).
+pub const NUM_WEAPONS: usize = 5;
 /// LSTM hidden size.
 pub const HIDDEN_SIZE: usize = 256;
 /// Actor/critic head hidden size.

@@ -212,9 +212,8 @@ impl EnvTerrain {
         result
     }
 
-    /// Number of modified chunks (for stats/debugging).
-    #[allow(dead_code)]
-    pub fn modified_chunk_count(&self) -> usize {
-        self.modified.len()
+    /// Get a reference to the modified chunks map.
+    pub fn modified_chunks(&self) -> &HashMap<u32, [u8; 4096]> {
+        &self.modified
     }
 }

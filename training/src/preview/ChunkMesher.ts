@@ -178,14 +178,22 @@ export class ChunkRenderer {
         const key = `${cx}_${cy}_${cz}`;
         neededKeys.add(key);
 
-        if (this.loadedChunks.has(key)) continue; // Already loaded
-
         const chunkData: ChunkData = {
           cx, cy, cz,
           blocks: new Uint8Array(blockData),
         };
 
         const mesh = buildChunkMesh(chunkData);
+
+        // Remove old mesh if it exists (terrain may have been modified by explosions)
+        const oldMesh = this.loadedChunks.get(key);
+        if (oldMesh) {
+          this.scene.remove(oldMesh);
+          oldMesh.geometry.dispose();
+          (oldMesh.material as THREE.Material).dispose();
+          this.loadedChunks.delete(key);
+        }
+
         if (mesh) {
           this.scene.add(mesh);
           this.loadedChunks.set(key, mesh);

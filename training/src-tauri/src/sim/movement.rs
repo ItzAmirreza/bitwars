@@ -3,9 +3,10 @@
 //! Every constant, formula, and edge case matches the client exactly.
 //! No visual-only effects (head bob, camera tilt, FOV offset, landing dip)
 //! are included since they don't affect physics.
+//! Crouching and sliding are omitted — bots don't use them.
 
 use super::collision::{
-    can_stand_up, check_ceiling, get_ground_level, is_against_wall, move_with_collision,
+    check_ceiling, get_ground_level, is_against_wall, move_with_collision,
     WALL_CLIMB_SPEED,
 };
 use super::world::EnvTerrain;
@@ -22,7 +23,6 @@ pub struct MoveAction {
     /// Discrete actions
     pub jump: bool,
     pub sprint: bool,
-    pub crouch: bool,
 }
 
 /// Complete player movement state.
@@ -48,13 +48,7 @@ pub struct PlayerMovement {
     pub on_ground: bool,
     pub is_jumping: bool,
     pub is_sprinting: bool,
-    pub is_crouching: bool,
-    pub is_sliding: bool,
     pub is_climbing: bool,
-
-    // Eye height interpolation
-    pub current_eye_height: f32,
-    target_eye_height: f32,
 
     // Coyote time
     coyote_timer: f32,
@@ -62,12 +56,6 @@ pub struct PlayerMovement {
     // Jump buffer
     jump_buffered: bool,
     jump_buffer_timer: f32,
-
-    // Slide state
-    slide_timer: f32,
-    slide_speed: f32,
-    slide_dir_x: f32,
-    slide_dir_z: f32,
 
     // Speed multiplier (for buffs)
     pub speed_multiplier: f32,
@@ -83,7 +71,6 @@ pub struct PlayerMovement {
 // Constants — matching client FPSControls exactly
 const SPEED: f32 = 12.0;
 const SPRINT_SPEED: f32 = 18.0;
-const CROUCH_SPEED: f32 = 5.0;
 const JUMP_FORCE: f32 = 9.5;
 const GRAVITY: f32 = -40.0;
 const GRAVITY_ASCENDING: f32 = -22.0;
@@ -92,12 +79,8 @@ const GROUND_ACCEL: f32 = 65.0;
 const GROUND_FRICTION: f32 = 45.0;
 const AIR_ACCEL: f32 = 18.0;
 const STAND_HEIGHT: f32 = 1.7;
-const CROUCH_HEIGHT: f32 = 1.0;
 const COYOTE_TIME: f32 = 0.1;
 const JUMP_BUFFER_TIME: f32 = 0.1;
-const SLIDE_DURATION: f32 = 0.75;
-const SLIDE_MIN_SPEED: f32 = 10.0;
-const SLIDE_INITIAL_SPEED: f32 = 22.0;
 
 // World bounds matching client
 const MIN_BOUND: f32 = 0.5;
@@ -124,18 +107,10 @@ impl PlayerMovement {
             on_ground: false,
             is_jumping: false,
             is_sprinting: false,
-            is_crouching: false,
-            is_sliding: false,
             is_climbing: false,
-            current_eye_height: STAND_HEIGHT,
-            target_eye_height: STAND_HEIGHT,
             coyote_timer: 0.0,
             jump_buffered: false,
             jump_buffer_timer: 0.0,
-            slide_timer: 0.0,
-            slide_speed: 0.0,
-            slide_dir_x: 0.0,
-            slide_dir_z: 0.0,
             speed_multiplier: 1.0,
             horizontal_speed: 0.0,
             health: 150.0,
@@ -156,18 +131,10 @@ impl PlayerMovement {
         self.on_ground = false;
         self.is_jumping = false;
         self.is_sprinting = false;
-        self.is_crouching = false;
-        self.is_sliding = false;
         self.is_climbing = false;
-        self.current_eye_height = STAND_HEIGHT;
-        self.target_eye_height = STAND_HEIGHT;
         self.coyote_timer = 0.0;
         self.jump_buffered = false;
         self.jump_buffer_timer = 0.0;
-        self.slide_timer = 0.0;
-        self.slide_speed = 0.0;
-        self.slide_dir_x = 0.0;
-        self.slide_dir_z = 0.0;
         self.speed_multiplier = 1.0;
         self.horizontal_speed = 0.0;
         self.health = self.max_health;
@@ -193,16 +160,7 @@ impl PlayerMovement {
 
     /// Get foot Y position.
     pub fn foot_y(&self) -> f32 {
-        self.pos_y - self.current_eye_height
-    }
-
-    /// Get current player height (stand or crouch).
-    pub fn player_height(&self) -> f32 {
-        if self.is_crouching {
-            CROUCH_HEIGHT
-        } else {
-            STAND_HEIGHT
-        }
+        self.pos_y - STAND_HEIGHT
     }
 
     fn execute_jump(&mut self) {
@@ -212,111 +170,31 @@ impl PlayerMovement {
         self.coyote_timer = 0.0;
         self.jump_buffered = false;
         self.jump_buffer_timer = 0.0;
-        // End slide but preserve momentum
-        if self.is_sliding {
-            self.is_sliding = false;
-        }
     }
 
     /// Main update — matches client's FPSControls.update() exactly.
     /// delta is in seconds.
     pub fn update(&mut self, delta: f32, action: &MoveAction, world: &EnvTerrain) {
-        let _prev_vel_y = self.vel_y;
-
         // Apply look direction
         self.yaw = action.yaw;
         self.pitch = action.pitch.clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
 
         // Sprint state (persists through jumps like Minecraft)
-        self.is_sprinting =
-            action.sprint && action.forward > 0.0 && !self.is_crouching && !self.is_sliding;
-
-        // Crouch with headroom check
-        if action.crouch {
-            // Slide activation: on ground, moving fast, not already sliding
-            if self.on_ground
-                && !self.is_sliding
-                && !self.is_crouching
-                && self.horizontal_speed >= SLIDE_MIN_SPEED
-            {
-                self.is_sliding = true;
-                self.slide_timer = SLIDE_DURATION;
-                self.slide_speed = self.horizontal_speed.max(SLIDE_INITIAL_SPEED);
-                let len = (self.h_vel_x * self.h_vel_x + self.h_vel_z * self.h_vel_z).sqrt();
-                if len > 0.1 {
-                    self.slide_dir_x = self.h_vel_x / len;
-                    self.slide_dir_z = self.h_vel_z / len;
-                }
-            }
-            self.is_crouching = true;
-        } else if self.is_crouching {
-            if can_stand_up(
-                world,
-                self.pos_x,
-                self.pos_z,
-                self.foot_y(),
-                STAND_HEIGHT,
-            ) {
-                self.is_crouching = false;
-            }
-        }
+        self.is_sprinting = action.sprint && action.forward > 0.0;
 
         // Target speed
-        let mut target_speed = SPEED;
-        if self.is_sprinting {
-            target_speed = SPRINT_SPEED;
-        } else if self.is_crouching && !self.is_sliding {
-            target_speed = CROUCH_SPEED;
-        }
+        let mut target_speed = if self.is_sprinting { SPRINT_SPEED } else { SPEED };
         target_speed *= self.speed_multiplier;
 
-        // Eye height interpolation — matches client's exponential lerp
-        self.target_eye_height = if self.is_crouching {
-            CROUCH_HEIGHT
-        } else {
-            STAND_HEIGHT
-        };
-        let height_lerp = 1.0 - (0.00001f32).powf(delta);
-        self.current_eye_height +=
-            (self.target_eye_height - self.current_eye_height) * height_lerp;
-
-        // Slide update
-        if self.is_sliding {
-            self.slide_timer -= delta;
-            let slide_progress = 1.0 - (self.slide_timer / SLIDE_DURATION);
-            let slide_decay = 1.0 - slide_progress * slide_progress; // quadratic ease-out
-            let current_slide_speed = self.slide_speed * slide_decay;
-
-            // Override horizontal velocity with slide direction
-            self.h_vel_x = self.slide_dir_x * current_slide_speed;
-            self.h_vel_z = self.slide_dir_z * current_slide_speed;
-
-            // End conditions
-            if self.slide_timer <= 0.0 || !action.crouch {
-                self.is_sliding = false;
-            }
-
-            // Prevent speed clamping from killing the slide
-            target_speed = target_speed.max(current_slide_speed);
-        }
-
-        // Input direction (skip during slide)
-        if !self.is_sliding {
+        // Input direction
+        {
             let dir_x = action.strafe;
             let dir_z = -action.forward;
             let dir_len = (dir_x * dir_x + dir_z * dir_z).sqrt();
 
             // World-space movement vectors from yaw
-            let cos_yaw = self.yaw.cos();
             let sin_yaw = self.yaw.sin();
-            // forward = (sin_yaw, 0, -cos_yaw) matching THREE.js quaternion (0,0,-1)
-            // right = (cos_yaw, 0, sin_yaw) matching THREE.js quaternion (1,0,0)
-            // But client does: forward = (0,0,-1).applyQuaternion, then forward.y=0, normalize
-            // For pure yaw rotation: forward = (-sin_yaw, 0, -cos_yaw), right = (cos_yaw, 0, -sin_yaw)
-            // Actually let me match precisely:
-            // THREE.js with YXZ euler order, yaw = euler.y:
-            // (0,0,-1) rotated by yaw around Y = (-sin(yaw), 0, -cos(yaw))
-            // (1,0,0) rotated by yaw around Y = (cos(yaw), 0, -sin(yaw))
+            let cos_yaw = self.yaw.cos();
             let fwd_x = -sin_yaw;
             let fwd_z = -cos_yaw;
             let right_x = cos_yaw;
@@ -328,9 +206,6 @@ impl PlayerMovement {
                 let norm_dir_x = dir_x / dir_len;
                 let norm_dir_z = dir_z / dir_len;
 
-                // wishDir in world space: forward * (-dir_z) + right * dir_x
-                // Client does: wishDir.addScaledVector(forward, -direction.z)
-                //              wishDir.addScaledVector(right, direction.x)
                 let wish_x = fwd_x * (-norm_dir_z) + right_x * norm_dir_x;
                 let wish_z = fwd_z * (-norm_dir_z) + right_z * norm_dir_x;
                 let wish_len = (wish_x * wish_x + wish_z * wish_z).sqrt();
@@ -371,18 +246,12 @@ impl PlayerMovement {
                     self.h_vel_z = 0.0;
                 }
             }
-            // Note: air friction = 2.0 in client but only applied via the accel system,
-            // not as explicit friction. No explicit air friction when no input — matches client.
         }
 
         // Soft speed clamping (gradual deceleration instead of hard cap)
         self.horizontal_speed =
             (self.h_vel_x * self.h_vel_x + self.h_vel_z * self.h_vel_z).sqrt();
-        let max_speed = if self.is_sliding {
-            self.slide_speed
-        } else {
-            target_speed * 1.1
-        };
+        let max_speed = target_speed * 1.1;
         if self.horizontal_speed > max_speed {
             let over_speed = self.horizontal_speed - max_speed;
             let reduction_rate = if self.on_ground {
@@ -401,7 +270,6 @@ impl PlayerMovement {
         // Apply horizontal velocity with collision detection
         {
             let foot_y = self.foot_y();
-            let player_height = self.player_height();
             let result = move_with_collision(
                 world,
                 self.pos_x,
@@ -409,7 +277,7 @@ impl PlayerMovement {
                 self.h_vel_x * delta,
                 self.h_vel_z * delta,
                 foot_y,
-                player_height,
+                STAND_HEIGHT,
             );
             self.pos_x = result.new_x;
             self.pos_z = result.new_z;
@@ -436,15 +304,14 @@ impl PlayerMovement {
         // Ceiling collision
         {
             let foot_y = self.foot_y();
-            let player_height = self.player_height();
             if let Some((camera_y, new_vel_y)) = check_ceiling(
                 world,
                 self.pos_x,
                 self.pos_z,
                 self.vel_y,
                 foot_y,
-                player_height,
-                self.current_eye_height,
+                STAND_HEIGHT,
+                STAND_HEIGHT,
             ) {
                 self.pos_y = camera_y;
                 self.vel_y = new_vel_y;
@@ -454,7 +321,7 @@ impl PlayerMovement {
         // Wall climbing: hold space while airborne and against a wall
         if !self.on_ground
             && action.jump
-            && is_against_wall(world, self.pos_x, self.pos_z, self.foot_y(), self.player_height())
+            && is_against_wall(world, self.pos_x, self.pos_z, self.foot_y(), STAND_HEIGHT)
         {
             self.is_climbing = true;
             self.vel_y = WALL_CLIMB_SPEED;
@@ -468,8 +335,7 @@ impl PlayerMovement {
         // Mantle: when climbing and head clears the wall top, boost onto the ledge
         if self.is_climbing {
             let foot_y = self.foot_y();
-            let player_height = self.player_height();
-            let head_block_y = (foot_y + player_height).floor() as i32;
+            let head_block_y = (foot_y + STAND_HEIGHT).floor() as i32;
             let foot_block_y = foot_y.floor() as i32;
 
             let head_clear = world.get_block(
@@ -484,7 +350,7 @@ impl PlayerMovement {
             ) != 0;
 
             if head_clear && feet_at_block {
-                self.pos_y = foot_block_y as f32 + 1.0 + self.current_eye_height;
+                self.pos_y = foot_block_y as f32 + 1.0 + STAND_HEIGHT;
                 self.vel_y = 1.0;
                 self.is_climbing = false;
                 self.on_ground = true;
@@ -508,7 +374,7 @@ impl PlayerMovement {
 
         // Handle jump input
         if action.jump && !self.is_climbing {
-            if self.on_ground || self.coyote_timer > 0.0 || self.is_sliding {
+            if self.on_ground || self.coyote_timer > 0.0 {
                 self.execute_jump();
             } else if !self.jump_buffered {
                 self.jump_buffered = true;
@@ -518,12 +384,11 @@ impl PlayerMovement {
 
         // Ground collision
         let ground_height =
-            get_ground_level(world, self.pos_x, self.pos_z, self.foot_y()) + self.current_eye_height;
+            get_ground_level(world, self.pos_x, self.pos_z, self.foot_y()) + STAND_HEIGHT;
         let was_on_ground = self.on_ground;
 
         if self.pos_y < ground_height {
             self.pos_y = ground_height;
-            // No landing dip in sim (visual only in client)
             self.vel_y = 0.0;
             self.on_ground = true;
             self.is_jumping = false;
@@ -536,10 +401,6 @@ impl PlayerMovement {
             self.on_ground = false;
             if was_on_ground && !self.is_jumping {
                 self.coyote_timer = COYOTE_TIME;
-            }
-            // End slide if we fall off an edge
-            if self.is_sliding {
-                self.is_sliding = false;
             }
         }
 

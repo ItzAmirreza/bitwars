@@ -2,7 +2,7 @@
 //!
 //! Ties all sim modules together into a reset/step loop for RL training.
 //! Each environment instance has its own CoW terrain, player state, weapons,
-//! abilities, projectiles, and grenades. The base terrain is shared via Arc.
+//! abilities, and projectiles. The base terrain is shared via Arc.
 
 use std::sync::Arc;
 
@@ -14,8 +14,8 @@ use super::destruction::explode_at;
 use super::knockback;
 use super::movement::{MoveAction, PlayerMovement};
 use super::weapons::{
-    Delivery, GrenadeSystem, Projectile, WeaponState,
-    GRENADE_WEAPON_INDEX, WEAPONS, NUM_WEAPONS,
+    Delivery, Projectile, WeaponState,
+    WEAPONS, NUM_WEAPONS,
 };
 use super::world::{BaseTerrain, EnvTerrain};
 use crate::worldgen;
@@ -32,8 +32,8 @@ const EPISODE_TIMEOUT: f32 = 30.0;
 const TARGET_SIZE: f32 = 3.0;
 
 /// Observation vector dimension.
-/// 13 (state) + 48 (raycasts) + 27 (3x3x3 grid) + 6 (ammo) + 6 (cooldown) + 6 (flags)
-pub const OBSERVATION_DIM: usize = 106;
+/// 13 (state) + 48 (raycasts) + 27 (3x3x3 grid) + 5 (ammo) + 5 (cooldown) + 5 (flags)
+pub const OBSERVATION_DIM: usize = 103;
 
 /// Number of vision raycasts.
 const NUM_RAYS: usize = 48;
@@ -43,8 +43,8 @@ const RAY_MAX_DIST: f32 = 40.0;
 const RAY_MAX_STEPS: u32 = 60;
 
 /// Action vector dimension.
-/// [move_fwd, move_strafe, look_yaw, look_pitch, jump, sprint, crouch, fire, weapon_select]
-pub const ACTION_DIM: usize = 9;
+/// [move_fwd, move_strafe, look_yaw, look_pitch, jump, sprint, fire, weapon_select]
+pub const ACTION_DIM: usize = 8;
 
 // ── Step result types ──
 
@@ -78,7 +78,6 @@ pub struct TrainingEnv {
     terrain: EnvTerrain,
     player: PlayerMovement,
     weapons: WeaponState,
-    grenades: GrenadeSystem,
     abilities: AbilitySystem,
     target_pos: [f32; 3],
     spawn_pos: [f32; 3],
@@ -106,7 +105,6 @@ impl TrainingEnv {
             terrain,
             player: PlayerMovement::new(375.0, 30.0, 375.0),
             weapons: WeaponState::new(),
-            grenades: GrenadeSystem::new(),
             abilities,
             target_pos: [0.0; 3],
             spawn_pos: [0.0; 3],
@@ -151,9 +149,8 @@ impl TrainingEnv {
         let dz = self.target_pos[2] - self.spawn_pos[2];
         self.player.yaw = dx.atan2(-dz);
 
-        // Reset weapons, grenades, and abilities
+        // Reset weapons and abilities
         self.weapons.reset();
-        self.grenades.reset();
         self.abilities.reset();
 
         // Clear projectiles
@@ -174,16 +171,15 @@ impl TrainingEnv {
 
     /// Take one step in the environment given an action vector.
     ///
-    /// Action layout (9 floats):
+    /// Action layout (8 floats):
     ///   [0] forward    (-1 to 1)
     ///   [1] strafe     (-1 to 1)
     ///   [2] yaw delta  (continuous, added to current yaw)
     ///   [3] pitch delta (continuous, added to current pitch)
     ///   [4] jump       (>0.5 = true)
     ///   [5] sprint     (>0.5 = true)
-    ///   [6] crouch     (>0.5 = true)
-    ///   [7] fire       (>0.5 = true)
-    ///   [8] weapon_select (0-5, discretized)
+    ///   [6] fire       (>0.5 = true)
+    ///   [7] weapon_select (0-5, discretized)
     pub fn step(&mut self, action: &[f32]) -> StepResult {
         debug_assert!(action.len() >= ACTION_DIM, "Action must have {} elements", ACTION_DIM);
 
@@ -194,9 +190,8 @@ impl TrainingEnv {
         let pitch_delta = action[3];
         let jump = action[4] > 0.5;
         let sprint = action[5] > 0.5;
-        let crouch = false; // Disabled — will be re-added in future
-        let fire = action[7] > 0.5;
-        let weapon_select = (action[8].round() as usize).min(NUM_WEAPONS - 1);
+        let fire = action[6] > 0.5;
+        let weapon_select = (action[7].round() as usize).min(NUM_WEAPONS - 1);
 
         // Handle weapon switching
         self.weapons.select_weapon(weapon_select);
@@ -207,6 +202,10 @@ impl TrainingEnv {
         // Handle fire action
         if fire {
             let w = self.weapons.current_weapon;
+            // Auto-reload if empty (matches real game's instant infantry reload)
+            if self.weapons.ammo[w] == 0 {
+                self.weapons.reload(w);
+            }
             if self.weapons.can_fire(w) {
                 let def = &WEAPONS[w];
                 // Compute fire direction from yaw and pitch
@@ -220,25 +219,15 @@ impl TrainingEnv {
 
                 match def.delivery {
                     Delivery::Projectile => {
-                        // Spawn a projectile (RPG, Sniper) using weapons module Projectile
+                        // Spawn a projectile (RPG, Sniper)
                         self.active_projectiles.push(Projectile::new(
                             self.player.pos_x, self.player.pos_y, self.player.pos_z,
                             dir_x, dir_y, dir_z,
                             w,
                         ));
                     }
-                    Delivery::ServerProjectile => {
-                        // Spawn a grenade using GrenadeSystem (server-matching physics)
-                        self.grenades.spawn(
-                            self.player.pos_x, self.player.pos_y, self.player.pos_z,
-                            dir_x * def.projectile_speed,
-                            dir_y * def.projectile_speed,
-                            dir_z * def.projectile_speed,
-                        );
-                    }
                     Delivery::Hitscan => {
                         // Hitscan weapons: no projectile simulation needed for nav training.
-                        // They don't create explosions or knockback.
                     }
                 }
             }
@@ -246,13 +235,6 @@ impl TrainingEnv {
 
         // Tick projectiles
         self.tick_projectiles();
-
-        // Tick grenades (GrenadeSystem returns explosion positions)
-        let grenade_explosions = self.grenades.tick(SIM_DT, &self.terrain);
-        for (ex, ey, ez) in grenade_explosions {
-            let def = &WEAPONS[GRENADE_WEAPON_INDEX];
-            self.apply_explosion([ex, ey, ez], def.damage as f32, def.radius);
-        }
 
         // Tick ability system and check for pickups
         self.abilities.tick(SIM_DT);
@@ -273,7 +255,6 @@ impl TrainingEnv {
             ),
             jump,
             sprint,
-            crouch,
         };
 
         // Update player movement
@@ -321,14 +302,13 @@ impl TrainingEnv {
     ///   [12]      Distance to target (normalized)
     ///   [13..61]  48 raycast distances (0=wall at face, 1=clear to max range)
     ///   [61..88]  3x3x3 immediate terrain grid (27 values, for close collision)
-    ///   [88..94]  Ammo per weapon (normalized)
-    ///   [94..100] Cooldown per weapon (normalized)
-    ///   [100]     Health (normalized)
-    ///   [101]     Speed multiplier (normalized)
-    ///   [102]     On ground
-    ///   [103]     Is sliding
-    ///   [104]     Is climbing
-    ///   [105]     Current weapon (normalized)
+    ///   [88..93]  Ammo per weapon (normalized, 5 weapons)
+    ///   [93..98]  Cooldown per weapon (normalized, 5 weapons)
+    ///   [98]      Health (normalized)
+    ///   [99]      Speed multiplier (normalized)
+    ///   [100]     On ground
+    ///   [101]     Is climbing
+    ///   [102]     Current weapon (normalized)
     pub fn compute_observation(&self) -> Vec<f32> {
         let mut obs = Vec::with_capacity(OBSERVATION_DIM);
 
@@ -416,12 +396,10 @@ impl TrainingEnv {
         obs.push(self.player.speed_multiplier / 2.4);
         // [102]: On ground
         obs.push(if self.player.on_ground { 1.0 } else { 0.0 });
-        // [103]: Is sliding
-        obs.push(if self.player.is_sliding { 1.0 } else { 0.0 });
-        // [104]: Is climbing
+        // [103]: Is climbing
         obs.push(if self.player.is_climbing { 1.0 } else { 0.0 });
-        // [105]: Current weapon
-        obs.push(self.weapons.current_weapon as f32 / 5.0);
+        // [104]: Current weapon
+        obs.push(self.weapons.current_weapon as f32 / 4.0);
 
         debug_assert_eq!(obs.len(), OBSERVATION_DIM);
         obs
@@ -524,19 +502,21 @@ impl TrainingEnv {
         }
     }
 
-    /// Apply an explosion: destroy blocks, apply knockback and self-damage.
-    fn apply_explosion(&mut self, pos: [f32; 3], _damage: f32, radius: f32) {
+    /// Apply an explosion: destroy blocks, apply knockback.
+    /// Knockback matches client InfantryFireController.applyExplosionKnockback().
+    fn apply_explosion(&mut self, pos: [f32; 3], damage: f32, radius: f32) {
         // Destroy blocks using the full ellipsoid + structural cascade pipeline
         let destroyed = explode_at(&mut self.terrain, (pos[0], pos[1], pos[2]), radius);
         self.blocks_destroyed += destroyed.len() as u32;
 
-        // Apply knockback to player (no self-damage — matches real game)
+        // Apply knockback to player (matches client-side knockback formula)
         let player_pos = (self.player.pos_x, self.player.pos_y, self.player.pos_z);
         let explosion_pos = (pos[0], pos[1], pos[2]);
         let (kx, ky, kz) = knockback::apply_explosion_knockback(
             player_pos,
             explosion_pos,
-            radius * 1.5, // extended radius for knockback
+            radius,
+            damage,
         );
         if kx.abs() > 0.01 || ky.abs() > 0.01 || kz.abs() > 0.01 {
             self.player.apply_impulse(kx, ky, kz);
@@ -574,6 +554,11 @@ impl TrainingEnv {
     /// Get whether the player is on the ground.
     pub fn on_ground(&self) -> bool {
         self.player.on_ground
+    }
+
+    /// Get the modified terrain chunks (for preview overlay on base terrain).
+    pub fn modified_terrain_chunks(&self) -> &std::collections::HashMap<u32, [u8; 4096]> {
+        self.terrain.modified_chunks()
     }
 
     /// Get whether the episode is done.

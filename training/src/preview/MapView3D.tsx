@@ -13,8 +13,8 @@ interface LiveBotState {
   action: number[];
 }
 
-const WEAPON_NAMES = ['Rifle', 'Shotgun', 'RPG', 'Machine Gun', 'Grenade', 'Sniper'];
-const ACTION_LABELS = ['Fwd', 'Strafe', 'Yaw', 'Pitch', 'Jump', 'Sprint', 'Crouch', 'Fire', 'Weapon'];
+const WEAPON_NAMES = ['Rifle', 'Shotgun', 'RPG', 'Machine Gun', 'Sniper'];
+const ACTION_LABELS = ['Fwd', 'Strafe', 'Yaw', 'Pitch', 'Jump', 'Sprint', 'Fire', 'Weapon'];
 
 const BOT_COLORS = [
   0x00ff88, 0x4488ff, 0xff4444, 0xffaa00,
@@ -82,7 +82,7 @@ export default function MapView3D() {
     const maxBots = 64;
     // Body
     const botBodyMesh = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(0.8, 1.9, 0.8),
+      new THREE.BoxGeometry(0.8, 1.7, 0.8),
       new THREE.MeshLambertMaterial({ color: 0xffffff }),
       maxBots,
     );
@@ -240,7 +240,7 @@ export default function MapView3D() {
 
       for (let i = 0; i < n; i++) {
         const b = bots[i];
-        tmpMat.makeTranslation(b.pos[0], b.pos[1] - 0.95, b.pos[2]);
+        tmpMat.makeTranslation(b.pos[0], b.pos[1] - 0.85, b.pos[2]);
         botBodyMesh.setMatrixAt(i, tmpMat);
         tmpMat.makeTranslation(b.pos[0], b.pos[1] + 0.25, b.pos[2]);
         botHeadMesh.setMatrixAt(i, tmpMat);
@@ -261,7 +261,7 @@ export default function MapView3D() {
 
         // Selection ring at feet
         selectionRing.visible = true;
-        selectionRing.position.set(b.pos[0], b.pos[1] - 1.9 + 0.05, b.pos[2]);
+        selectionRing.position.set(b.pos[0], b.pos[1] - 1.7 + 0.05, b.pos[2]);
         ringMat.color.set(BOT_COLORS[sel % BOT_COLORS.length]);
 
         // Look direction arrow
@@ -359,6 +359,11 @@ export default function MapView3D() {
       if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
     };
   }, []);
+
+  // Notify backend which bot's terrain to show in preview
+  useEffect(() => {
+    invoke('set_preview_bot', { botIndex: selectedBot }).catch(() => {});
+  }, [selectedBot]);
 
   const selectNextBot = useCallback(() => {
     setSelectedBot(s => (s + 1) % Math.max(1, botCount));

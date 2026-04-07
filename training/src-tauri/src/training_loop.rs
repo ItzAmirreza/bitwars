@@ -3,27 +3,60 @@
 //! Runs on a background thread. Environment steps are parallelized with rayon.
 //! LSTM hidden states are maintained per environment and reset on episode done.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use rayon::prelude::*;
 
 use crate::bridge::{LiveBotState, SharedState, TrainingStats};
+use crate::rl::checkpoint::{CheckpointManager, CheckpointMeta};
 use crate::rl::ppo::{PPOConfig, PPOTrainer};
 use crate::sim::environment::{StepResult, TrainingEnv};
 use crate::sim::world::BaseTerrain;
 
 const STATS_UPDATE_INTERVAL: u64 = 50;
 const ROLLING_WINDOW: usize = 100;
+const AUTO_SAVE_INTERVAL: u64 = 1000;
+
+/// Save a checkpoint (shared helper for manual + auto save).
+fn do_save_checkpoint(
+    checkpoint_mgr: &CheckpointManager,
+    trainer: &PPOTrainer,
+    mean_reward: f32,
+    mean_episode_length: f32,
+    step_count: u64,
+) {
+    let meta = CheckpointMeta {
+        episode: trainer.total_episodes,
+        total_steps: step_count,
+        mean_reward,
+        mean_episode_length,
+        timestamp: chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string(),
+        config: trainer.config.clone(),
+    };
+    match checkpoint_mgr.save(&trainer.network, &meta) {
+        Ok(path) => log::info!("Checkpoint saved: {}", path.display()),
+        Err(e) => log::error!("Failed to save checkpoint: {}", e),
+    }
+}
 
 pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, seed: u64) {
     log::info!("Generating world terrain (seed={})...", seed);
     let base_terrain = Arc::new(BaseTerrain::generate(seed));
     log::info!("World generated. Starting training with {} environments.", num_envs);
 
-    if let Ok(mut s) = state.lock() {
+    let checkpoint_dir = {
+        let mut s = state.lock().unwrap();
         s.base_terrain = Some(base_terrain.clone());
-    }
+        s.checkpoint_dir.clone()
+    };
+
+    let checkpoint_mgr = CheckpointManager::with_limits(
+        checkpoint_dir,
+        20,
+        AUTO_SAVE_INTERVAL,
+    );
 
     let mut envs: Vec<TrainingEnv> = (0..num_envs)
         .map(|i| TrainingEnv::new(base_terrain.clone(), seed + i as u64 + 1000))
@@ -49,14 +82,15 @@ pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, 
     let mut current_ep_rewards = vec![0.0f32; num_envs];
     let mut current_ep_steps = vec![0u32; num_envs];
     let mut step_count: u64 = 0;
+    let mut last_auto_save_ep: u64 = 0;
 
     log::info!("Training loop started (LSTM, {} envs, {} rayon threads).",
         num_envs, rayon::current_num_threads());
 
     loop {
-        // Check stop/pause
+        // Check stop/pause + checkpoint load requests
         {
-            let s = match state.lock() {
+            let mut s = match state.lock() {
                 Ok(s) => s,
                 Err(_) => break,
             };
@@ -64,6 +98,27 @@ pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, 
             if s.is_paused {
                 drop(s);
                 std::thread::sleep(std::time::Duration::from_millis(100));
+                continue;
+            }
+
+            // Handle checkpoint load request
+            if let Some(path) = s.checkpoint_load_path.take() {
+                let load_path = PathBuf::from(&path);
+                drop(s); // Release lock during file I/O
+                match checkpoint_mgr.load(&load_path, &mut trainer.network) {
+                    Ok(meta) => {
+                        trainer.total_episodes = meta.episode;
+                        trainer.total_steps = meta.total_steps;
+                        last_auto_save_ep = meta.episode;
+                        trainer.init_states(num_envs);
+                        observations = envs.iter_mut().map(|env| env.reset()).collect();
+                        current_ep_rewards.fill(0.0);
+                        current_ep_steps.fill(0);
+                        log::info!("Loaded checkpoint from ep={}, reward={:.1}",
+                            meta.episode, meta.mean_reward);
+                    }
+                    Err(e) => log::error!("Failed to load checkpoint: {}", e),
+                }
                 continue;
             }
         }
@@ -133,22 +188,24 @@ pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, 
             }
         }
 
-        // 6. Update shared state
+        // 6. Compute stats for shared state + checkpoint decisions
+        let recent_r = if episode_rewards.len() > ROLLING_WINDOW {
+            &episode_rewards[episode_rewards.len() - ROLLING_WINDOW..]
+        } else { &episode_rewards };
+        let mean_reward = if recent_r.is_empty() { 0.0 }
+            else { recent_r.iter().sum::<f32>() / recent_r.len() as f32 };
+
+        let recent_l = if episode_lengths.len() > ROLLING_WINDOW {
+            &episode_lengths[episode_lengths.len() - ROLLING_WINDOW..]
+        } else { &episode_lengths };
+        let mean_length = if recent_l.is_empty() { 0.0 }
+            else { recent_l.iter().sum::<f32>() / recent_l.len() as f32 };
+
+        // 7. Check for manual save request
+        let mut should_save = false;
         if step_count % (STATS_UPDATE_INTERVAL * num_envs as u64) < num_envs as u64 {
             let elapsed = start_time.elapsed().as_secs_f64();
             let steps_per_sec = step_count as f32 / elapsed as f32;
-
-            let recent_r = if episode_rewards.len() > ROLLING_WINDOW {
-                &episode_rewards[episode_rewards.len() - ROLLING_WINDOW..]
-            } else { &episode_rewards };
-            let mean_reward = if recent_r.is_empty() { 0.0 }
-                else { recent_r.iter().sum::<f32>() / recent_r.len() as f32 };
-
-            let recent_l = if episode_lengths.len() > ROLLING_WINDOW {
-                &episode_lengths[episode_lengths.len() - ROLLING_WINDOW..]
-            } else { &episode_lengths };
-            let mean_length = if recent_l.is_empty() { 0.0 }
-                else { recent_l.iter().sum::<f32>() / recent_l.len() as f32 };
 
             if let Ok(mut s) = state.lock() {
                 s.stats = TrainingStats {
@@ -167,9 +224,9 @@ pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, 
                 }
 
                 s.live_bot_states = envs.iter().enumerate().map(|(i, env)| {
-                    let mut a = [0.0f32; 9];
+                    let mut a = [0.0f32; 8];
                     if let Some(act) = actions.get(i) {
-                        for (j, val) in act.iter().enumerate().take(9) { a[j] = *val; }
+                        for (j, val) in act.iter().enumerate().take(8) { a[j] = *val; }
                     }
                     LiveBotState {
                         pos: env.player_pos(),
@@ -181,8 +238,46 @@ pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, 
                         action: a,
                     }
                 }).collect();
+
+                // Snapshot preview bot's modified terrain for the 3D preview
+                let preview_idx = s.preview_bot.min(envs.len().saturating_sub(1));
+                s.preview_modified_chunks = envs[preview_idx].modified_terrain_chunks().clone();
+
+                // Check manual save request
+                if s.checkpoint_save_requested {
+                    s.checkpoint_save_requested = false;
+                    should_save = true;
+                }
             }
         }
+
+        // 8. Auto-save every 1000 episodes
+        if trainer.total_episodes > 0
+            && trainer.total_episodes >= last_auto_save_ep + AUTO_SAVE_INTERVAL
+        {
+            last_auto_save_ep = trainer.total_episodes;
+            should_save = true;
+        }
+
+        // 9. Execute checkpoint save (outside mutex lock)
+        if should_save {
+            do_save_checkpoint(&checkpoint_mgr, &trainer, mean_reward, mean_length, step_count);
+        }
+    }
+
+    // Final checkpoint on training stop
+    {
+        let recent_r = if episode_rewards.len() > ROLLING_WINDOW {
+            &episode_rewards[episode_rewards.len() - ROLLING_WINDOW..]
+        } else { &episode_rewards };
+        let mean_reward = if recent_r.is_empty() { 0.0 }
+            else { recent_r.iter().sum::<f32>() / recent_r.len() as f32 };
+        let recent_l = if episode_lengths.len() > ROLLING_WINDOW {
+            &episode_lengths[episode_lengths.len() - ROLLING_WINDOW..]
+        } else { &episode_lengths };
+        let mean_length = if recent_l.is_empty() { 0.0 }
+            else { recent_l.iter().sum::<f32>() / recent_l.len() as f32 };
+        do_save_checkpoint(&checkpoint_mgr, &trainer, mean_reward, mean_length, step_count);
     }
 
     log::info!("Training complete. {} episodes, {} steps in {:.1}s",

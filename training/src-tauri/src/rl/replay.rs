@@ -14,8 +14,8 @@ pub struct ReplayFrame {
     pub yaw: f32,
     /// Pitch angle in radians.
     pub pitch: f32,
-    /// All action values (8 continuous + 1 weapon index).
-    pub action: [f32; 9],
+    /// All action values (7 continuous + 1 weapon index).
+    pub action: [f32; 8],
     /// Selected weapon index.
     pub weapon: u8,
     /// Current health.
@@ -217,7 +217,6 @@ pub fn detect_strategies(frames: &[ReplayFrame]) -> Vec<String> {
     let mut saw_rocket_jump = false;
     let mut saw_tunnel = false;
     let mut saw_speed_boost = false;
-    let mut saw_slide_boost = false;
 
     for i in 1..frames.len() {
         let prev = &frames[i - 1];
@@ -251,16 +250,6 @@ pub fn detect_strategies(frames: &[ReplayFrame]) -> Vec<String> {
             }
         }
 
-        // "slide_boost": crouch action active while speed > 10
-        if !saw_slide_boost {
-            // action[6] is crouch (0-indexed: move_dir x2, look_dir x2, jump, sprint, crouch, fire)
-            let crouch_action = curr.action[6];
-            let horiz_speed = (curr.vel[0] * curr.vel[0] + curr.vel[2] * curr.vel[2]).sqrt();
-            if crouch_action > 0.5 && horiz_speed > 10.0 {
-                strategies.push("slide_boost".to_string());
-                saw_slide_boost = true;
-            }
-        }
     }
 
     // "wall_climb": multiple consecutive frames where bot is not on ground
