@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+
+# Rust build artifacts
+src-tauri/target/
+
+# Tauri generated
+src-tauri/gen/
+
+# Checkpoints and replays (large binary files)
+checkpoints/
+replays/
+
+# Lock files
+bun.lock
+
+# OS
+.DS_Store

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BitWars Neural Bot Training</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=JetBrains+Mono:wght@400;700&display=swap');
+      :root {
+        --font-pixel: 'Press Start 2P', monospace;
+        --font-mono: 'JetBrains Mono', monospace;
+        --bg-dark: #0a0a0a;
+        --bg-panel: #1a1a1a;
+        --border-color: #3a3a3a;
+        --text-primary: #e0e0e0;
+        --text-secondary: #888;
+        --accent-green: #00ff88;
+        --accent-red: #ff4444;
+        --accent-blue: #4488ff;
+        --accent-yellow: #ffaa00;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: var(--font-mono);
+        background: var(--bg-dark);
+        color: var(--text-primary);
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

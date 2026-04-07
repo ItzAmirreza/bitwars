@@ -1,0 +1,50 @@
+[package]
+name = "bitwars-training"
+version = "0.1.0"
+edition = "2021"
+description = "BitWars Neural Bot Training Environment"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"
+rayon = "1.10"
+parking_lot = "0.12"
+candle-core = "0.8"
+candle-nn = "0.8"
+log = "0.4"
+env_logger = "0.11"
+bincode = "1.3"
+chrono = { version = "0.4", features = ["serde"] }
+ctrlc = "3.4"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+# Optimize candle and rayon even in dev builds — they're 10-50x slower without
+[profile.dev.package.candle-core]
+opt-level = 3
+[profile.dev.package.candle-nn]
+opt-level = 3
+[profile.dev.package.rayon]
+opt-level = 3
+[profile.dev.package.rayon-core]
+opt-level = 3
+[profile.dev.package.half]
+opt-level = 3
+[profile.dev.package.gemm]
+opt-level = 3
+[profile.dev.package.gemm-common]
+opt-level = 3
+[profile.dev.package.gemm-f32]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = true
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
