@@ -115,25 +115,8 @@ pub fn check_vehicle_block_collision(
 fn destroy_vehicle_from_collision(ctx: &ReducerContext, vehicle: &Vehicle, entity: &Entity) {
     let vehicle_id = vehicle.entity_id;
 
-    // Clear input queue
-    for row in ctx
-        .db
-        .vehicle_input_cmd()
-        .idx_vehicle_input_by_vehicle()
-        .filter(&vehicle_id)
-    {
-        ctx.db.vehicle_input_cmd().id().delete(&row.id);
-    }
-
-    // Dismount pilot
-    if let Some(pilot_id) = vehicle.pilot_identity {
-        if let Some(player) = ctx.db.player().identity().find(pilot_id) {
-            let dismounted = dismount_player_internal(ctx, player, true);
-            ctx.db.player().identity().update(dismounted.clone());
-            init_movement_state(ctx, dismounted.identity, &dismounted.pos);
-            sync_player_entity(ctx, &dismounted);
-        }
-    }
+    clear_vehicle_input_queue(ctx, vehicle_id);
+    dismount_all_vehicle_occupants(ctx, vehicle_id, true);
 
     // Emit explosion at vehicle position
     ctx.db.explosion_event().insert(ExplosionEvent {
@@ -177,6 +160,13 @@ fn collision_half_extents(entity: &Entity, scale: f32) -> (f32, f32, f32, f32) {
             aa_hitbox_half_y() * scale,
             aa_hitbox_half_z() * scale,
             aa_hitbox_center_y(),
+        )
+    } else if entity.subtype == vehicle_type_apc() {
+        (
+            apc_hitbox_half_x() * scale,
+            apc_hitbox_half_y() * scale,
+            apc_hitbox_half_z() * scale,
+            apc_hitbox_center_y(),
         )
     } else {
         (

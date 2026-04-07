@@ -2,7 +2,6 @@ import { DbConnection } from "./module_bindings";
 import type { SubscriptionEventContext, ErrorContext } from "./module_bindings";
 import {
   ENTITY_KINDS,
-  VEHICLE_TYPES,
   WORLD as WORLD_CONFIG,
 } from "./shared-config";
 import { getConnectionToken, saveConnectionToken } from "./auth";
@@ -270,9 +269,8 @@ export function connect(
             // Keep vehicle/entity streams stable for prediction + fire origin.
             // These must not churn with AOI chunk resubscriptions.
             `SELECT * FROM entity WHERE kind = ${ENTITY_KINDS.Vehicle}`,
-            `SELECT * FROM vehicle WHERE vehicle_type = ${VEHICLE_TYPES.Helicopter}`,
-            `SELECT * FROM vehicle WHERE vehicle_type = ${VEHICLE_TYPES.FighterJet}`,
-            `SELECT * FROM vehicle WHERE vehicle_type = ${VEHICLE_TYPES.AntiAir}`,
+            "SELECT * FROM vehicle",
+            "SELECT * FROM vehicle_occupant",
           ]) as { unsubscribe: () => void; isEnded: () => boolean };
 
         setWorldChunkSubscription(

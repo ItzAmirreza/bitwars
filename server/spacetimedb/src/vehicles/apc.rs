@@ -1,6 +1,7 @@
-// ── Helicopter Physics ──
-// All helicopter-specific physics simulation.
-// Extracted so adding a tank/boat/plane is just a new file.
+// ── APC (Armored Personnel Carrier) Physics ──
+// Heavy ground vehicle with tread-based movement. Cannot fly.
+// Strong collision resistance — plows through blocks with minimal speed loss.
+// Driver cannot fire weapons; this is a transport/ramming vehicle.
 
 use std::f32::consts::TAU;
 
@@ -12,9 +13,8 @@ use crate::tables::*;
 use crate::types::*;
 use crate::worldgen::{WORLD_SIZE_X, WORLD_SIZE_Z};
 
-/// Simulate one tick of helicopter physics.
-/// Modifies vehicle + entity in DB, pushes mounted player updates to `mounted_updates`.
-pub fn tick_helicopter(
+/// Simulate one tick of APC ground vehicle physics.
+pub fn tick_apc(
     ctx: &ReducerContext,
     mut vehicle: Vehicle,
     mut entity: Entity,
@@ -25,7 +25,7 @@ pub fn tick_helicopter(
     let next_sim_tick = entity.sim_tick.saturating_add(VEHICLE_SIM_TICK_INCREMENT);
     let entity_id = vehicle.entity_id;
 
-    // Eject dead/offline pilots
+    // ── Eject dead/offline pilots ──
     if let Some(pilot_id) = vehicle.pilot_identity {
         match ctx.db.player().identity().find(pilot_id) {
             Some(pilot) if pilot.online && pilot.health > 0 => {}
@@ -51,7 +51,7 @@ pub fn tick_helicopter(
 
     let has_pilot = vehicle.pilot_identity.is_some();
 
-    // Consume exactly one queued command per simulation tick.
+    // ── Consume one queued command per tick ──
     if has_pilot {
         if let Some(cmd) = pop_next_vehicle_input(ctx, entity_id) {
             vehicle.input_forward = clamp_vehicle_axis(cmd.forward);
@@ -74,60 +74,9 @@ pub fn tick_helicopter(
     } else {
         0.0
     };
-    let strafe_input = if has_pilot {
-        clamp_vehicle_axis(vehicle.input_strafe)
-    } else {
-        0.0
-    };
-    let lift_input = if has_pilot {
-        clamp_vehicle_axis(vehicle.input_lift)
-    } else {
-        0.0
-    };
 
-    // ── Rotation ──
-    let yaw_step = yaw_input * heli_max_yaw_rate() * dt;
-    let target_pitch = if has_pilot {
-        -forward_input * 0.25
-    } else {
-        0.0
-    };
-    let pitch_step = (target_pitch - entity.rot.pitch)
-        .clamp(-heli_max_pitch_rate() * dt, heli_max_pitch_rate() * dt);
-    entity.rot.pitch += pitch_step;
-
-    // ── Velocity ──
-    let forward_speed = forward_input * heli_cruise_speed();
-    let strafe_speed = strafe_input * heli_strafe_speed();
-    let lift_speed = lift_input * heli_lift_speed();
-
-    let fx = -entity.rot.yaw.sin();
-    let fz = -entity.rot.yaw.cos();
-    let rx = entity.rot.yaw.cos();
-    let rz = -entity.rot.yaw.sin();
-
-    let target_vx = fx * forward_speed + rx * strafe_speed;
-    let target_vz = fz * forward_speed + rz * strafe_speed;
-    let target_vy = if has_pilot { lift_speed } else { -2.2 };
-
-    let horiz_blend = if has_pilot { heli_horiz_blend() } else { 0.09 };
-    let vert_blend = if has_pilot { heli_vert_blend() } else { 0.06 };
-    entity.vel.x += (target_vx - entity.vel.x) * horiz_blend;
-    entity.vel.z += (target_vz - entity.vel.z) * horiz_blend;
-    entity.vel.y += (target_vy - entity.vel.y) * vert_blend;
-
-    let drag = if has_pilot {
-        heli_drag_piloted()
-    } else {
-        heli_drag_unpiloted()
-    };
-    entity.vel.x *= drag;
-    entity.vel.z *= drag;
-    if !has_pilot {
-        entity.vel.y *= 0.995;
-    }
-
-    // ── Yaw wrap ──
+    // ── Rotation (treads steer) ──
+    let yaw_step = yaw_input * apc_max_yaw_rate() * dt;
     entity.rot.yaw += yaw_step;
     if entity.rot.yaw > std::f32::consts::PI {
         entity.rot.yaw -= TAU;
@@ -135,6 +84,30 @@ pub fn tick_helicopter(
     if entity.rot.yaw < -std::f32::consts::PI {
         entity.rot.yaw += TAU;
     }
+
+    // ── Velocity (tread-driven, forward/backward only, no strafing) ──
+    let forward_speed = forward_input * apc_cruise_speed();
+
+    let fx = -entity.rot.yaw.sin();
+    let fz = -entity.rot.yaw.cos();
+
+    let target_vx = fx * forward_speed;
+    let target_vz = fz * forward_speed;
+
+    let horiz_blend = if has_pilot { apc_horiz_blend() } else { 0.08 };
+    entity.vel.x += (target_vx - entity.vel.x) * horiz_blend;
+    entity.vel.z += (target_vz - entity.vel.z) * horiz_blend;
+
+    // Gravity
+    entity.vel.y -= apc_gravity() * dt;
+
+    let drag = if has_pilot {
+        apc_drag_piloted()
+    } else {
+        apc_drag_unpiloted()
+    };
+    entity.vel.x *= drag;
+    entity.vel.z *= drag;
 
     // ── Position integration ──
     let mut next_pos = Vec3 {
@@ -169,7 +142,6 @@ pub fn tick_helicopter(
     entity.pos = next_pos;
 
     // ── Block collision (BEFORE ground clamping) ──
-    // Must run first so destroyed blocks don't push the vehicle upward via ground height.
     let (_blocks_hit, destroyed) =
         super::collision::check_vehicle_block_collision(ctx, &mut entity, &mut vehicle, terrain);
     if destroyed {
@@ -177,42 +149,32 @@ pub fn tick_helicopter(
     }
 
     // ── Ground collision ──
-    // After block collision: terrain cache is invalidated, so ground height
-    // now reflects the hole the vehicle punched through.
-    let ground =
-        terrain.helicopter_ground_rest_height_below(ctx, entity.pos.x, entity.pos.z, entity.pos.y);
-    let min_alt = ground + heli_min_altitude_from_ground();
+    // Scan downward from current Y to match client prediction (which also scans from footY).
+    let ground = terrain.ground_vehicle_rest_height_below(ctx, entity.pos.x, entity.pos.z, entity.pos.y);
+    let min_alt = ground + apc_min_altitude();
     if entity.pos.y < min_alt {
         entity.pos.y = min_alt;
         if entity.vel.y < 0.0 {
-            entity.vel.y *= -0.08;
-        }
-        if !has_pilot {
             entity.vel.y = 0.0;
-            entity.vel.x *= 0.93;
-            entity.vel.z *= 0.93;
         }
     }
-    if entity.pos.y > heli_max_altitude() {
-        entity.pos.y = heli_max_altitude();
-        if entity.vel.y > 0.0 {
-            entity.vel.y *= 0.15;
-        }
+    if entity.pos.y > apc_max_altitude() {
+        entity.pos.y = apc_max_altitude();
     }
+
+    // Keep pitch level (ground vehicle)
+    entity.rot.pitch = 0.0;
 
     entity.sim_tick = next_sim_tick;
     entity.updated_at = ctx.timestamp;
 
-    // ── Rotor spin visual ──
-    let spin_target = if has_pilot {
-        10.0 + (forward_input.abs() + strafe_input.abs()) * 4.0 + lift_input.abs() * 2.0
-    } else {
-        2.4
-    };
-    vehicle.rotor_spin = (vehicle.rotor_spin + spin_target * dt) % TAU;
+    // ── Tread spin visual (reusing rotor_spin field) ──
+    let speed_sq =
+        entity.vel.x * entity.vel.x + entity.vel.z * entity.vel.z;
+    let speed = speed_sq.sqrt();
+    let spin_rate = if has_pilot { speed * 0.3 } else { 0.0 };
+    vehicle.rotor_spin = (vehicle.rotor_spin + spin_rate * dt) % TAU;
 
-    // Stamp the current input sequence consumed by this physics tick.
-    // If no new command arrived, this remains the last consumed sequence.
     vehicle.sim_tick = next_sim_tick;
     vehicle.sim_updated_at = ctx.timestamp;
 

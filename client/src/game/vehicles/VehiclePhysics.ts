@@ -29,6 +29,7 @@ import {
   HELICOPTER,
   FIGHTER_JET,
   ANTI_AIR,
+  APC,
   WORLD,
   VEHICLE_BLOCK_COLLISION,
 } from '../../shared-config';
@@ -360,6 +361,91 @@ export function tickAntiAir(
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch: 0 };
 }
 
+// ── APC physics (mirrors server/vehicles/apc.rs) ──
+
+export function tickAPC(
+  s: PhysicsState,
+  input: PhysicsInput,
+  gnd: GroundHeightFn,
+  blockQuery?: BlockQueryFn,
+  collisionOut?: BlockCollisionResult,
+): PhysicsState {
+  let { px, py, pz, vx, vy, vz, yaw } = s;
+
+  const fwd = clamp(input.forward, -1, 1);
+  const ywIn = clamp(input.yaw, -1, 1);
+
+  // Rotation (treads steer)
+  const yawStep = ywIn * APC.maxYawRate * TICK_DT;
+  yaw += yawStep;
+  if (yaw > PI) yaw -= TAU;
+  if (yaw < -PI) yaw += TAU;
+
+  // Velocity (tread-driven, forward/backward only)
+  const fwdSpeed = fwd * APC.cruiseSpeed;
+
+  const fx = -Math.sin(yaw);
+  const fz = -Math.cos(yaw);
+
+  const targetVx = fx * fwdSpeed;
+  const targetVz = fz * fwdSpeed;
+
+  const hb = APC.horizBlend;
+  vx += (targetVx - vx) * hb;
+  vz += (targetVz - vz) * hb;
+
+  // Gravity
+  vy -= APC.gravity * TICK_DT;
+
+  const drag = APC.dragPiloted;
+  vx *= drag;
+  vz *= drag;
+
+  let nx = px + vx * TICK_DT;
+  let ny = py + vy * TICK_DT;
+  let nz = pz + vz * TICK_DT;
+
+  // World bounds
+  if (nx < WORLD_MIN_X) { nx = WORLD_MIN_X; vx = Math.abs(vx) * BOUNDS_BOUNCE; }
+  if (nx > WORLD_MAX_X) { nx = WORLD_MAX_X; vx = -Math.abs(vx) * BOUNDS_BOUNCE; }
+  if (nz < WORLD_MIN_Z) { nz = WORLD_MIN_Z; vz = Math.abs(vz) * BOUNDS_BOUNCE; }
+  if (nz > WORLD_MAX_Z) { nz = WORLD_MAX_Z; vz = -Math.abs(vz) * BOUNDS_BOUNCE; }
+
+  // Block collision (BEFORE ground clamping)
+  if (blockQuery) {
+    const col = checkBlockCollision(
+      nx, ny, nz,
+      APC.hitbox.halfX, APC.hitbox.halfY, APC.hitbox.halfZ,
+      APC.hitbox.centerY,
+      vx, vy, vz,
+      blockQuery,
+    );
+    if (col.count > 0) {
+      // APC has stronger collision resistance — uses its own speed retain
+      const f = Math.pow(APC.collisionSpeedRetain, col.count);
+      vx *= f; vy *= f; vz *= f;
+      if (collisionOut) {
+        collisionOut.count += col.count;
+        collisionOut.cx = col.cx; collisionOut.cy = col.cy; collisionOut.cz = col.cz;
+      }
+    }
+  }
+
+  // Ground collision
+  const ground = gnd(nx, nz, ny);
+  const minAlt = ground + APC.minAltitude;
+  if (ny < minAlt) {
+    ny = minAlt;
+    if (vy < 0) vy = 0;
+  }
+  if (ny > APC.maxAltitude) {
+    ny = APC.maxAltitude;
+  }
+
+  // pitch stays 0 (ground vehicle)
+  return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch: 0 };
+}
+
 // ── Input history entry ──
 
 interface InputEntry {
@@ -574,6 +660,9 @@ export class VehiclePrediction {
     }
     if (this.vehicleType === VEHICLE_TYPES.AntiAir) {
       return tickAntiAir(s, input, this.groundFn);
+    }
+    if (this.vehicleType === VEHICLE_TYPES.APC) {
+      return tickAPC(s, input, this.groundFn, this.blockQueryFn, collisionOut);
     }
     return tickHelicopter(s, input, this.groundFn, this.blockQueryFn, collisionOut);
   }

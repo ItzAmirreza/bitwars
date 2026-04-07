@@ -156,6 +156,25 @@ pub struct Vehicle {
     pub last_input_at: Timestamp,
 }
 
+/// Occupant-to-seat mapping for mounted players.
+#[derive(Clone)]
+#[table(
+    accessor = vehicle_occupant,
+    public,
+    index(accessor = idx_vehicle_occupant_by_vehicle, btree(columns = [vehicle_id])),
+    index(
+        accessor = idx_vehicle_occupant_by_vehicle_seat,
+        btree(columns = [vehicle_id, seat_index])
+    )
+)]
+pub struct VehicleOccupant {
+    #[primary_key]
+    pub identity: Identity,
+    pub vehicle_id: u64,
+    pub seat_index: u8,
+    pub mounted_at: Timestamp,
+}
+
 /// Small FIFO queue of pilot inputs to guarantee deterministic one-command-
 /// per-tick processing on the server.
 #[derive(Clone)]

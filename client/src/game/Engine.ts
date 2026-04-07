@@ -118,6 +118,7 @@ export interface EngineState {
   vehicleThrottle: number; // 0..1 for jet throttle
   vehicleReloading: boolean;
   vehicleWeaponSlots: { name: string; color: string }[];
+  isVehiclePilot: boolean;
   aaTargets: {
     screenX: number;
     screenY: number;
@@ -357,6 +358,7 @@ export class Engine {
   private localIdentity: string | null = null;
   private localPlayerEntityId = 0n;
   private mountedVehicleId = 0;
+  private wasMountedVehiclePilot = false;
   private health = 100;
   private kills = 0;
   private deaths = 0;
@@ -1467,6 +1469,81 @@ export class Engine {
     return true;
   }
 
+  private getVehicleSlotMaxAmmo(slot: number): number {
+    const resolvedIdx = this.vehicleManager.getResolvedWeaponIndexForSlot(slot);
+    return resolvedIdx >= 0 ? (VEHICLE_WEAPONS[resolvedIdx]?.maxAmmo ?? 0) : 0;
+  }
+
+  private seedMountedVehiclePoseFromServer(): void {
+    const pose =
+      this.vehicleManager.getMountedVehiclePoseRaw()
+      ?? this.vehicleManager.getMountedVehiclePose();
+    if (!pose) return;
+
+    const entity = this.vehicleManager.findEntityRow(this.mountedVehicleId);
+    const vel = entity?.vel ?? { x: 0, y: 0, z: 0 };
+    this.vehicleManager.localLastServerPos.set(pose.x, pose.y, pose.z);
+    this.vehicleManager.localLastServerVel.set(
+      Number(vel.x ?? 0),
+      Number(vel.y ?? 0),
+      Number(vel.z ?? 0),
+    );
+    this.vehicleManager.localLastServerYaw = pose.yaw;
+    this.vehicleManager.localLastServerPitch = pose.pitch;
+    this.vehicleManager.localLastServerTime = performance.now();
+  }
+
+  private initializeMountedVehicleState(): void {
+    this.vehicleManager.vehicleWeaponIndex = 0;
+    this.vehicleManager.lastVehicleFireAt = 0;
+    this.vehicleManager.vehicleReloadingUntil[0] = 0;
+    this.vehicleManager.vehicleReloadingUntil[1] = 0;
+    this.vehicleManager.vehicleReloadingUntil[2] = 0;
+    this.vehicleManager.vehicleCameraDistance = this.vehicleManager.CAMERA_DISTANCE;
+
+    const vRow = this.vehicleManager.getVehicleRow(this.mountedVehicleId);
+    const maxAmmo0 = this.getVehicleSlotMaxAmmo(0);
+    const maxAmmo1 = this.getVehicleSlotMaxAmmo(1);
+    const maxAmmo2 = this.getVehicleSlotMaxAmmo(2);
+
+    if (vRow) {
+      const serverWeaponType = Number(vRow.weaponType ?? 0);
+      if (
+        Number.isFinite(serverWeaponType)
+        && serverWeaponType >= 0
+        && serverWeaponType < 3
+      ) {
+        this.vehicleManager.vehicleWeaponIndex = serverWeaponType;
+      }
+      this.vehicleManager.vehicleAmmo[0] = Number(vRow.weaponAmmoPrimary ?? maxAmmo0);
+      this.vehicleManager.vehicleAmmo[1] = Number(vRow.weaponAmmoSecondary ?? maxAmmo1);
+      this.vehicleManager.vehicleAmmo[2] = Number(vRow.weaponAmmoTertiary ?? maxAmmo2);
+    } else {
+      this.vehicleManager.vehicleAmmo[0] = maxAmmo0;
+      this.vehicleManager.vehicleAmmo[1] = maxAmmo1;
+      this.vehicleManager.vehicleAmmo[2] = maxAmmo2;
+    }
+  }
+
+  private syncMountedPilotRoleState(): void {
+    const isPilot =
+      this.mountedVehicleId !== 0 && this.vehicleManager.isMountedVehiclePilot();
+    if (isPilot === this.wasMountedVehiclePilot) return;
+
+    this.wasMountedVehiclePilot = isPilot;
+    this.vehicleManager.resetLocalPilotSmoothing();
+    if (isPilot) {
+      this.seedMountedVehiclePoseFromServer();
+      this.initializeMountedVehicleState();
+    } else {
+      this.vehicleManager.lastVehicleFireAt = 0;
+      this.vehicleManager.vehicleReloadingUntil[0] = 0;
+      this.vehicleManager.vehicleReloadingUntil[1] = 0;
+      this.vehicleManager.vehicleReloadingUntil[2] = 0;
+      this.vehicleManager.jetThrottle = 0;
+    }
+  }
+
   // ── INPUT ──
 
   private onMouseDown = (e: MouseEvent): void => {
@@ -1474,8 +1551,11 @@ export class Engine {
     if (this.sandboxMotionEnabled) return;
     if (e.button === 0 && this.controls.locked) {
       this.mouseDown = true;
-      if (this.mountedVehicleId !== 0) this.tryVehicleFire();
-      else this.tryFire();
+      if (this.mountedVehicleId !== 0 && this.vehicleManager.isMountedVehiclePilot()) {
+        this.tryVehicleFire();
+      } else {
+        this.tryFire();
+      }
     }
     if (e.button === 2 && this.controls.locked && this.mountedVehicleId === 0) {
       this.toggleSniperScope();
@@ -2011,7 +2091,9 @@ export class Engine {
     }
     if (e.code === "KeyR") {
       if (this.mountedVehicleId !== 0) {
-        this.startVehicleReload();
+        if (this.vehicleManager.isMountedVehiclePilot()) {
+          this.startVehicleReload();
+        }
         return;
       }
       this.weapons.reload(); // Client prediction
@@ -2021,10 +2103,12 @@ export class Engine {
     }
     if (e.code === "Digit1" || e.code === "Digit2" || e.code === "Digit3") {
       if (this.mountedVehicleId !== 0) {
+        if (!this.vehicleManager.isMountedVehiclePilot()) {
+          return;
+        }
         // Vehicle weapon switching: 1/2/3
         const slot = parseInt(e.code.charAt(5), 10) - 1;
-        const vTypeId = this.vehicleManager.getMountedVehicleType()?.typeId;
-        const maxSlots = vTypeId === 1 ? 3 : vTypeId === 2 ? 1 : 2; // jet=3, AA=1, heli=2
+        const maxSlots = this.vehicleManager.getMountedWeaponSlotCount();
         if (
           slot >= 0 &&
           slot < maxSlots &&
@@ -2714,6 +2798,7 @@ export class Engine {
           if (wasMounted !== (this.mountedVehicleId !== 0)) {
             this.unscopeSniper();
             this.vehicleManager.resetLocalPilotSmoothing();
+            this.wasMountedVehiclePilot = false;
             if (this.mountedVehicleId !== 0) {
               const pose = this.vehicleManager.getMountedVehiclePose();
               if (pose) {
@@ -2729,49 +2814,9 @@ export class Engine {
                   pose.y,
                   pose.z,
                 );
-                this.vehicleManager.localLastServerVel.set(0, 0, 0);
-                this.vehicleManager.localLastServerYaw = pose.yaw;
-                this.vehicleManager.localLastServerPitch = pose.pitch;
-                this.vehicleManager.localLastServerTime = performance.now();
               }
-              // Reset vehicle weapon state on mount
-              this.vehicleManager.vehicleWeaponIndex = 0;
-              this.vehicleManager.lastVehicleFireAt = 0;
-              this.vehicleManager.vehicleReloadingUntil[0] = 0;
-              this.vehicleManager.vehicleReloadingUntil[1] = 0;
-              this.vehicleManager.vehicleReloadingUntil[2] = 0;
-              this.vehicleManager.vehicleCameraDistance =
-                this.vehicleManager.CAMERA_DISTANCE;
-              const vRow = this.vehicleManager.getVehicleRow(
-                this.mountedVehicleId,
-              );
-              // Resolve weapon indices based on vehicle type for correct maxAmmo
-              const wep0Idx =
-                this.vehicleManager.getResolvedWeaponIndexForSlot(0);
-              const wep1Idx =
-                this.vehicleManager.getResolvedWeaponIndexForSlot(1);
-              const wep2Idx =
-                this.vehicleManager.getResolvedWeaponIndexForSlot(2);
-              const maxAmmo0 =
-                VEHICLE_WEAPONS[wep0Idx]?.maxAmmo ?? VEHICLE_WEAPONS[0].maxAmmo;
-              const maxAmmo1 =
-                VEHICLE_WEAPONS[wep1Idx]?.maxAmmo ?? VEHICLE_WEAPONS[1].maxAmmo;
-              const maxAmmo2 = VEHICLE_WEAPONS[wep2Idx]?.maxAmmo ?? 0;
-              if (vRow) {
-                this.vehicleManager.vehicleAmmo[0] = Number(
-                  vRow.weaponAmmoPrimary ?? maxAmmo0,
-                );
-                this.vehicleManager.vehicleAmmo[1] = Number(
-                  vRow.weaponAmmoSecondary ?? maxAmmo1,
-                );
-                this.vehicleManager.vehicleAmmo[2] = Number(
-                  vRow.weaponAmmoTertiary ?? maxAmmo2,
-                );
-              } else {
-                this.vehicleManager.vehicleAmmo[0] = maxAmmo0;
-                this.vehicleManager.vehicleAmmo[1] = maxAmmo1;
-                this.vehicleManager.vehicleAmmo[2] = maxAmmo2;
-              }
+              this.seedMountedVehiclePoseFromServer();
+              this.initializeMountedVehicleState();
             } else {
               // Dismounting — snap camera to server player position so infantry
               // controls start from the correct location (not the 3rd-person offset).
@@ -3280,6 +3325,7 @@ export class Engine {
         // ── Dismount local player if in vehicle ──
         if (this.mountedVehicleId !== 0) {
           this.mountedVehicleId = 0;
+          this.wasMountedVehiclePilot = false;
           this.vehicleManager.resetLocalPilotSmoothing();
           this.vehicleManager.vehiclePilotYaw = 0;
           this.vehicleManager.vehiclePilotPitch = 0;
@@ -3904,6 +3950,10 @@ export class Engine {
     this.remotePlayers.interpolateAll(delta);
     const afterRemotePlayersMs = performance.now();
 
+    if (this.mountedVehicleId !== 0) {
+      this.syncMountedPilotRoleState();
+    }
+
     // Vehicle per-frame update FIRST so mesh positions are current before camera sync.
     // Old order (camera → mesh update) caused one-frame lag on the camera.
     this.vehicleManager.updatePerFrame(delta);
@@ -3911,7 +3961,11 @@ export class Engine {
     if (this.mountedVehicleId !== 0) {
       this.vehicleManager.syncMountedCameraToVehicle();
       this.vehicleManager.syncVehicleInput();
-      if ((this.mouseDown || this.autoFireHeld) && this.controls.locked) {
+      if (
+        (this.mouseDown || this.autoFireHeld)
+        && this.controls.locked
+        && this.vehicleManager.isMountedVehiclePilot()
+      ) {
         this.tryVehicleFire();
       }
     }
@@ -4128,7 +4182,9 @@ export class Engine {
     }
 
     // Vehicle reload timer
-    if (this.mountedVehicleId !== 0) this.tickVehicleReload();
+    if (this.mountedVehicleId !== 0 && this.vehicleManager.isMountedVehiclePilot()) {
+      this.tickVehicleReload();
+    }
 
     // Weapon switch via scroll
     if (this.weapons.currentWeapon !== this.lastWeaponIndex) {
@@ -4363,6 +4419,8 @@ export class Engine {
     let vehicleSpeed = 0;
     let nearVehicle = false;
     let nearVehicleName: string | null = null;
+    const isVehiclePilot =
+      this.mountedVehicleId !== 0 && this.vehicleManager.isMountedVehiclePilot();
 
     if (this.mountedVehicleId !== 0) {
       const vRow = this.vehicleManager.getVehicleRow(this.mountedVehicleId);
@@ -4392,7 +4450,11 @@ export class Engine {
           this.vehicleManager.vehicleAmmo[2] = serverAmmoTertiary;
         // Sync weapon type from server
         const serverWeaponType = Number(vRow.weaponType ?? 0);
-        if (Number.isFinite(serverWeaponType) && serverWeaponType < 3) {
+        if (
+          Number.isFinite(serverWeaponType)
+          && serverWeaponType >= 0
+          && serverWeaponType < 3
+        ) {
           this.vehicleManager.vehicleWeaponIndex = serverWeaponType;
         }
       }
@@ -4410,9 +4472,50 @@ export class Engine {
       nearVehicleName = nearName;
     }
 
-    const resolvedVehWepIdx =
-      this.vehicleManager.getResolvedVehicleWeaponIndex();
-    const curVehWep = VEHICLE_WEAPONS[resolvedVehWepIdx];
+    const resolvedVehWepIdx = isVehiclePilot
+      ? this.vehicleManager.getResolvedVehicleWeaponIndex()
+      : -1;
+    const curVehWep =
+      resolvedVehWepIdx >= 0 ? VEHICLE_WEAPONS[resolvedVehWepIdx] : undefined;
+    const vehicleWeaponSlots = (() => {
+      if (!isVehiclePilot) {
+        return [];
+      }
+      const mountedType = this.vehicleManager.getMountedVehicleType();
+      const isJet = mountedType?.name === "Fighter Jet";
+      const isAA = mountedType?.typeId === VEHICLE_TYPES.AntiAir;
+      const isAPC = mountedType?.typeId === VEHICLE_TYPES.APC;
+      if (isAPC) {
+        return [];
+      }
+      if (isAA) {
+        const idx = this.vehicleManager.getResolvedWeaponIndexForSlot(0);
+        return idx >= 0
+          ? [{
+              name: VEHICLE_WEAPONS[idx]?.name ?? "",
+              color: VEHICLE_WEAPONS[idx]?.color ?? "#fff",
+            }]
+          : [];
+      }
+      const slots: { name: string; color: string }[] = [];
+      for (let slot = 0; slot < 2; slot++) {
+        const idx = this.vehicleManager.getResolvedWeaponIndexForSlot(slot);
+        if (idx >= 0) {
+          slots.push({
+            name: VEHICLE_WEAPONS[idx]?.name ?? "",
+            color: VEHICLE_WEAPONS[idx]?.color ?? "#fff",
+          });
+        }
+      }
+      if (isJet) {
+        const idx = this.vehicleManager.getResolvedWeaponIndexForSlot(2);
+        if (idx >= 0) {
+          const wep = VEHICLE_WEAPONS[idx];
+          if (wep) slots.push({ name: wep.name, color: wep.color });
+        }
+      }
+      return slots;
+    })();
 
     this.onStateChange({
       weapon: this.weapons.currentWeapon,
@@ -4444,69 +4547,22 @@ export class Engine {
       vehicleHealth,
       vehicleMaxHealth,
       vehicleWeapon: this.vehicleManager.vehicleWeaponIndex,
-      vehicleWeaponName: curVehWep?.name ?? "",
-      vehicleAmmo:
-        this.vehicleManager.vehicleAmmo[
-          this.vehicleManager.vehicleWeaponIndex
-        ] ?? 0,
-      vehicleMaxAmmo: curVehWep?.maxAmmo ?? 0,
+      vehicleWeaponName: isVehiclePilot ? (curVehWep?.name ?? "") : "",
+      vehicleAmmo: isVehiclePilot
+        ? (this.vehicleManager.vehicleAmmo[
+            this.vehicleManager.vehicleWeaponIndex
+          ] ?? 0)
+        : 0,
+      vehicleMaxAmmo: isVehiclePilot ? (curVehWep?.maxAmmo ?? 0) : 0,
       vehicleSpeed,
       vehicleThrottle: this.vehicleManager.jetThrottle,
       vehicleReloading:
-        this.mountedVehicleId !== 0 &&
+        isVehiclePilot &&
         this.vehicleManager.vehicleReloadingUntil[
           this.vehicleManager.vehicleWeaponIndex
         ] > performance.now(),
-      vehicleWeaponSlots: (() => {
-        const mountedType = this.vehicleManager.getMountedVehicleType();
-        const isJet = mountedType?.name === "Fighter Jet";
-        const isAA = mountedType?.typeId === VEHICLE_TYPES.AntiAir;
-        if (isAA) {
-          // AA has only 1 weapon slot (CRAM)
-          return [
-            {
-              name:
-                VEHICLE_WEAPONS[
-                  this.vehicleManager.getResolvedWeaponIndexForSlot(0)
-                ]?.name ?? "",
-              color:
-                VEHICLE_WEAPONS[
-                  this.vehicleManager.getResolvedWeaponIndexForSlot(0)
-                ]?.color ?? "#fff",
-            },
-          ];
-        }
-        const slots = [
-          {
-            name:
-              VEHICLE_WEAPONS[
-                this.vehicleManager.getResolvedWeaponIndexForSlot(0)
-              ]?.name ?? "",
-            color:
-              VEHICLE_WEAPONS[
-                this.vehicleManager.getResolvedWeaponIndexForSlot(0)
-              ]?.color ?? "#fff",
-          },
-          {
-            name:
-              VEHICLE_WEAPONS[
-                this.vehicleManager.getResolvedWeaponIndexForSlot(1)
-              ]?.name ?? "",
-            color:
-              VEHICLE_WEAPONS[
-                this.vehicleManager.getResolvedWeaponIndexForSlot(1)
-              ]?.color ?? "#fff",
-          },
-        ];
-        if (isJet) {
-          const wep2 =
-            VEHICLE_WEAPONS[
-              this.vehicleManager.getResolvedWeaponIndexForSlot(2)
-            ];
-          if (wep2) slots.push({ name: wep2.name, color: wep2.color });
-        }
-        return slots;
-      })(),
+      vehicleWeaponSlots,
+      isVehiclePilot,
       aaTargets: this.vehicleManager.getAATargets(
         this.camera,
         ANTI_AIR.trackingRange,

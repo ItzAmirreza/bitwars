@@ -112,3 +112,16 @@ pub fn trim_vehicle_input_queue(ctx: &ReducerContext, vehicle_id: u64) {
         ctx.db.vehicle_input_cmd().id().delete(&row.id);
     }
 }
+
+pub fn clear_vehicle_input_queue(ctx: &ReducerContext, vehicle_id: u64) {
+    let row_ids: Vec<u64> = ctx
+        .db
+        .vehicle_input_cmd()
+        .idx_vehicle_input_by_vehicle()
+        .filter(&vehicle_id)
+        .map(|row| row.id)
+        .collect();
+    for row_id in row_ids {
+        ctx.db.vehicle_input_cmd().id().delete(&row_id);
+    }
+}

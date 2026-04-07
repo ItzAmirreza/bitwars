@@ -10,7 +10,6 @@ use spacetimedb::ReducerContext;
 use crate::constants::*;
 use crate::helpers::*;
 use crate::tables::*;
-use crate::types::*;
 
 /// Simulate one tick of anti-air vehicle physics.
 pub fn tick_anti_air(
@@ -76,7 +75,7 @@ pub fn tick_anti_air(
     // Ground snap (surface_height is the top solid block Y; +1.0 is the
     // walkable top surface where the AA base should rest).
     let ground =
-        terrain.ground_surface_height(ctx, entity.pos.x, entity.pos.z) + aa_min_altitude() + 1.0;
+        terrain.ground_vehicle_rest_height(ctx, entity.pos.x, entity.pos.z) + aa_min_altitude();
     entity.pos.y = ground;
 
     // Keep pitch level
@@ -95,19 +94,5 @@ pub fn tick_anti_air(
     ctx.db.entity().id().update(entity.clone());
     ctx.db.vehicle().entity_id().update(vehicle.clone());
 
-    // ── Mounted pilot position sync ──
-    if let Some(pilot_id) = vehicle.pilot_identity {
-        if let Some(pilot) = ctx.db.player().identity().find(pilot_id) {
-            mounted_updates.push(Player {
-                pos: Vec3 {
-                    x: entity.pos.x,
-                    y: entity.pos.y + aa_pilot_seat_height(),
-                    z: entity.pos.z,
-                },
-                vel: entity.vel.clone(),
-                spawn_protected: false,
-                ..pilot
-            });
-        }
-    }
+    sync_vehicle_occupants(ctx, &vehicle, &entity, mounted_updates);
 }

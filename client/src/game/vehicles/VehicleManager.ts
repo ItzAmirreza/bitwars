@@ -32,6 +32,7 @@ import type {
 import { HelicopterType } from './HelicopterType';
 import { FighterJetType } from './FighterJetType';
 import { AntiAirType } from './AntiAirType';
+import { APCType } from './APCType';
 import { VehiclePrediction } from './VehiclePhysics';
 import type { PhysicsInput } from './VehiclePhysics';
 
@@ -163,6 +164,7 @@ export default class VehicleManager {
     this.registerVehicleType(new HelicopterType());
     this.registerVehicleType(new FighterJetType());
     this.registerVehicleType(new AntiAirType());
+    this.registerVehicleType(new APCType());
   }
 
   // ── Registry ──
@@ -206,6 +208,64 @@ export default class VehicleManager {
     return vt ? vt.name : null;
   }
 
+  private identityMatches(value: unknown, identity: string | null): boolean {
+    return !!identity
+      && !!value
+      && typeof value === 'object'
+      && 'toHexString' in value
+      && typeof (value as { toHexString: () => string }).toHexString === 'function'
+      && (value as { toHexString: () => string }).toHexString() === identity;
+  }
+
+  isLocalPilot(vehicleId = this.engine.mountedVehicleId): boolean {
+    if (!this.engine.localIdentity || vehicleId === 0) return false;
+    const vehicle = this.getVehicleRow(vehicleId);
+    return this.identityMatches(vehicle?.pilotIdentity, this.engine.localIdentity);
+  }
+
+  isMountedVehiclePilot(): boolean {
+    return this.isLocalPilot(this.engine.mountedVehicleId);
+  }
+
+  getVehicleOccupantCount(vehicleId: number): number {
+    if (!this.engine.conn || vehicleId === 0) return 0;
+    const table =
+      (this.engine.conn.db as any).vehicleOccupant
+      ?? (this.engine.conn.db as any).vehicle_occupant;
+    let count = 0;
+    if (table?.iter) {
+      for (const row of table.iter()) {
+        if (Number((row as any).vehicleId ?? (row as any).vehicle_id) === vehicleId) {
+          count++;
+        }
+      }
+    }
+    if (count === 0 && this.getVehicleRow(vehicleId)?.pilotIdentity) {
+      return 1;
+    }
+    return count;
+  }
+
+  hasFreeSeat(vehicleId: number): boolean {
+    const vehicle = this.getVehicleRow(vehicleId);
+    if (!vehicle) return false;
+    const seatCount = Math.max(1, Number(vehicle.seatCount ?? 1));
+    return this.getVehicleOccupantCount(vehicleId) < seatCount;
+  }
+
+  getWeaponSlotCountForType(typeId: number | undefined): number {
+    if (typeId === VEHICLE_TYPES.APC) return 0;
+    if (typeId === VEHICLE_TYPES.FighterJet) return 3;
+    if (typeId === VEHICLE_TYPES.AntiAir) return 1;
+    if (typeId === VEHICLE_TYPES.Helicopter) return 2;
+    return 0;
+  }
+
+  getMountedWeaponSlotCount(): number {
+    if (!this.isMountedVehiclePilot()) return 0;
+    return this.getWeaponSlotCountForType(this.getMountedVehicleType()?.typeId);
+  }
+
   /**
    * Resolve the actual vehicle weapon index from the current slot.
    * Fighter jets use weapon indices 2/3 (Kinetic Penetrator/Carpet Bomb),
@@ -213,6 +273,10 @@ export default class VehicleManager {
    */
   getResolvedVehicleWeaponIndex(): number {
     const vt = this.getMountedVehicleType();
+    if (vt && vt.typeId === VEHICLE_TYPES.APC) {
+      // APC has no weapons — driver cannot fire
+      return -1;
+    }
     if (vt && vt.typeId === VEHICLE_TYPES.FighterJet) {
       // Jet slot 0→2 (Kinetic Penetrator), 1→3 (Carpet Bomb), 2→6 (Air Missile)
       if (this.vehicleWeaponIndex === 2) return 6;
@@ -231,6 +295,9 @@ export default class VehicleManager {
    */
   getResolvedWeaponIndexForSlot(slot: number): number {
     const vt = this.getMountedVehicleType();
+    if (vt && vt.typeId === VEHICLE_TYPES.APC) {
+      return -1; // APC has no weapons
+    }
     if (vt && vt.typeId === VEHICLE_TYPES.FighterJet) {
       if (slot === 2) return 6; // Air Missile
       return slot + 2;
@@ -249,7 +316,7 @@ export default class VehicleManager {
   getAATargets(camera: THREE.PerspectiveCamera, trackingRange: number): AATarget[] {
     if (this.engine.mountedVehicleId === 0) return [];
     const mounted = this.getMountedVehicleType();
-    if (!mounted || mounted.typeId !== VEHICLE_TYPES.AntiAir) return [];
+    if (!mounted || mounted.typeId !== VEHICLE_TYPES.AntiAir || !this.isMountedVehiclePilot()) return [];
 
     const localInst = this.vehicleInstances.get(this.engine.mountedVehicleId);
     if (!localInst) return [];
@@ -310,7 +377,7 @@ export default class VehicleManager {
    *  direct pilot yaw/pitch; for remote vehicles reads the pilot's Player row. */
   getPilotAim(entityId: number): { yaw: number; pitch: number } | null {
     // Local vehicle: use the local pilot aim directly
-    if (entityId === this.engine.mountedVehicleId) {
+    if (entityId === this.engine.mountedVehicleId && this.isLocalPilot(entityId)) {
       return { yaw: this.vehiclePilotYaw, pitch: this.vehiclePilotPitch };
     }
     // Remote vehicle: look up pilot identity from Vehicle row, then Player row
@@ -345,6 +412,7 @@ export default class VehicleManager {
       if (!mesh) continue;
       const vt = this.vehicleTypes.get(inst.type);
       if (!vt) continue;
+      if (!this.hasFreeSeat(entityId)) continue;
 
       const d2 = around.distanceToSquared(mesh.position);
       if (d2 < bestD2) {
@@ -385,6 +453,7 @@ export default class VehicleManager {
       if (!inst) continue;
       const vt = this.vehicleTypes.get(inst.type);
       if (!vt) continue;
+      if (!this.hasFreeSeat(entityId)) continue;
       const range = vt.getMountRange();
       const dx = camPos.x - mesh.position.x;
       const dy = camPos.y - mesh.position.y;
@@ -571,6 +640,7 @@ export default class VehicleManager {
     if (reconcileLocal && id === this.engine.mountedVehicleId) {
       const newPos = { x: Number(entity.pos.x), y: Number(entity.pos.y), z: Number(entity.pos.z) };
       const newVel = { x: Number(vel.x), y: Number(vel.y), z: Number(vel.z) };
+      const isLocalPilot = this.isLocalPilot(id);
 
       // Record diagnostics
       const predState = this.prediction?.state;
@@ -588,36 +658,35 @@ export default class VehicleManager {
       this.localLastServerPitch = Number(rot.pitch ?? 0);
       this.localLastServerTime = performance.now();
 
-      // Only reconcile when entity pose and vehicle ack were produced by the
-      // same server simulation tick.
-      const entitySimTick = Number(entity.simTick ?? 0);
-      const vehicleSimTick = Number(vehicle.simTick ?? 0);
-      if (entitySimTick <= 0 || vehicleSimTick <= 0 || entitySimTick !== vehicleSimTick) {
-        return;
-      }
+      if (isLocalPilot) {
+        // Only reconcile when entity pose and vehicle ack were produced by the
+        // same server simulation tick.
+        const entitySimTick = Number(entity.simTick ?? 0);
+        const vehicleSimTick = Number(vehicle.simTick ?? 0);
+        if (entitySimTick > 0 && vehicleSimTick > 0 && entitySimTick === vehicleSimTick) {
+          // Reconcile each server sim tick at most once. We listen on both entity
+          // and vehicle streams; this guard prevents duplicate reconcile passes
+          // while still allowing whichever callback arrives second to complete a
+          // coherent pair.
+          if (entitySimTick > this.lastReconciledSimTick) {
+            this.lastReconciledSimTick = entitySimTick;
 
-      // Reconcile each server sim tick at most once. We listen on both entity
-      // and vehicle streams; this guard prevents duplicate reconcile passes
-      // while still allowing whichever callback arrives second to complete a
-      // coherent pair.
-      if (entitySimTick <= this.lastReconciledSimTick) {
-        return;
-      }
-      this.lastReconciledSimTick = entitySimTick;
+            // Read the acknowledged processed input sequence from the Vehicle table
+            const ackedSeq = Number(vehicle.ackedInputSeq ?? 0);
+            this.lastAckedInputSeq = ackedSeq;
+            this.prediction?.discardAckedInputs(ackedSeq);
 
-      // Read the acknowledged processed input sequence from the Vehicle table
-      const ackedSeq = Number(vehicle.ackedInputSeq ?? 0);
-      this.lastAckedInputSeq = ackedSeq;
-      this.prediction?.discardAckedInputs(ackedSeq);
-
-      // Rewind-and-replay reconciliation
-      if (this.prediction) {
-        this.prediction.reconcile({
-          px: newPos.x, py: newPos.y, pz: newPos.z,
-          vx: newVel.x, vy: newVel.y, vz: newVel.z,
-          yaw: Number(rot.yaw ?? 0),
-          pitch: Number(rot.pitch ?? 0),
-        }, ackedSeq);
+            // Rewind-and-replay reconciliation
+            if (this.prediction) {
+              this.prediction.reconcile({
+                px: newPos.x, py: newPos.y, pz: newPos.z,
+                vx: newVel.x, vy: newVel.y, vz: newVel.z,
+                yaw: Number(rot.yaw ?? 0),
+                pitch: Number(rot.pitch ?? 0),
+              }, ackedSeq);
+            }
+          }
+        }
       }
     }
 
@@ -656,6 +725,7 @@ export default class VehicleManager {
 
   syncVehicleInput(): void {
     if (!this.engine.conn || !this.engine.localIdentity || this.engine.mountedVehicleId === 0) return;
+    if (!this.isMountedVehiclePilot()) return;
 
     if (this.lastAckedInputSeq > 0) {
       while (this.pendingInputPackets.length > 0 && this.pendingInputPackets[0]!.seq <= this.lastAckedInputSeq) {
@@ -688,6 +758,13 @@ export default class VehicleManager {
   }
 
   private sampleCurrentInput(delta: number): void {
+    if (!this.isMountedVehiclePilot()) {
+      this.currentInput.forward = 0;
+      this.currentInput.strafe = 0;
+      this.currentInput.lift = 0;
+      this.currentInput.yaw = 0;
+      return;
+    }
     const mountedType = this.getMountedVehicleType();
     const isJet = mountedType?.typeId === VEHICLE_TYPES.FighterJet;
 
@@ -785,7 +862,7 @@ export default class VehicleManager {
     // Server parity:
     // - helicopter_ground_rest_height: surface + 0.475
     // - fighter_jet_ground_height:    surface + 1
-    // - anti-air ground snap:         surface + 1
+    // - ground_vehicle_rest_height:   surface + 1
     if (typeId === VEHICLE_TYPES.Helicopter) return surface + 0.475;
     return surface + 1;
   }
@@ -1027,6 +1104,7 @@ export default class VehicleManager {
     this.pendingInputPackets = [];
     this.localLastServerTime = 0;
     this.collisionPendingBlocks.clear();
+    this.currentInput = { forward: 0, strafe: 0, lift: 0, yaw: 0 };
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -1063,10 +1141,11 @@ export default class VehicleManager {
 
     for (const [id, mesh] of this.vehicles) {
       const inst = this.vehicleInstances.get(id);
-      const isLocal = id === this.engine.mountedVehicleId;
+      const isMountedLocalVehicle = id === this.engine.mountedVehicleId;
+      const isLocalPilot = isMountedLocalVehicle && this.isLocalPilot(id);
 
       // ── Position / rotation ──
-      if (isLocal) {
+      if (isLocalPilot) {
         // Client-side prediction: run the same physics locally using the
         // player's current input for instant response. Reconciliation applies
         // server-authoritative corrections as render-only offsets.
@@ -1119,11 +1198,17 @@ export default class VehicleManager {
         if (inst && inst.buffer.hasData()) {
           inst.buffer.sample(mesh.position, rot);
           mesh.rotation.set(rot.pitch, rot.yaw, 0);
+        } else {
+          const entity = this.findEntityRow(id);
+          if (entity) {
+            mesh.position.set(Number(entity.pos.x), Number(entity.pos.y), Number(entity.pos.z));
+            mesh.rotation.set(Number(entity.rot?.pitch ?? 0), Number(entity.rot?.yaw ?? 0), 0);
+          }
         }
       }
 
       // ── Restore opacity for vehicles the local player is NOT mounted in ──
-      if (!isLocal && (mesh.userData.currentOpacity as number) < 0.99) {
+      if (!isMountedLocalVehicle && (mesh.userData.currentOpacity as number) < 0.99) {
         this.setVehicleOpacity(mesh, 1.0);
       }
 
@@ -1131,7 +1216,7 @@ export default class VehicleManager {
       if (inst) {
         const vt = this.vehicleTypes.get(inst.type);
         if (vt) {
-          vt.updatePerFrame(inst, delta, isLocal, frameCtx);
+          vt.updatePerFrame(inst, delta, isLocalPilot, frameCtx);
         }
       }
 

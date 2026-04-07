@@ -69,6 +69,8 @@ const VEHICLE_BROADPHASE_BY_TYPE: Record<number, VehicleBroadPhase> = {
   [VEHICLE_TYPES.FighterJet]: { centerY: 2.2, halfX: 8.1, halfY: 2.5, halfZ: 8.1 },
   // AA includes crossed barrel sweep and raised turret/radar volume.
   [VEHICLE_TYPES.AntiAir]: { centerY: 2.2, halfX: 4.9, halfY: 2.8, halfZ: 4.9 },
+  // APC is a long, boxy ground vehicle with broad side skirts / treads.
+  [VEHICLE_TYPES.APC]: { centerY: 1.85, halfX: 4.2, halfY: 2.3, halfZ: 5.9 },
 };
 
 const DEFAULT_VEHICLE_BROADPHASE: VehicleBroadPhase = { centerY: 2.4, halfX: 9.5, halfY: 2.8, halfZ: 9.5 };

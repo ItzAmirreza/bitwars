@@ -101,21 +101,24 @@ pub fn get_surface_height_generated(
 
 // ── Helicopter Spawn Helpers ──
 
-pub fn helicopter_spawn_y_if_fit(
+fn spawn_y_if_fit(
     ctx: &ReducerContext,
     center_x: i32,
     center_z: i32,
+    clearance_radius: i32,
+    clearance_height: i32,
+    min_separation: f32,
+    rest_y_offset: f32,
     chunk_cache: &mut HashMap<u32, [u8; 4096]>,
 ) -> Option<f32> {
-    use crate::constants::*;
     use crate::helpers::dist_sq;
 
     let mut min_surface = i32::MAX;
     let mut max_surface = i32::MIN;
 
-    for dx in -HELI_SPAWN_CLEARANCE_RADIUS..=HELI_SPAWN_CLEARANCE_RADIUS {
-        for dz in -HELI_SPAWN_CLEARANCE_RADIUS..=HELI_SPAWN_CLEARANCE_RADIUS {
-            if dx * dx + dz * dz > HELI_SPAWN_CLEARANCE_RADIUS * HELI_SPAWN_CLEARANCE_RADIUS {
+    for dx in -clearance_radius..=clearance_radius {
+        for dz in -clearance_radius..=clearance_radius {
+            if dx * dx + dz * dz > clearance_radius * clearance_radius {
                 continue;
             }
             if (dx & 1) != 0 || (dz & 1) != 0 {
@@ -135,18 +138,18 @@ pub fn helicopter_spawn_y_if_fit(
     }
 
     let base_y = max_surface + 1;
-    if base_y + HELI_SPAWN_CLEARANCE_HEIGHT >= crate::worldgen::WORLD_SIZE_Y as i32 - 1 {
+    if base_y + clearance_height >= crate::worldgen::WORLD_SIZE_Y as i32 - 1 {
         return None;
     }
 
-    for dx in -HELI_SPAWN_CLEARANCE_RADIUS..=HELI_SPAWN_CLEARANCE_RADIUS {
-        for dz in -HELI_SPAWN_CLEARANCE_RADIUS..=HELI_SPAWN_CLEARANCE_RADIUS {
-            if dx * dx + dz * dz > HELI_SPAWN_CLEARANCE_RADIUS * HELI_SPAWN_CLEARANCE_RADIUS {
+    for dx in -clearance_radius..=clearance_radius {
+        for dz in -clearance_radius..=clearance_radius {
+            if dx * dx + dz * dz > clearance_radius * clearance_radius {
                 continue;
             }
             let sx = center_x + dx;
             let sz = center_z + dz;
-            for y in base_y..=base_y + HELI_SPAWN_CLEARANCE_HEIGHT {
+            for y in base_y..=base_y + clearance_height {
                 if !matches!(
                     get_block_type_generated_cached(ctx, sx, y, sz, chunk_cache),
                     Some(AIR)
@@ -159,28 +162,66 @@ pub fn helicopter_spawn_y_if_fit(
 
     let center = crate::types::Vec3 {
         x: center_x as f32 + 0.5,
-        // Helicopter origin should spawn at its ground-rest height so skids
-        // are already touching terrain (no initial settle hover).
-        y: (base_y as f32) - 0.525,
+        y: (base_y as f32) + rest_y_offset,
         z: center_z as f32 + 0.5,
     };
 
     for p in ctx.db.player().iter() {
-        if dist_sq(&p.pos, &center) < HELI_SPAWN_MIN_SEPARATION * HELI_SPAWN_MIN_SEPARATION {
+        if dist_sq(&p.pos, &center) < min_separation * min_separation {
             return None;
         }
     }
 
     for v in ctx.db.vehicle().iter() {
         if let Some(entity) = ctx.db.entity().id().find(&v.entity_id) {
-            if dist_sq(&entity.pos, &center) < HELI_SPAWN_MIN_SEPARATION * HELI_SPAWN_MIN_SEPARATION
-            {
+            if dist_sq(&entity.pos, &center) < min_separation * min_separation {
                 return None;
             }
         }
     }
 
     Some(center.y)
+}
+
+pub fn helicopter_spawn_y_if_fit(
+    ctx: &ReducerContext,
+    center_x: i32,
+    center_z: i32,
+    chunk_cache: &mut HashMap<u32, [u8; 4096]>,
+) -> Option<f32> {
+    use crate::constants::*;
+
+    spawn_y_if_fit(
+        ctx,
+        center_x,
+        center_z,
+        HELI_SPAWN_CLEARANCE_RADIUS,
+        HELI_SPAWN_CLEARANCE_HEIGHT,
+        HELI_SPAWN_MIN_SEPARATION,
+        -0.525,
+        chunk_cache,
+    )
+}
+
+pub fn ground_vehicle_spawn_y_if_fit(
+    ctx: &ReducerContext,
+    center_x: i32,
+    center_z: i32,
+    clearance_radius: i32,
+    clearance_height: i32,
+    min_separation: f32,
+    chunk_cache: &mut HashMap<u32, [u8; 4096]>,
+) -> Option<f32> {
+    spawn_y_if_fit(
+        ctx,
+        center_x,
+        center_z,
+        clearance_radius,
+        clearance_height,
+        min_separation,
+        0.0,
+        chunk_cache,
+    )
 }
 
 // ── Block Destruction ──

@@ -77,6 +77,7 @@ import ServerInfoRow from "./server_info_table";
 import ShotEventRow from "./shot_event_table";
 import VehicleRow from "./vehicle_table";
 import VehicleDestroyEventRow from "./vehicle_destroy_event_table";
+import VehicleOccupantRow from "./vehicle_occupant_table";
 import WorldChunkRow from "./world_chunk_table";
 import WorldConfigRow from "./world_config_table";
 import WorldEnvironmentRow from "./world_environment_table";
@@ -323,6 +324,24 @@ const tablesSchema = __schema({
       { name: 'vehicle_destroy_event_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, VehicleDestroyEventRow),
+  vehicle_occupant: __table({
+    name: 'vehicle_occupant',
+    indexes: [
+      { accessor: 'identity', name: 'vehicle_occupant_identity_idx_btree', algorithm: 'btree', columns: [
+        'identity',
+      ] },
+      { accessor: 'idx_vehicle_occupant_by_vehicle', name: 'vehicle_occupant_vehicle_id_idx_btree', algorithm: 'btree', columns: [
+        'vehicleId',
+      ] },
+      { accessor: 'idx_vehicle_occupant_by_vehicle_seat', name: 'vehicle_occupant_vehicle_id_seat_index_idx_btree', algorithm: 'btree', columns: [
+        'vehicleId',
+        'seatIndex',
+      ] },
+    ],
+    constraints: [
+      { name: 'vehicle_occupant_identity_key', constraint: 'unique', columns: ['identity'] },
+    ],
+  }, VehicleOccupantRow),
   world_chunk: __table({
     name: 'world_chunk',
     indexes: [

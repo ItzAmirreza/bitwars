@@ -11,7 +11,10 @@ use crate::helpers::*;
 use crate::matchmaking::{schedule_next_match_tick, set_waiting_match_state};
 use crate::tables::*;
 use crate::types::*;
-use crate::vehicles::{spawn_aa_at_outposts, spawn_jets_at_airstrips, spawn_sandbox_helicopters};
+use crate::vehicles::{
+    spawn_aa_at_outposts, spawn_apcs_on_flat_ground, spawn_jets_at_airstrips,
+    spawn_sandbox_helicopters,
+};
 
 use crate::worldgen::{self, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
 
@@ -107,6 +110,7 @@ pub fn init(ctx: &ReducerContext) {
     spawn_sandbox_helicopters(ctx);
     spawn_jets_at_airstrips(ctx, seed);
     spawn_aa_at_outposts(ctx, seed);
+    spawn_apcs_on_flat_ground(ctx);
 
     abilities::spawning::spawn_initial_ability_pickups(ctx, seed);
     ctx.db.ability_tick().insert(AbilityTick {

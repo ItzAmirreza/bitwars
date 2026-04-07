@@ -291,12 +291,16 @@ pub fn reset_players_for_new_round(ctx: &ReducerContext) {
             Some(jet_weapon_slot0())
         } else if vehicle.vehicle_type == vehicle_type_anti_air() {
             Some(aa_weapon_slot0())
+        } else if vehicle.vehicle_type == vehicle_type_apc() {
+            None
         } else {
             Some(0)
         };
         let secondary_idx = if vehicle.vehicle_type == vehicle_type_fighter_jet() {
             Some(jet_weapon_slot1())
         } else if vehicle.vehicle_type == vehicle_type_anti_air() {
+            None
+        } else if vehicle.vehicle_type == vehicle_type_apc() {
             None
         } else {
             Some(1)

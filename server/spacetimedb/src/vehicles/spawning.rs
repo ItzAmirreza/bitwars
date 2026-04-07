@@ -6,7 +6,7 @@ use std::f32::consts::TAU;
 
 use spacetimedb::{ReducerContext, Table};
 
-use crate::chunks::helicopter_spawn_y_if_fit;
+use crate::chunks::{ground_vehicle_spawn_y_if_fit, helicopter_spawn_y_if_fit};
 use crate::constants::*;
 use crate::helpers::*;
 use crate::tables::*;
@@ -192,6 +192,98 @@ pub fn spawn_fighter_jet(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
     });
 
     entity.id
+}
+
+/// Spawn a single APC entity + vehicle row.
+pub fn spawn_apc(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
+    let entity = ctx.db.entity().insert(Entity {
+        id: 0,
+        kind: entity_kind_vehicle(),
+        subtype: vehicle_type_apc(),
+        pos,
+        vel: ZERO_VEL,
+        rot: Rotation { yaw, pitch: 0.0 },
+        scale: apc_scale(),
+        active: true,
+        sim_tick: 0,
+        created_at: ctx.timestamp,
+        updated_at: ctx.timestamp,
+    });
+
+    // APC has no vehicle weapons — driver cannot fire.
+    ctx.db.vehicle().insert(Vehicle {
+        entity_id: entity.id,
+        vehicle_type: vehicle_type_apc(),
+        pilot_identity: None,
+        seat_count: 4,
+        input_forward: 0.0,
+        input_strafe: 0.0,
+        input_lift: 0.0,
+        input_yaw: 0.0,
+        boosting: false,
+        input_seq: 0,
+        acked_input_seq: 0,
+        sim_tick: 0,
+        sim_updated_at: ctx.timestamp,
+        rotor_spin: 0.0,
+        health: apc_health_max(),
+        weapon_type: 0,
+        weapon_ammo_primary: 0,
+        weapon_ammo_secondary: 0,
+        weapon_ammo_tertiary: 0,
+        weapon_last_fire: ctx.timestamp,
+        created_at: ctx.timestamp,
+        last_input_at: ctx.timestamp,
+    });
+
+    entity.id
+}
+
+/// Spawn APCs at random flat locations across the map.
+pub fn spawn_apcs_on_flat_ground(ctx: &ReducerContext) {
+    let seed = timestamp_micros(ctx.timestamp) ^ 0xb7e151628aed2a6b;
+    let margin = (APC_SPAWN_CLEARANCE_RADIUS + 12).max(10);
+    let span_x = (WORLD_SIZE_X as i32 - margin * 2).max(8);
+    let span_z = (WORLD_SIZE_Z as i32 - margin * 2).max(8);
+    let mut chunk_cache: HashMap<u32, [u8; 4096]> = HashMap::new();
+
+    let mut spawned = 0usize;
+    for attempt in 0..320u64 {
+        if spawned >= SANDBOX_APC_COUNT {
+            break;
+        }
+
+        let rx = hash_u64(seed ^ attempt.wrapping_mul(0x9e3779b97f4a7c15));
+        let rz = hash_u64(seed ^ attempt.wrapping_mul(0xd1b54a32d192ed03));
+        let x = margin + (rx % span_x as u64) as i32;
+        let z = margin + (rz % span_z as u64) as i32;
+
+        let Some(y) = ground_vehicle_spawn_y_if_fit(
+            ctx,
+            x,
+            z,
+            APC_SPAWN_CLEARANCE_RADIUS,
+            APC_SPAWN_CLEARANCE_HEIGHT,
+            APC_SPAWN_MIN_SEPARATION,
+            &mut chunk_cache,
+        ) else {
+            continue;
+        };
+
+        let yaw = unit_from_seed(seed ^ attempt.wrapping_mul(0x94d049bb133111eb)) * TAU;
+        spawn_apc(
+            ctx,
+            Vec3 {
+                x: x as f32 + 0.5,
+                y,
+                z: z as f32 + 0.5,
+            },
+            yaw,
+        );
+        spawned += 1;
+    }
+
+    log::info!("Spawned {} APCs on flat ground", spawned);
 }
 
 /// Spawn fighter jets at the START of each Airport biome runway.
