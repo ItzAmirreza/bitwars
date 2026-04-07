@@ -4,6 +4,8 @@
 use spacetimedb::{Identity, ReducerContext, Table};
 
 use super::math::*;
+use super::vehicle_seats::*;
+use super::vehicle_input::clear_vehicle_input_queue;
 use crate::constants::*;
 use crate::tables::*;
 use crate::types::*;
@@ -176,6 +178,54 @@ const AA_HITBOXES: [LocalHitbox; 5] = [
     },
 ];
 
+const APC_HITBOXES: [LocalHitbox; 5] = [
+    // Lower armored hull
+    LocalHitbox {
+        cx: 0.0,
+        cy: 1.25,
+        cz: 0.0,
+        hx: 2.20,
+        hy: 1.00,
+        hz: 4.40,
+    },
+    // Upper troop compartment
+    LocalHitbox {
+        cx: 0.0,
+        cy: 2.40,
+        cz: -0.35,
+        hx: 1.90,
+        hy: 0.80,
+        hz: 3.30,
+    },
+    // Front glacis / driver section
+    LocalHitbox {
+        cx: 0.0,
+        cy: 2.25,
+        cz: -4.15,
+        hx: 1.75,
+        hy: 0.75,
+        hz: 0.75,
+    },
+    // Left tread / side skirt
+    LocalHitbox {
+        cx: -2.0,
+        cy: 0.8,
+        cz: 0.0,
+        hx: 0.50,
+        hy: 0.75,
+        hz: 4.45,
+    },
+    // Right tread / side skirt
+    LocalHitbox {
+        cx: 2.0,
+        cy: 0.8,
+        cz: 0.0,
+        hx: 0.50,
+        hy: 0.75,
+        hz: 4.45,
+    },
+];
+
 fn vehicle_hitbox_profile(entity: &Entity) -> HitboxProfile {
     if entity.subtype == vehicle_type_fighter_jet() {
         HitboxProfile {
@@ -186,6 +236,11 @@ fn vehicle_hitbox_profile(entity: &Entity) -> HitboxProfile {
         HitboxProfile {
             center_y: 2.20,
             boxes: &AA_HITBOXES,
+        }
+    } else if entity.subtype == vehicle_type_apc() {
+        HitboxProfile {
+            center_y: 1.85,
+            boxes: &APC_HITBOXES,
         }
     } else {
         HitboxProfile {
@@ -403,37 +458,39 @@ pub fn dismount_player_internal(
     }
 
     let mut dismount_pos = next.pos.clone();
+    let occupant = vehicle_occupant_for_player(ctx, &next);
+    let seat_index = occupant.as_ref().map(|row| row.seat_index).unwrap_or(0);
+    remove_vehicle_occupant(ctx, next.identity);
+
     if let Some(entity) = ctx.db.entity().id().find(&next.mounted_vehicle_id) {
         if let Some(vehicle) = ctx.db.vehicle().entity_id().find(&next.mounted_vehicle_id) {
-            for row in ctx
-                .db
-                .vehicle_input_cmd()
-                .idx_vehicle_input_by_vehicle()
-                .filter(&next.mounted_vehicle_id)
-            {
-                ctx.db.vehicle_input_cmd().id().delete(&row.id);
+            let was_pilot = vehicle.pilot_identity == Some(next.identity);
+            if was_pilot {
+                clear_vehicle_input_queue(ctx, next.mounted_vehicle_id);
+                let cleared = Vehicle {
+                    pilot_identity: None,
+                    input_forward: 0.0,
+                    input_strafe: 0.0,
+                    input_lift: 0.0,
+                    input_yaw: 0.0,
+                    boosting: false,
+                    input_seq: 0,
+                    acked_input_seq: 0,
+                    sim_tick: 0,
+                    sim_updated_at: ctx.timestamp,
+                    weapon_type: if vehicle.vehicle_type == vehicle_type_apc() {
+                        0
+                    } else {
+                        vehicle.weapon_type
+                    },
+                    ..vehicle
+                };
+                ctx.db.vehicle().entity_id().update(cleared.clone());
+                let _ = promote_next_vehicle_pilot(ctx, cleared);
             }
-            ctx.db.vehicle().entity_id().update(Vehicle {
-                pilot_identity: None,
-                input_forward: 0.0,
-                input_strafe: 0.0,
-                input_lift: 0.0,
-                input_yaw: 0.0,
-                boosting: false,
-                input_seq: 0,
-                acked_input_seq: 0,
-                sim_tick: 0,
-                sim_updated_at: ctx.timestamp,
-                ..vehicle
-            });
+            dismount_pos =
+                vehicle_dismount_world_position(&entity, vehicle.vehicle_type, seat_index);
         }
-        let right_x = entity.rot.yaw.cos();
-        let right_z = -entity.rot.yaw.sin();
-        dismount_pos = Vec3 {
-            x: entity.pos.x + right_x * 3.4,
-            y: entity.pos.y,
-            z: entity.pos.z + right_z * 3.4,
-        };
     }
 
     if force_to_ground {
@@ -446,6 +503,27 @@ pub fn dismount_player_internal(
     next.vel = ZERO_VEL;
     next.mounted_vehicle_id = 0;
     next
+}
+
+pub fn dismount_all_vehicle_occupants(
+    ctx: &ReducerContext,
+    vehicle_id: u64,
+    force_to_ground: bool,
+) {
+    let Some(vehicle) = ctx.db.vehicle().entity_id().find(&vehicle_id) else {
+        return;
+    };
+    let occupants = vehicle_occupants_for_vehicle(ctx, &vehicle);
+    for occupant in occupants {
+        if let Some(player) = ctx.db.player().identity().find(occupant.identity) {
+            let dismounted = dismount_player_internal(ctx, player, force_to_ground);
+            ctx.db.player().identity().update(dismounted.clone());
+            super::player_state::init_movement_state(ctx, dismounted.identity, &dismounted.pos);
+            super::entity_ops::sync_player_entity(ctx, &dismounted);
+        } else {
+            remove_vehicle_occupant(ctx, occupant.identity);
+        }
+    }
 }
 
 pub fn apply_vehicle_damage(
@@ -487,15 +565,7 @@ pub fn apply_vehicle_damage(
         return;
     }
 
-    let pilot = vehicle.pilot_identity;
-    for row in ctx
-        .db
-        .vehicle_input_cmd()
-        .idx_vehicle_input_by_vehicle()
-        .filter(&vehicle_id)
-    {
-        ctx.db.vehicle_input_cmd().id().delete(&row.id);
-    }
+    clear_vehicle_input_queue(ctx, vehicle_id);
     ctx.db.vehicle().entity_id().update(Vehicle {
         pilot_identity: None,
         input_forward: 0.0,
@@ -511,14 +581,7 @@ pub fn apply_vehicle_damage(
         ..vehicle
     });
 
-    if let Some(pilot_id) = pilot {
-        if let Some(player) = ctx.db.player().identity().find(pilot_id) {
-            let dismounted = dismount_player_internal(ctx, player, true);
-            ctx.db.player().identity().update(dismounted.clone());
-            super::player_state::init_movement_state(ctx, dismounted.identity, &dismounted.pos);
-            super::entity_ops::sync_player_entity(ctx, &dismounted);
-        }
-    }
+    dismount_all_vehicle_occupants(ctx, vehicle_id, true);
 
     ctx.db.explosion_event().insert(ExplosionEvent {
         id: 0,

@@ -53,6 +53,20 @@ impl TerrainSampler {
         self.surface_height(ctx, x, z)
     }
 
+    pub fn ground_vehicle_rest_height(&mut self, ctx: &ReducerContext, x: f32, z: f32) -> f32 {
+        self.surface_height(ctx, x, z) + 1.0
+    }
+
+    pub fn ground_vehicle_rest_height_below(
+        &mut self,
+        ctx: &ReducerContext,
+        x: f32,
+        z: f32,
+        max_y: f32,
+    ) -> f32 {
+        self.surface_height_below(ctx, x, z, max_y) + 1.0
+    }
+
     pub fn ground_surface_height_below(
         &mut self,
         ctx: &ReducerContext,

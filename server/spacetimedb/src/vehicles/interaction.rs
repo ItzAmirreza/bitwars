@@ -28,7 +28,7 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
     }
 
     // Find nearest mountable vehicle
-    let mut best_vehicle: Option<(u64, Vec3, f32)> = None;
+    let mut best_vehicle: Option<(u64, f32)> = None;
     for v in ctx.db.vehicle().iter() {
         let mount_range = if v.vehicle_type == vehicle_type_helicopter() {
             heli_mount_range()
@@ -41,7 +41,7 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
         } else {
             continue; // unknown vehicle type
         };
-        if v.pilot_identity.is_some() {
+        if !vehicle_has_free_seat(ctx, &v) {
             continue;
         }
         let Some(entity) = ctx.db.entity().id().find(&v.entity_id) else {
@@ -57,12 +57,12 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
         }
 
         match &best_vehicle {
-            Some((_, _, best_d2)) if *best_d2 <= d2 => {}
-            _ => best_vehicle = Some((v.entity_id, entity.pos.clone(), d2)),
+            Some((_, best_d2)) if *best_d2 <= d2 => {}
+            _ => best_vehicle = Some((v.entity_id, d2)),
         }
     }
 
-    let (vehicle_id, vehicle_pos, _) = best_vehicle.ok_or("No vehicle in range")?;
+    let (vehicle_id, _) = best_vehicle.ok_or("No vehicle in range")?;
 
     let vehicle = ctx
         .db
@@ -70,46 +70,40 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
         .entity_id()
         .find(&vehicle_id)
         .ok_or("Vehicle not found")?;
-    let seat_height = if vehicle.vehicle_type == vehicle_type_helicopter() {
-        heli_pilot_seat_height()
-    } else if vehicle.vehicle_type == vehicle_type_anti_air() {
-        aa_pilot_seat_height()
-    } else if vehicle.vehicle_type == vehicle_type_apc() {
-        apc_pilot_seat_height()
-    } else {
-        jet_pilot_seat_height()
-    };
-    for row in ctx
-        .db
-        .vehicle_input_cmd()
-        .idx_vehicle_input_by_vehicle()
-        .filter(&vehicle_id)
-    {
-        ctx.db.vehicle_input_cmd().id().delete(&row.id);
+    let seat_index = vehicle_next_free_seat(ctx, &vehicle).ok_or("Vehicle is full")?;
+    let mut mounted_vehicle = vehicle.clone();
+    if seat_index == 0 {
+        clear_vehicle_input_queue(ctx, vehicle_id);
+        mounted_vehicle = Vehicle {
+            pilot_identity: Some(sender),
+            input_forward: 0.0,
+            input_strafe: 0.0,
+            input_lift: 0.0,
+            input_yaw: 0.0,
+            boosting: false,
+            input_seq: 0,
+            acked_input_seq: 0,
+            sim_tick: 0,
+            sim_updated_at: ctx.timestamp,
+            last_input_at: ctx.timestamp,
+            ..vehicle
+        };
+        ctx.db.vehicle().entity_id().update(mounted_vehicle.clone());
     }
-    ctx.db.vehicle().entity_id().update(Vehicle {
-        pilot_identity: Some(sender),
-        input_forward: 0.0,
-        input_strafe: 0.0,
-        input_lift: 0.0,
-        input_yaw: 0.0,
-        boosting: false,
-        input_seq: 0,
-        acked_input_seq: 0,
-        sim_tick: 0,
-        sim_updated_at: ctx.timestamp,
-        last_input_at: ctx.timestamp,
-        ..vehicle
-    });
+    upsert_vehicle_occupant(ctx, sender, vehicle_id, seat_index);
 
     let mounted = Player {
         mounted_vehicle_id: vehicle_id,
         spawn_protected: false,
-        pos: Vec3 {
-            x: vehicle_pos.x,
-            y: vehicle_pos.y + seat_height,
-            z: vehicle_pos.z,
-        },
+        pos: vehicle_seat_world_position(
+            &ctx.db
+                .entity()
+                .id()
+                .find(&vehicle_id)
+                .ok_or("Vehicle entity missing")?,
+            mounted_vehicle.vehicle_type,
+            seat_index,
+        ),
         vel: ZERO_VEL,
         ..player
     };

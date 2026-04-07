@@ -6,7 +6,7 @@ use std::f32::consts::TAU;
 
 use spacetimedb::{ReducerContext, Table};
 
-use crate::chunks::helicopter_spawn_y_if_fit;
+use crate::chunks::{ground_vehicle_spawn_y_if_fit, helicopter_spawn_y_if_fit};
 use crate::constants::*;
 use crate::helpers::*;
 use crate::tables::*;
@@ -258,8 +258,15 @@ pub fn spawn_apcs_on_flat_ground(ctx: &ReducerContext) {
         let x = margin + (rx % span_x as u64) as i32;
         let z = margin + (rz % span_z as u64) as i32;
 
-        // Reuse helicopter spawn Y check — finds flat ground with clearance
-        let Some(y) = helicopter_spawn_y_if_fit(ctx, x, z, &mut chunk_cache) else {
+        let Some(y) = ground_vehicle_spawn_y_if_fit(
+            ctx,
+            x,
+            z,
+            APC_SPAWN_CLEARANCE_RADIUS,
+            APC_SPAWN_CLEARANCE_HEIGHT,
+            APC_SPAWN_MIN_SEPARATION,
+            &mut chunk_cache,
+        ) else {
             continue;
         };
 

@@ -149,7 +149,8 @@ pub fn tick_apc(
     }
 
     // ── Ground collision ──
-    let ground = terrain.ground_surface_height(ctx, entity.pos.x, entity.pos.z);
+    // Scan downward from current Y to match client prediction (which also scans from footY).
+    let ground = terrain.ground_vehicle_rest_height_below(ctx, entity.pos.x, entity.pos.z, entity.pos.y);
     let min_alt = ground + apc_min_altitude();
     if entity.pos.y < min_alt {
         entity.pos.y = min_alt;
@@ -181,19 +182,5 @@ pub fn tick_apc(
     ctx.db.entity().id().update(entity.clone());
     ctx.db.vehicle().entity_id().update(vehicle.clone());
 
-    // ── Mounted pilot position sync ──
-    if let Some(pilot_id) = vehicle.pilot_identity {
-        if let Some(pilot) = ctx.db.player().identity().find(pilot_id) {
-            mounted_updates.push(Player {
-                pos: Vec3 {
-                    x: entity.pos.x,
-                    y: entity.pos.y + apc_pilot_seat_height(),
-                    z: entity.pos.z,
-                },
-                vel: entity.vel.clone(),
-                spawn_protected: false,
-                ..pilot
-            });
-        }
-    }
+    sync_vehicle_occupants(ctx, &vehicle, &entity, mounted_updates);
 }

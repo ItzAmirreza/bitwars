@@ -414,6 +414,14 @@ export const VehicleInputCmd = __t.object("VehicleInputCmd", {
 });
 export type VehicleInputCmd = __Infer<typeof VehicleInputCmd>;
 
+export const VehicleOccupant = __t.object("VehicleOccupant", {
+  identity: __t.identity(),
+  vehicleId: __t.u64(),
+  seatIndex: __t.u8(),
+  mountedAt: __t.timestamp(),
+});
+export type VehicleOccupant = __Infer<typeof VehicleOccupant>;
+
 export const VehicleTick = __t.object("VehicleTick", {
   scheduledId: __t.u64(),
   scheduledAt: __t.scheduleAt(),

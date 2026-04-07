@@ -279,19 +279,5 @@ pub fn tick_fighter_jet(
     ctx.db.entity().id().update(entity.clone());
     ctx.db.vehicle().entity_id().update(vehicle.clone());
 
-    // ── Mounted pilot sync ──
-    if let Some(pilot_id) = vehicle.pilot_identity {
-        if let Some(pilot) = ctx.db.player().identity().find(pilot_id) {
-            mounted_updates.push(Player {
-                pos: Vec3 {
-                    x: entity.pos.x,
-                    y: entity.pos.y + jet_pilot_seat_height(),
-                    z: entity.pos.z,
-                },
-                vel: entity.vel.clone(),
-                spawn_protected: false,
-                ..pilot
-            });
-        }
-    }
+    sync_vehicle_occupants(ctx, &vehicle, &entity, mounted_updates);
 }

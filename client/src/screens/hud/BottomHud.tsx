@@ -540,7 +540,8 @@ export function BottomHud({
                     </div>
                   </div>
 
-                  {/* Vehicle Weapon + Ammo Panel */}
+                  {/* Vehicle Weapon + Ammo Panel (hidden for APC / passengers with no weapons) */}
+                  {vehicleWeaponSlots.length > 0 && (
                   <div style={{
                     background: 'rgba(12,16,24,0.88)',
                     border: '2px solid #1a1e2e',
@@ -615,6 +616,7 @@ export function BottomHud({
                       }}/>
                     </div>
                   </div>
+                  )}
 
                   {/* Telemetry: Altitude + Speed */}
                   <div style={{

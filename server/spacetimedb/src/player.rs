@@ -133,16 +133,12 @@ pub fn update_position(
 
     // Mounted player handling
     if player.mounted_vehicle_id != 0 {
-        if let Some(vehicle) = ctx
+        let Some(vehicle) = ctx
             .db
             .vehicle()
             .entity_id()
             .find(&player.mounted_vehicle_id)
-        {
-            if vehicle.pilot_identity != Some(sender) {
-                return Err("Vehicle occupied".to_string());
-            }
-        } else {
+        else {
             let dismounted = Player {
                 mounted_vehicle_id: 0,
                 ..player
@@ -150,25 +146,43 @@ pub fn update_position(
             ctx.db.player().identity().update(dismounted.clone());
             sync_player_entity(ctx, &dismounted);
             return Ok(());
-        }
+        };
 
-        if let Some(vehicle_entity) = ctx.db.entity().id().find(&player.mounted_vehicle_id) {
-            let mounted = Player {
-                movement_flags: 0,
-                pos: Vec3 {
-                    x: vehicle_entity.pos.x,
-                    y: vehicle_entity.pos.y + heli_pilot_seat_height(),
-                    z: vehicle_entity.pos.z,
-                },
-                vel: vehicle_entity.vel.clone(),
-                rot,
-                current_weapon: selected_weapon,
-                spawn_protected: false,
+        let Some(occupant) = vehicle_occupant_for_player(ctx, &player) else {
+            let dismounted = Player {
+                mounted_vehicle_id: 0,
                 ..player
             };
-            ctx.db.player().identity().update(mounted.clone());
-            sync_player_entity(ctx, &mounted);
-        }
+            ctx.db.player().identity().update(dismounted.clone());
+            sync_player_entity(ctx, &dismounted);
+            return Ok(());
+        };
+
+        let Some(vehicle_entity) = ctx.db.entity().id().find(&player.mounted_vehicle_id) else {
+            let dismounted = Player {
+                mounted_vehicle_id: 0,
+                ..player
+            };
+            ctx.db.player().identity().update(dismounted.clone());
+            sync_player_entity(ctx, &dismounted);
+            return Ok(());
+        };
+
+        let mounted = Player {
+            movement_flags: 0,
+            pos: vehicle_seat_world_position(
+                &vehicle_entity,
+                vehicle.vehicle_type,
+                occupant.seat_index,
+            ),
+            vel: vehicle_entity.vel.clone(),
+            rot,
+            current_weapon: selected_weapon,
+            spawn_protected: false,
+            ..player
+        };
+        ctx.db.player().identity().update(mounted.clone());
+        sync_player_entity(ctx, &mounted);
         return Ok(());
     }
 

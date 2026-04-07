@@ -80,6 +80,7 @@ export function GameScreen({ active }: GameScreenProps) {
     vehicleThrottle: 0,
     vehicleReloading: false,
     vehicleWeaponSlots: [{ name: 'MINIGUN', color: '#ffaa00' }, { name: 'ROCKETS', color: '#ff4400' }],
+    isVehiclePilot: false,
     aaTargets: [],
     nearVehicle: false,
     nearVehicleName: null,
@@ -854,41 +855,48 @@ export function GameScreen({ active }: GameScreenProps) {
       {/* ═══ EJECT PROMPT + CONTROL HINTS (bottom-center) ═══ */}
       {state.locked && !hudOverlayOpen && state.mountedVehicleName && (
         <div className="absolute bottom-24 left-0 right-0 flex flex-col items-center pointer-events-none z-10" style={{ gap: '6px' }}>
-          <div style={{
-            fontFamily: 'var(--font-pixel)',
-            fontSize: '6px',
-            letterSpacing: '0.1em',
-            color: '#6b7080',
-            background: 'rgba(12,16,24,0.85)',
-            border: '2px solid #1a1e2e',
-            padding: '6px 12px',
-            lineHeight: '2.2',
-            textAlign: 'center',
-          }}>
-            {state.mountedVehicleName === 'Fighter Jet' ? (<>
-              <div>
-                <span style={{ color: '#e8e8f0' }}>W</span> THROTTLE UP
-                {' '}<span style={{ color: '#e8e8f0' }}>S</span> THROTTLE DOWN
-                {' '}<span style={{ color: '#e8e8f0' }}>A/D</span> YAW
-              </div>
-              <div>
-                <span style={{ color: '#e8e8f0' }}>SPACE</span> PULL UP
-                {' '}<span style={{ color: '#e8e8f0' }}>SHIFT</span> PUSH DOWN
-                {' '}<span style={{ color: '#e8e8f0' }}>1/2</span> WEAPONS
-              </div>
-            </>) : (<>
-              <div>
-                <span style={{ color: '#e8e8f0' }}>W/S</span> FWD/BACK
-                {' '}<span style={{ color: '#e8e8f0' }}>A/D</span> YAW
-                {' '}<span style={{ color: '#e8e8f0' }}>Q/E</span> STRAFE
-              </div>
-              <div>
-                <span style={{ color: '#e8e8f0' }}>SPACE</span> ASCEND
-                {' '}<span style={{ color: '#e8e8f0' }}>SHIFT</span> DESCEND
-                {' '}<span style={{ color: '#e8e8f0' }}>1/2</span> WEAPONS
-              </div>
-            </>)}
-          </div>
+          {state.isVehiclePilot && (
+            <div style={{
+              fontFamily: 'var(--font-pixel)',
+              fontSize: '6px',
+              letterSpacing: '0.1em',
+              color: '#6b7080',
+              background: 'rgba(12,16,24,0.85)',
+              border: '2px solid #1a1e2e',
+              padding: '6px 12px',
+              lineHeight: '2.2',
+              textAlign: 'center',
+            }}>
+              {state.mountedVehicleName === 'Fighter Jet' ? (<>
+                <div>
+                  <span style={{ color: '#e8e8f0' }}>W</span> THROTTLE UP
+                  {' '}<span style={{ color: '#e8e8f0' }}>S</span> THROTTLE DOWN
+                  {' '}<span style={{ color: '#e8e8f0' }}>A/D</span> YAW
+                </div>
+                <div>
+                  <span style={{ color: '#e8e8f0' }}>SPACE</span> PULL UP
+                  {' '}<span style={{ color: '#e8e8f0' }}>SHIFT</span> PUSH DOWN
+                  {' '}<span style={{ color: '#e8e8f0' }}>1/2</span> WEAPONS
+                </div>
+              </>) : state.mountedVehicleName === 'APC' ? (<>
+                <div>
+                  <span style={{ color: '#e8e8f0' }}>W/S</span> FWD/BACK
+                  {' '}<span style={{ color: '#e8e8f0' }}>A/D</span> YAW
+                </div>
+              </>) : (<>
+                <div>
+                  <span style={{ color: '#e8e8f0' }}>W/S</span> FWD/BACK
+                  {' '}<span style={{ color: '#e8e8f0' }}>A/D</span> YAW
+                  {' '}<span style={{ color: '#e8e8f0' }}>Q/E</span> STRAFE
+                </div>
+                <div>
+                  <span style={{ color: '#e8e8f0' }}>SPACE</span> ASCEND
+                  {' '}<span style={{ color: '#e8e8f0' }}>SHIFT</span> DESCEND
+                  {' '}<span style={{ color: '#e8e8f0' }}>1/2</span> WEAPONS
+                </div>
+              </>)}
+            </div>
+          )}
           <div style={{
             fontFamily: 'var(--font-pixel)',
             fontSize: '8px',

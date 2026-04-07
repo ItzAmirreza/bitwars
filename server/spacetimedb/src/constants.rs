@@ -375,6 +375,8 @@ pub const SANDBOX_APC_COUNT: usize = 2;
 pub const APC_SPAWN_CLEARANCE_RADIUS: i32 = 5;
 /// Not in shared JSON — server-only spawn config.
 pub const APC_SPAWN_CLEARANCE_HEIGHT: i32 = 5;
+/// Not in shared JSON — server-only spawn config.
+pub const APC_SPAWN_MIN_SEPARATION: f32 = 32.0;
 
 pub fn apc_scale() -> f32 {
     shared_config::config().apc.scale
