@@ -427,10 +427,10 @@
       "SpeedBoost": 2,
       "Shield": 3
     },
-    "doubleDamageDurationSecs": 15,
+    "doubleDamageDurationSecs": 7.5,
     "doubleDamageMultiplier": 2.0,
     "speedBoostDurationSecs": 12,
-    "speedBoostMultiplier": 1.6,
+    "speedBoostMultiplier": 2.4,
     "shieldDurationSecs": 15,
     "shieldDamageReduction": 0.5,
     "pickupRadius": 2.0,
