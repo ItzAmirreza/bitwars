@@ -54,6 +54,7 @@ const HEARD_CONTACT_MS = 3200;
 const MAX_VIEW_DOT = -0.2;
 const SPAWN_RUSH_MS = 4200;
 const BREACH_COOLDOWN_MS = 2400;
+const MIN_SAFE_FOOT_Y = 3;
 
 type IdentityLike = {
   toHexString?: () => string;
@@ -1287,6 +1288,30 @@ export class HeadlessBitBot {
     return bestGround;
   }
 
+  /** Scan from the top of the world to find the actual surface foot Y. */
+  private findSurfaceFootY(x: number, z: number): number | null {
+    const hw = BOT_HALF_WIDTH;
+    const points = [
+      [x, z],
+      [x - hw, z - hw],
+      [x + hw, z - hw],
+      [x - hw, z + hw],
+      [x + hw, z + hw],
+    ] as const;
+
+    let bestGround = -1;
+    for (const [sx, sz] of points) {
+      const ground = this.world.getGroundHeightBelow(sx, WORLD.sizeY - 1, sz);
+      if (ground >= 0) {
+        bestGround = Math.max(bestGround, ground + 1);
+      }
+    }
+
+    if (bestGround < 0) return null;
+    if (!this.positionClear(x, bestGround, z)) return null;
+    return bestGround;
+  }
+
   private shouldJumpObstacle(
     me: PlayerRow,
     dirX: number,
@@ -1397,6 +1422,39 @@ export class HeadlessBitBot {
     grounded: boolean;
     climbing: boolean;
   } {
+    // Don't move if terrain data isn't loaded — prevents falling through unloaded chunks
+    if (!this.world.isColumnLoaded(me.pos.x, me.pos.z)) {
+      this.verticalVelocity = 0;
+      return {
+        nextPos: { ...me.pos },
+        velocity: { x: 0, y: 0, z: 0 },
+        sprinting: false,
+        grounded: true,
+        climbing: false,
+      };
+    }
+
+    // Recovery: if bot fell underground (e.g. chunks loaded late), find the
+    // actual surface and snap back up
+    const earlyFootY = me.pos.y - BOT_EYE_HEIGHT;
+    if (earlyFootY < MIN_SAFE_FOOT_Y) {
+      const surfaceFootY = this.findSurfaceFootY(me.pos.x, me.pos.z);
+      if (surfaceFootY !== null && surfaceFootY > earlyFootY) {
+        this.verticalVelocity = 0;
+        return {
+          nextPos: {
+            x: me.pos.x,
+            y: clamp(surfaceFootY + BOT_EYE_HEIGHT, 0.5, WORLD.sizeY - 0.5),
+            z: me.pos.z,
+          },
+          velocity: { x: 0, y: 0, z: 0 },
+          sprinting: false,
+          grounded: true,
+          climbing: false,
+        };
+      }
+    }
+
     if (me.spawnProtected && now >= this.spawnRushUntil) {
       this.spawnRushUntil = now + SPAWN_RUSH_MS;
       this.moveDirective = this.chooseSpawnExitWaypoint(me, now);

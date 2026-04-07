@@ -84,7 +84,7 @@ export class WorldSnapshot {
   }
 
   getGroundHeightBelow(x: number, footY: number, z: number): number {
-    const startY = Math.min(WORLD_Y - 1, Math.floor(footY));
+    const startY = Math.max(0, Math.min(WORLD_Y - 1, Math.floor(footY)));
     for (let y = startY; y >= 0; y--) {
       if (this.getBlock(x, y, z) !== 0) return y;
     }
