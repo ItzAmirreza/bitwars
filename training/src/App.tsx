@@ -2,8 +2,7 @@ import { useState } from 'react';
 import TrainingControls from './dashboard/TrainingControls';
 import RewardChart from './dashboard/RewardChart';
 import CheckpointManager from './dashboard/CheckpointManager';
-import MapView3D from './preview/MapView3D';
-import MapView2D from './preview/MapView2D';
+import PreviewPage from './preview/PreviewPage';
 import EpisodePlayer from './replay/EpisodePlayer';
 
 export default function App() {
@@ -69,14 +68,7 @@ export default function App() {
 
         {/* Preview view */}
         {view === 'preview' && (
-          <div style={{ display: 'flex', gap: 16, height: '100%' }}>
-            <div style={{ flex: 2, height: '100%' }}>
-              <MapView3D />
-            </div>
-            <div style={{ flex: 1, height: '100%' }}>
-              <MapView2D />
-            </div>
-          </div>
+          <PreviewPage />
         )}
 
         {/* Replay view */}

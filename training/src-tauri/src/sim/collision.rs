@@ -71,12 +71,12 @@ pub fn move_with_collision(
     // Resolve X axis
     let mut new_x = pos_x + dx;
     let mut collided_x = false;
-    'x_loop: for bx in (new_x - PLAYER_HALF_WIDTH).floor() as i32
-        ..=(new_x + PLAYER_HALF_WIDTH).floor() as i32
+    'x_loop: for bx in
+        (new_x - PLAYER_HALF_WIDTH).floor() as i32..=(new_x + PLAYER_HALF_WIDTH).floor() as i32
     {
         for by in min_by..=max_by {
-            for bz in
-                (pos_z - PLAYER_HALF_WIDTH).floor() as i32..=(pos_z + PLAYER_HALF_WIDTH).floor() as i32
+            for bz in (pos_z - PLAYER_HALF_WIDTH).floor() as i32
+                ..=(pos_z + PLAYER_HALF_WIDTH).floor() as i32
             {
                 if world.get_block(bx, by, bz) != AIR {
                     collided_x = true;
@@ -94,8 +94,8 @@ pub fn move_with_collision(
     // Resolve Z axis (using resolved X)
     let mut new_z = pos_z + dz;
     let mut collided_z = false;
-    'z_loop: for bx in (new_x - PLAYER_HALF_WIDTH).floor() as i32
-        ..=(new_x + PLAYER_HALF_WIDTH).floor() as i32
+    'z_loop: for bx in
+        (new_x - PLAYER_HALF_WIDTH).floor() as i32..=(new_x + PLAYER_HALF_WIDTH).floor() as i32
     {
         for by in min_by..=max_by {
             for bz in (new_z - PLAYER_HALF_WIDTH).floor() as i32
@@ -178,4 +178,3 @@ pub fn get_ground_level(world: &EnvTerrain, pos_x: f32, pos_z: f32, foot_y: f32)
     }
     max_ground
 }
-

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   LineChart,
@@ -17,6 +17,9 @@ interface RewardPoint {
   avg: number;
 }
 
+/** Max chart data points fed to Recharts. More than this hammers the SVG renderer. */
+const MAX_CHART_POINTS = 500;
+
 const panelStyle: React.CSSProperties = {
   background: '#1a1a1a',
   border: '3px solid #3a3a3a',
@@ -33,38 +36,68 @@ const labelStyle: React.CSSProperties = {
 
 export default function RewardChart() {
   const [data, setData] = useState<RewardPoint[]>([]);
+  const inFlightRef = useRef(false);
+  const lastLenRef = useRef(0);
 
   const fetchData = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const history = await invoke<[number, number][]>('get_reward_history');
-      const points: RewardPoint[] = [];
-      const windowSize = 100;
-
-      for (let i = 0; i < history.length; i++) {
-        const [ep, reward] = history[i];
-        // Rolling average
-        const start = Math.max(0, i - windowSize + 1);
-        let sum = 0;
-        for (let j = start; j <= i; j++) {
-          sum += history[j][1];
-        }
-        const avg = sum / (i - start + 1);
-        points.push({ episode: ep, reward, avg });
+      if (!Array.isArray(history)) {
+        setData([]);
+        inFlightRef.current = false;
+        return;
       }
 
-      // Downsample if too many points (keep last 2000)
-      if (points.length > 2000) {
-        const step = Math.ceil(points.length / 2000);
-        const sampled = points.filter((_, i) => i % step === 0 || i === points.length - 1);
+      // Skip re-render if nothing changed — the biggest CPU saver
+      if (history.length === lastLenRef.current) {
+        inFlightRef.current = false;
+        return;
+      }
+      lastLenRef.current = history.length;
+
+      const windowSize = 100;
+      const sanitizedHistory = history.filter(
+        (point): point is [number, number] =>
+          Array.isArray(point)
+          && point.length >= 2
+          && Number.isFinite(point[0])
+          && Number.isFinite(point[1]),
+      );
+
+      // O(n) sliding window
+      const points: RewardPoint[] = new Array(sanitizedHistory.length);
+      let windowSum = 0;
+      for (let i = 0; i < sanitizedHistory.length; i++) {
+        const [ep, reward] = sanitizedHistory[i];
+        windowSum += reward;
+        if (i >= windowSize) {
+          windowSum -= sanitizedHistory[i - windowSize][1];
+        }
+        const count = Math.min(i + 1, windowSize);
+        const avg = windowSum / count;
+        points[i] = { episode: ep, reward, avg: Number.isFinite(avg) ? avg : 0 };
+      }
+
+      // Downsample for Recharts SVG rendering (max MAX_CHART_POINTS)
+      if (points.length > MAX_CHART_POINTS) {
+        const step = points.length / MAX_CHART_POINTS;
+        const sampled: RewardPoint[] = [];
+        for (let i = 0; i < MAX_CHART_POINTS - 1; i++) {
+          sampled.push(points[Math.floor(i * step)]);
+        }
+        sampled.push(points[points.length - 1]);
         setData(sampled);
       } else {
         setData(points);
       }
     } catch { /* ignore */ }
+    inFlightRef.current = false;
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(fetchData, 1000);
+    const interval = setInterval(fetchData, 3000);
     fetchData();
     return () => clearInterval(interval);
   }, [fetchData]);

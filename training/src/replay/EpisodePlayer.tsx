@@ -24,6 +24,13 @@ interface EpisodeRecording {
   timestamp: string;
 }
 
+interface EpisodeListItem {
+  timestamp: string;
+  total_reward: number;
+  episode_length: number;
+  strategies_detected: string[];
+}
+
 const panelStyle: React.CSSProperties = {
   background: '#1a1a1a',
   border: '3px solid #3a3a3a',
@@ -39,14 +46,50 @@ const labelStyle: React.CSSProperties = {
 };
 
 export default function EpisodePlayer() {
-  const [episodes, setEpisodes] = useState<{ id: number; reward: number; length: number; strategies: string[] }[]>([]);
-  const [selectedEp, setSelectedEp] = useState<number | null>(null);
+  const [episodes, setEpisodes] = useState<EpisodeListItem[]>([]);
+  const [selectedTimestamp, setSelectedTimestamp] = useState<string | null>(null);
   const [recording, setRecording] = useState<EpisodeRecording | null>(null);
   const [frameIdx, setFrameIdx] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [actionStatus, setActionStatus] = useState<{ msg: string; ok: boolean } | null>(null);
   const animRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
+
+  // Poll only lightweight metadata — no frame data
+  const fetchEpisodeList = useCallback(async () => {
+    try {
+      const list = await invoke<EpisodeListItem[]>('get_episode_list');
+      setEpisodes(list);
+      // If the selected recording was deleted on the backend, clear it
+      if (selectedTimestamp !== null && !list.some((ep) => ep.timestamp === selectedTimestamp)) {
+        setSelectedTimestamp(null);
+        setRecording(null);
+        setFrameIdx(0);
+        setIsPlaying(false);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [selectedTimestamp]);
+
+  useEffect(() => {
+    const interval = setInterval(fetchEpisodeList, 2000);
+    fetchEpisodeList();
+    return () => clearInterval(interval);
+  }, [fetchEpisodeList]);
+
+  // Fetch full frame data only when a replay is selected
+  const fetchFullRecording = useCallback(async (timestamp: string) => {
+    try {
+      const raw = await invoke<string>('get_episode_replay', { timestamp });
+      const parsed = JSON.parse(raw) as EpisodeRecording;
+      setRecording(parsed);
+    } catch {
+      setRecording(null);
+      setSelectedTimestamp(null);
+    }
+  }, []);
 
   // Playback loop
   useEffect(() => {
@@ -75,9 +118,76 @@ export default function EpisodePlayer() {
 
   const frame = recording?.frames[frameIdx];
 
+  const showActionStatus = (msg: string, ok: boolean) => {
+    setActionStatus({ msg, ok });
+    window.setTimeout(() => setActionStatus(null), 3000);
+  };
+
+  const handleDeleteReplay = async (timestamp: string) => {
+    try {
+      const msg = await invoke<string>('delete_replay', { timestamp });
+      if (selectedTimestamp === timestamp) {
+        setSelectedTimestamp(null);
+        setRecording(null);
+        setFrameIdx(0);
+        setIsPlaying(false);
+      }
+      showActionStatus(msg, true);
+      await fetchEpisodeList();
+    } catch (e) {
+      showActionStatus(String(e), false);
+    }
+  };
+
+  const handleClearReplays = async () => {
+    try {
+      const msg = await invoke<string>('clear_replays');
+      setSelectedTimestamp(null);
+      setRecording(null);
+      setFrameIdx(0);
+      setIsPlaying(false);
+      showActionStatus(msg, true);
+      await fetchEpisodeList();
+    } catch (e) {
+      showActionStatus(String(e), false);
+    }
+  };
+
   return (
     <div style={panelStyle}>
-      <div style={labelStyle}>EPISODE REPLAY</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ ...labelStyle, marginBottom: 0 }}>EPISODE REPLAY ({episodes.length})</div>
+        <button
+          onClick={handleClearReplays}
+          disabled={episodes.length === 0}
+          style={{
+            background: episodes.length === 0 ? '#1f1f1f' : '#2a2a2a',
+            color: episodes.length === 0 ? '#555' : '#ff6666',
+            border: `2px solid ${episodes.length === 0 ? '#2a2a2a' : '#3a3a3a'}`,
+            padding: '2px 8px',
+            fontFamily: 'var(--font-pixel)',
+            fontSize: 7,
+            cursor: episodes.length === 0 ? 'default' : 'pointer',
+            textTransform: 'uppercase',
+          }}
+        >
+          clear
+        </button>
+      </div>
+
+      {actionStatus && (
+        <div style={{
+          padding: '4px 8px',
+          marginBottom: 8,
+          background: actionStatus.ok ? '#1a2a1a' : '#2a1a1a',
+          border: `2px solid ${actionStatus.ok ? '#00ff88' : '#ff4444'}`,
+          fontFamily: 'var(--font-mono)',
+          fontSize: 10,
+          color: actionStatus.ok ? '#00ff88' : '#ff4444',
+        }}>
+          {actionStatus.msg}
+        </div>
+      )}
 
       {/* Episode list */}
       {!recording && (
@@ -89,39 +199,61 @@ export default function EpisodePlayer() {
           )}
           {episodes.map((ep) => (
             <div
-              key={ep.id}
-              onClick={() => setSelectedEp(ep.id)}
+              key={ep.timestamp}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
                 padding: '4px 8px',
                 borderBottom: '1px solid #2a2a2a',
-                cursor: 'pointer',
-                background: selectedEp === ep.id ? '#1a2a1a' : 'transparent',
+                background: selectedTimestamp === ep.timestamp ? '#1a2a1a' : 'transparent',
               }}
             >
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#00ff88' }}>
-                R: {ep.reward.toFixed(1)}
-              </span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#888' }}>
-                | {ep.length} frames
-              </span>
-              {ep.strategies.map((s) => (
-                <span
-                  key={s}
-                  style={{
-                    fontFamily: 'var(--font-pixel)',
-                    fontSize: 6,
-                    color: '#ffaa00',
-                    background: '#2a2a1a',
-                    padding: '1px 4px',
-                    border: '1px solid #ffaa00',
-                  }}
-                >
-                  {s}
+              <div
+                onClick={() => {
+                  setSelectedTimestamp(ep.timestamp);
+                  setFrameIdx(0);
+                  setIsPlaying(false);
+                  fetchFullRecording(ep.timestamp);
+                }}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, cursor: 'pointer' }}
+              >
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#00ff88' }}>
+                  R: {ep.total_reward.toFixed(1)}
                 </span>
-              ))}
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#888' }}>
+                  | {ep.episode_length} frames
+                </span>
+                {ep.strategies_detected.map((s) => (
+                  <span
+                    key={s}
+                    style={{
+                      fontFamily: 'var(--font-pixel)',
+                      fontSize: 6,
+                      color: '#ffaa00',
+                      background: '#2a2a1a',
+                      padding: '1px 4px',
+                      border: '1px solid #ffaa00',
+                    }}
+                  >
+                    {s}
+                  </span>
+                ))}
+              </div>
+              <button
+                onClick={() => handleDeleteReplay(ep.timestamp)}
+                style={{
+                  background: '#2a2a2a',
+                  color: '#ff6666',
+                  border: '2px solid #3a3a3a',
+                  padding: '2px 8px',
+                  fontFamily: 'var(--font-pixel)',
+                  fontSize: 7,
+                  cursor: 'pointer',
+                }}
+              >
+                DEL
+              </button>
             </div>
           ))}
         </div>
@@ -188,6 +320,7 @@ export default function EpisodePlayer() {
             <button
               onClick={() => {
                 setRecording(null);
+                setSelectedTimestamp(null);
                 setFrameIdx(0);
                 setIsPlaying(false);
               }}
@@ -203,6 +336,24 @@ export default function EpisodePlayer() {
               }}
             >
               CLOSE
+            </button>
+            <button
+              onClick={() => {
+                if (recording) {
+                  void handleDeleteReplay(recording.timestamp);
+                }
+              }}
+              style={{
+                background: '#2a2a2a',
+                color: '#ff6666',
+                border: '2px solid #3a3a3a',
+                padding: '4px 12px',
+                fontFamily: 'var(--font-pixel)',
+                fontSize: 8,
+                cursor: 'pointer',
+              }}
+            >
+              DELETE
             </button>
           </div>
 

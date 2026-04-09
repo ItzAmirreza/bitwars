@@ -14,7 +14,7 @@ pub struct ReplayFrame {
     pub yaw: f32,
     /// Pitch angle in radians.
     pub pitch: f32,
-    /// All action values (7 continuous + 1 weapon index).
+    /// Action values [forward, strafe, yaw_delta, pitch_delta, jump, sprint, fire, weapon].
     pub action: [f32; 8],
     /// Selected weapon index.
     pub weapon: u8,
@@ -108,23 +108,10 @@ impl ReplayManager {
             return false;
         }
 
-        // Check if we should keep this recording
-        if self.recordings.len() >= self.max_recordings {
-            // Only keep if better than the worst
-            let worst_reward = self
-                .recordings
-                .last()
-                .map(|r| r.total_reward)
-                .unwrap_or(f32::NEG_INFINITY);
-            if total_reward <= worst_reward {
-                return false;
-            }
-        }
-
         let strategies = detect_strategies(&frames);
         let episode_length = frames.len();
 
-        let recording = EpisodeRecording {
+        self.insert_recording(EpisodeRecording {
             frames,
             total_reward,
             episode_length,
@@ -132,17 +119,28 @@ impl ReplayManager {
             target_pos: self.current_target_pos,
             strategies_detected: strategies,
             timestamp: chrono::Utc::now().to_rfc3339(),
-        };
+        })
+    }
 
-        // Insert in sorted position (descending by reward)
+    pub fn insert_recording(&mut self, recording: EpisodeRecording) -> bool {
+        if self.recordings.len() >= self.max_recordings {
+            let worst_reward = self
+                .recordings
+                .last()
+                .map(|r| r.total_reward)
+                .unwrap_or(f32::NEG_INFINITY);
+            if recording.total_reward <= worst_reward {
+                return false;
+            }
+        }
+
         let insert_pos = self
             .recordings
             .iter()
-            .position(|r| r.total_reward < total_reward)
+            .position(|r| r.total_reward < recording.total_reward)
             .unwrap_or(self.recordings.len());
         self.recordings.insert(insert_pos, recording);
 
-        // Trim to max
         if self.recordings.len() > self.max_recordings {
             self.recordings.truncate(self.max_recordings);
         }
@@ -163,6 +161,21 @@ impl ReplayManager {
     /// Whether the collection is empty.
     pub fn is_empty(&self) -> bool {
         self.recordings.is_empty()
+    }
+
+    pub fn recordings(&self) -> &[EpisodeRecording] {
+        &self.recordings
+    }
+
+    pub fn delete_recording_by_timestamp(&mut self, timestamp: &str) -> bool {
+        let before = self.recordings.len();
+        self.recordings
+            .retain(|recording| recording.timestamp != timestamp);
+        self.recordings.len() != before
+    }
+
+    pub fn clear_recordings(&mut self) {
+        self.recordings.clear();
     }
 
     /// Save all recordings to disk using bincode.
@@ -186,8 +199,7 @@ impl ReplayManager {
 
     /// Load recordings from disk.
     pub fn load_from_disk(&mut self, path: &Path) -> Result<(), String> {
-        let bytes =
-            fs::read(path).map_err(|e| format!("Failed to read replay file: {}", e))?;
+        let bytes = fs::read(path).map_err(|e| format!("Failed to read replay file: {}", e))?;
         let loaded: Vec<EpisodeRecording> = bincode::deserialize(&bytes)
             .map_err(|e| format!("Failed to deserialize replays: {}", e))?;
 
@@ -222,11 +234,14 @@ pub fn detect_strategies(frames: &[ReplayFrame]) -> Vec<String> {
         let prev = &frames[i - 1];
         let curr = &frames[i];
 
-        // "rocket_jump": health decreased AND vertical velocity > 5.0
-        // (suggests the bot took self-damage from an explosion to gain height)
         if !saw_rocket_jump
-            && curr.health < prev.health
-            && curr.vel[1] > 5.0
+            && prev.weapon == 2
+            && prev.action[6] > 0.5
+            && frames[i.saturating_sub(1)..=(i + 2).min(frames.len() - 1)]
+                .iter()
+                .any(|frame| frame.blocks_destroyed > 0)
+            && !curr.on_ground
+            && (curr.vel[1] > prev.vel[1] + 2.5 || curr.pos[1] > prev.pos[1] + 1.5)
         {
             strategies.push("rocket_jump".to_string());
             saw_rocket_jump = true;
@@ -241,15 +256,14 @@ pub fn detect_strategies(frames: &[ReplayFrame]) -> Vec<String> {
             }
         }
 
-        // "speed_boost": horizontal speed exceeds normal max (roughly > 8.0)
+        // "speed_boost": horizontal speed exceeds normal sprint speed.
         if !saw_speed_boost {
             let horiz_speed = (curr.vel[0] * curr.vel[0] + curr.vel[2] * curr.vel[2]).sqrt();
-            if horiz_speed > 8.0 {
+            if horiz_speed > 20.0 {
                 strategies.push("speed_boost".to_string());
                 saw_speed_boost = true;
             }
         }
-
     }
 
     // "wall_climb": multiple consecutive frames where bot is not on ground

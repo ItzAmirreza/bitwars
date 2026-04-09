@@ -2,21 +2,17 @@
 //!
 //! Ties all sim modules together into a reset/step loop for RL training.
 //! Each environment instance has its own CoW terrain, player state, weapons,
-//! abilities, and projectiles. The base terrain is shared via Arc.
+//! and projectiles. The base terrain is shared via Arc.
 
 use std::sync::Arc;
 
 use rand::Rng;
 use rand::SeedableRng;
 
-use super::abilities::AbilitySystem;
 use super::destruction::explode_at;
 use super::knockback;
 use super::movement::{MoveAction, PlayerMovement};
-use super::weapons::{
-    Delivery, Projectile, WeaponState,
-    WEAPONS, NUM_WEAPONS,
-};
+use super::weapons::{Delivery, Projectile, WeaponState, NUM_WEAPONS, WEAPONS};
 use super::world::{BaseTerrain, EnvTerrain};
 use crate::worldgen;
 
@@ -25,26 +21,37 @@ use crate::worldgen;
 /// Simulation timestep: 30 Hz matching server tick rate.
 const SIM_DT: f32 = 1.0 / 30.0;
 
-/// Maximum episode duration in seconds.
-const EPISODE_TIMEOUT: f32 = 30.0;
+/// Per-episode timeout is derived from target distance and active task.
+const EPISODE_TIMEOUT_MIN: f32 = 12.0;
+const EPISODE_TIMEOUT_MAX: f32 = 30.0;
 
 /// Target is a 3x3 block area on the ground.
 const TARGET_SIZE: f32 = 3.0;
 
 /// Observation vector dimension.
-/// 13 (state) + 48 (raycasts) + 27 (3x3x3 grid) + 5 (ammo) + 5 (cooldown) + 5 (flags)
-pub const OBSERVATION_DIM: usize = 103;
+/// 13 (state) + 48 (raycasts) + 27 (3x3x3 grid)
+/// + 3 (ammo) + 3 (cooldown) + 4 (nearest pickup) + 5 (status)
+/// + 3 (current look vector)
+pub const OBSERVATION_DIM: usize = 106;
 
 /// Number of vision raycasts.
 const NUM_RAYS: usize = 48;
 /// Max raycast distance in blocks.
 const RAY_MAX_DIST: f32 = 40.0;
-/// DDA step limit per ray.
-const RAY_MAX_STEPS: u32 = 60;
+/// Max attempts for sampling a scenario-specific spawn/target pair.
+const SCENARIO_SAMPLE_ATTEMPTS: usize = 420;
 
 /// Action vector dimension.
 /// [move_fwd, move_strafe, look_yaw, look_pitch, jump, sprint, fire, weapon_select]
 pub const ACTION_DIM: usize = 8;
+const MAX_YAW_DELTA_PER_STEP: f32 = 0.35;
+const MAX_PITCH_DELTA_PER_STEP: f32 = 0.25;
+
+const PROGRESS_CLAMP: f32 = 2.0;
+const BREACH_FIRE_COST: f32 = 0.02;
+const BREACH_OTHER_FIRE_COST: f32 = 0.05;
+const BREACH_DESTROY_COST_PER_BLOCK: f32 = 0.008;
+const STAGNATION_DRIFT_COST: f32 = 0.02;
 
 // ── Step result types ──
 
@@ -58,7 +65,11 @@ pub struct StepInfo {
     pub distance_to_target: f32,
     pub health: f32,
     pub blocks_destroyed: u32,
+    pub blocks_destroyed_this_step: u32,
     pub reached_target: bool,
+    pub timed_out: bool,
+    pub stalled_out: bool,
+    pub fired_weapon: Option<u8>,
 }
 
 /// Result of a single environment step.
@@ -71,6 +82,180 @@ pub struct StepResult {
     pub info: StepInfo,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScenarioKind {
+    OpenRun,
+    ElevatedTraversal,
+    Breach,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TrainingTask {
+    GroundShort,
+    GroundLong,
+    Elevated,
+    Breach,
+}
+
+impl TrainingTask {
+    pub(crate) fn initial() -> Self {
+        Self::GroundShort
+    }
+
+    pub(crate) fn next(self) -> Option<Self> {
+        match self {
+            Self::GroundShort => Some(Self::GroundLong),
+            Self::GroundLong => Some(Self::Elevated),
+            Self::Elevated => Some(Self::Breach),
+            Self::Breach => None,
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::GroundShort => "Ground Short",
+            Self::GroundLong => "Ground Long",
+            Self::Elevated => "Elevated",
+            Self::Breach => "Breach",
+        }
+    }
+
+    fn layout_kind(self) -> ScenarioKind {
+        match self {
+            Self::GroundShort | Self::GroundLong => ScenarioKind::OpenRun,
+            Self::Elevated => ScenarioKind::ElevatedTraversal,
+            Self::Breach => ScenarioKind::Breach,
+        }
+    }
+
+    fn distance_range(self) -> (f32, f32) {
+        match self {
+            Self::GroundShort => (8.0, 18.0),
+            Self::GroundLong => (18.0, 36.0),
+            Self::Elevated => (14.0, 30.0),
+            Self::Breach => (12.0, 28.0),
+        }
+    }
+
+    pub(crate) fn mastery_window(self) -> usize {
+        match self {
+            Self::GroundShort => 120,
+            Self::GroundLong => 140,
+            Self::Elevated => 160,
+            Self::Breach => 0,
+        }
+    }
+
+    pub(crate) fn mastery_min_episodes(self) -> usize {
+        match self {
+            Self::GroundShort => 96,
+            Self::GroundLong => 112,
+            Self::Elevated => 128,
+            Self::Breach => usize::MAX,
+        }
+    }
+
+    pub(crate) fn mastery_success_rate(self) -> f32 {
+        match self {
+            Self::GroundShort => 0.70,
+            Self::GroundLong => 0.62,
+            Self::Elevated => 0.52,
+            Self::Breach => 1.0,
+        }
+    }
+
+    pub(crate) fn mastery_stall_rate(self) -> f32 {
+        match self {
+            Self::GroundShort => 0.20,
+            Self::GroundLong => 0.28,
+            Self::Elevated => 0.38,
+            Self::Breach => 0.0,
+        }
+    }
+
+    pub(crate) fn mastery_timeout_rate(self) -> f32 {
+        match self {
+            Self::GroundShort => 0.08,
+            Self::GroundLong => 0.10,
+            Self::Elevated => 0.14,
+            Self::Breach => 0.0,
+        }
+    }
+
+    fn weapons_enabled(self) -> bool {
+        matches!(self, Self::Breach)
+    }
+
+    fn progress_scale(self) -> f32 {
+        match self {
+            Self::GroundShort => 6.0,
+            Self::GroundLong => 6.0,
+            Self::Elevated => 5.5,
+            Self::Breach => 5.0,
+        }
+    }
+
+    fn living_cost(self) -> f32 {
+        match self {
+            Self::GroundShort => 0.02,
+            Self::GroundLong => 0.025,
+            Self::Elevated => 0.03,
+            Self::Breach => 0.035,
+        }
+    }
+
+    fn success_bonus(self) -> f32 {
+        match self {
+            Self::GroundShort => 120.0,
+            Self::GroundLong => 135.0,
+            Self::Elevated => 145.0,
+            Self::Breach => 160.0,
+        }
+    }
+
+    fn timeout_penalty(self) -> f32 {
+        match self {
+            Self::GroundShort => 25.0,
+            Self::GroundLong => 30.0,
+            Self::Elevated => 35.0,
+            Self::Breach => 40.0,
+        }
+    }
+
+    fn stall_penalty(self) -> f32 {
+        match self {
+            Self::GroundShort => 15.0,
+            Self::GroundLong => 18.0,
+            Self::Elevated => 24.0,
+            Self::Breach => 28.0,
+        }
+    }
+
+    fn stall_window(self) -> (f32, f32) {
+        match self {
+            Self::GroundShort => (6.0, 4.5),
+            Self::GroundLong => (8.0, 5.5),
+            Self::Elevated => (10.0, 7.0),
+            Self::Breach => (12.0, 8.0),
+        }
+    }
+
+    fn remaining_work(self, distance: f32, height_gap: f32, obstruction_count: u32) -> f32 {
+        match self {
+            Self::GroundShort | Self::GroundLong => distance,
+            Self::Elevated => distance + height_gap * 4.0,
+            Self::Breach => distance + obstruction_count as f32 * 2.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TerminationReason {
+    ReachedTarget,
+    TimedOut,
+    Stalled,
+}
+
 // ── Training Environment ──
 
 /// The core training environment: Gym-like API with reset() and step().
@@ -78,17 +263,30 @@ pub struct TrainingEnv {
     terrain: EnvTerrain,
     player: PlayerMovement,
     weapons: WeaponState,
-    abilities: AbilitySystem,
     target_pos: [f32; 3],
     spawn_pos: [f32; 3],
     episode_time: f32,
+    episode_timeout: f32,
     episode_step: u32,
     total_reward: f32,
     prev_distance: f32,
+    initial_remaining_work: f32,
     active_projectiles: Vec<Projectile>,
     blocks_destroyed: u32,
     rng: rand::rngs::StdRng,
     done: bool,
+    /// Active training task assigned by the outer curriculum controller.
+    task: TrainingTask,
+    /// Smallest remaining-work score seen this episode.
+    best_remaining_work: f32,
+    /// Time since the bot last made meaningful progress toward the target.
+    stagnation_timer: f32,
+    /// Previous remaining-work score used for reward shaping.
+    prev_remaining_work: f32,
+    /// Per-step destruction count used for reward shaping.
+    step_blocks_destroyed: u32,
+    /// Weapon fired on this step, if any.
+    fired_weapon_this_step: Option<u8>,
 }
 
 impl TrainingEnv {
@@ -97,25 +295,28 @@ impl TrainingEnv {
         let terrain = EnvTerrain::new(base_terrain);
         let rng = rand::rngs::StdRng::seed_from_u64(seed);
 
-        // Spawn ability pickups in the world (they persist across episodes)
-        let mut abilities = AbilitySystem::new();
-        abilities.spawn_pickups(&terrain, seed, 12);
-
         TrainingEnv {
             terrain,
             player: PlayerMovement::new(375.0, 30.0, 375.0),
             weapons: WeaponState::new(),
-            abilities,
             target_pos: [0.0; 3],
             spawn_pos: [0.0; 3],
             episode_time: 0.0,
+            episode_timeout: EPISODE_TIMEOUT_MAX,
             episode_step: 0,
             total_reward: 0.0,
             prev_distance: 0.0,
+            initial_remaining_work: 0.0,
             active_projectiles: Vec::new(),
             blocks_destroyed: 0,
             rng,
             done: false,
+            task: TrainingTask::initial(),
+            best_remaining_work: f32::MAX,
+            stagnation_timer: 0.0,
+            prev_remaining_work: 0.0,
+            step_blocks_destroyed: 0,
+            fired_weapon_this_step: None,
         }
     }
 
@@ -124,34 +325,27 @@ impl TrainingEnv {
         // Reset terrain (drop CoW modifications)
         self.terrain.reset();
 
-        // Pick random spawn position on solid ground
-        self.spawn_pos = find_ground_position(&mut self.rng, &self.terrain);
-
-        // Pick random target on ground, at least 30 blocks from spawn
-        self.target_pos = loop {
-            let candidate = find_ground_position(&mut self.rng, &self.terrain);
-            let dx = candidate[0] - self.spawn_pos[0];
-            let dz = candidate[2] - self.spawn_pos[2];
-            let dist = (dx * dx + dz * dz).sqrt();
-            if dist >= 30.0 {
-                break candidate;
-            }
-        };
+        let (min_dist, max_dist) = self.task.distance_range();
+        let (spawn_pos, target_pos) =
+            sample_episode_layout(&mut self.rng, &self.terrain, min_dist, max_dist, self.task);
+        self.spawn_pos = spawn_pos;
+        self.target_pos = target_pos;
+        self.episode_timeout = episode_timeout_for(
+            horizontal_distance(self.spawn_pos, self.target_pos),
+            self.task,
+        );
 
         // Reset player at spawn
-        self.player.reset(
-            self.spawn_pos[0],
-            self.spawn_pos[1],
-            self.spawn_pos[2],
-        );
+        self.player
+            .reset(self.spawn_pos[0], self.spawn_pos[1], self.spawn_pos[2]);
         // Face toward target
         let dx = self.target_pos[0] - self.spawn_pos[0];
         let dz = self.target_pos[2] - self.spawn_pos[2];
         self.player.yaw = dx.atan2(-dz);
 
-        // Reset weapons and abilities
+        // Reset weapons
         self.weapons.reset();
-        self.abilities.reset();
+        self.weapons.select_weapon(0);
 
         // Clear projectiles
         self.active_projectiles.clear();
@@ -160,13 +354,36 @@ impl TrainingEnv {
         self.episode_time = 0.0;
         self.episode_step = 0;
         self.total_reward = 0.0;
+        self.best_remaining_work = f32::MAX;
+        self.stagnation_timer = 0.0;
         self.blocks_destroyed = 0;
+        self.step_blocks_destroyed = 0;
         self.done = false;
+        self.prev_remaining_work = 0.0;
+        self.fired_weapon_this_step = None;
 
-        // Compute initial distance
+        // Compute initial task progress state.
         self.prev_distance = self.distance_to_target();
+        let initial_height_gap = positive_height_gap(self.player.pos_y, self.target_pos[1]);
+        let initial_line_block_count = line_block_count(
+            &self.terrain,
+            [self.player.pos_x, self.player.pos_y, self.player.pos_z],
+            self.target_pos,
+        );
+        let initial_remaining_work = self.task.remaining_work(
+            self.prev_distance,
+            initial_height_gap,
+            initial_line_block_count,
+        );
+        self.initial_remaining_work = initial_remaining_work;
+        self.prev_remaining_work = initial_remaining_work;
+        self.best_remaining_work = initial_remaining_work;
 
         self.compute_observation()
+    }
+
+    pub fn set_task(&mut self, task: TrainingTask) {
+        self.task = task;
     }
 
     /// Take one step in the environment given an action vector.
@@ -179,28 +396,41 @@ impl TrainingEnv {
     ///   [4] jump       (>0.5 = true)
     ///   [5] sprint     (>0.5 = true)
     ///   [6] fire       (>0.5 = true)
-    ///   [7] weapon_select (0-5, discretized)
+    ///   [7] weapon_select (0-2, discretized)
     pub fn step(&mut self, action: &[f32]) -> StepResult {
-        debug_assert!(action.len() >= ACTION_DIM, "Action must have {} elements", ACTION_DIM);
+        debug_assert!(
+            action.len() >= ACTION_DIM,
+            "Action must have {} elements",
+            ACTION_DIM
+        );
+        self.step_blocks_destroyed = 0;
+        self.fired_weapon_this_step = None;
 
         // Parse action
         let forward = action[0].clamp(-1.0, 1.0);
         let strafe = action[1].clamp(-1.0, 1.0);
-        let yaw_delta = action[2];
-        let pitch_delta = action[3];
+        let yaw_delta = action[2].clamp(-1.0, 1.0) * MAX_YAW_DELTA_PER_STEP;
+        let pitch_delta = action[3].clamp(-1.0, 1.0) * MAX_PITCH_DELTA_PER_STEP;
         let jump = action[4] > 0.5;
         let sprint = action[5] > 0.5;
         let fire = action[6] > 0.5;
         let weapon_select = (action[7].round() as usize).min(NUM_WEAPONS - 1);
+        let next_yaw = self.player.yaw + yaw_delta;
+        let next_pitch = (self.player.pitch + pitch_delta)
+            .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
+        let weapons_enabled = self.task.weapons_enabled();
 
         // Handle weapon switching
-        self.weapons.select_weapon(weapon_select);
+        self.weapons
+            .select_weapon(if weapons_enabled { weapon_select } else { 0 });
 
         // Tick weapon sim time
         self.weapons.tick(SIM_DT);
 
+        let mut fired_weapon = None;
+
         // Handle fire action
-        if fire {
+        if weapons_enabled && fire {
             let w = self.weapons.current_weapon;
             // Auto-reload if empty (matches real game's instant infantry reload)
             if self.weapons.ammo[w] == 0 {
@@ -208,21 +438,27 @@ impl TrainingEnv {
             }
             if self.weapons.can_fire(w) {
                 let def = &WEAPONS[w];
+                fired_weapon = Some(def.index);
+                self.fired_weapon_this_step = fired_weapon;
                 // Compute fire direction from yaw and pitch
-                let cos_pitch = self.player.pitch.cos();
-                let dir_x = -self.player.yaw.sin() * cos_pitch;
-                let dir_y = -self.player.pitch.sin();
-                let dir_z = -self.player.yaw.cos() * cos_pitch;
+                let cos_pitch = next_pitch.cos();
+                let dir_x = -next_yaw.sin() * cos_pitch;
+                let dir_y = -next_pitch.sin();
+                let dir_z = -next_yaw.cos() * cos_pitch;
 
                 // Deduct ammo and set cooldown
                 self.weapons.fire(w);
 
                 match def.delivery {
                     Delivery::Projectile => {
-                        // Spawn a projectile (RPG, Sniper)
+                        // Spawn an RPG projectile.
                         self.active_projectiles.push(Projectile::new(
-                            self.player.pos_x, self.player.pos_y, self.player.pos_z,
-                            dir_x, dir_y, dir_z,
+                            self.player.pos_x,
+                            self.player.pos_y,
+                            self.player.pos_z,
+                            dir_x,
+                            dir_y,
+                            dir_z,
                             w,
                         ));
                     }
@@ -234,25 +470,19 @@ impl TrainingEnv {
         }
 
         // Tick projectiles
+        let blocks_before = self.blocks_destroyed;
         self.tick_projectiles();
+        self.step_blocks_destroyed = self.blocks_destroyed - blocks_before;
 
-        // Tick ability system and check for pickups
-        self.abilities.tick(SIM_DT);
-        let player_pos_tuple = (self.player.pos_x, self.player.pos_y, self.player.pos_z);
-        self.abilities.try_collect(player_pos_tuple);
-
-        // Apply speed multiplier from abilities
-        self.player.speed_multiplier = self.abilities.get_speed_multiplier();
+        // Early curriculum removes pickups and buff interactions entirely.
+        self.player.speed_multiplier = 1.0;
 
         // Build move action
         let move_action = MoveAction {
             forward,
             strafe,
-            yaw: self.player.yaw + yaw_delta,
-            pitch: (self.player.pitch + pitch_delta).clamp(
-                -std::f32::consts::FRAC_PI_2,
-                std::f32::consts::FRAC_PI_2,
-            ),
+            yaw: next_yaw,
+            pitch: next_pitch,
             jump,
             sprint,
         };
@@ -269,8 +499,11 @@ impl TrainingEnv {
         self.total_reward += reward;
 
         // Check done
-        let reached = self.reached_target();
-        self.done = self.check_done();
+        let termination = self.termination_reason();
+        let reached = matches!(termination, Some(TerminationReason::ReachedTarget));
+        let timed_out = matches!(termination, Some(TerminationReason::TimedOut));
+        let stalled_out = matches!(termination, Some(TerminationReason::Stalled));
+        self.done = termination.is_some();
 
         let observation = self.compute_observation();
 
@@ -281,7 +514,11 @@ impl TrainingEnv {
             distance_to_target: self.distance_to_target(),
             health: self.player.health,
             blocks_destroyed: self.blocks_destroyed,
+            blocks_destroyed_this_step: self.blocks_destroyed - blocks_before,
             reached_target: reached,
+            timed_out,
+            stalled_out,
+            fired_weapon,
         };
 
         StepResult {
@@ -302,13 +539,15 @@ impl TrainingEnv {
     ///   [12]      Distance to target (normalized)
     ///   [13..61]  48 raycast distances (0=wall at face, 1=clear to max range)
     ///   [61..88]  3x3x3 immediate terrain grid (27 values, for close collision)
-    ///   [88..93]  Ammo per weapon (normalized, 5 weapons)
-    ///   [93..98]  Cooldown per weapon (normalized, 5 weapons)
+    ///   [88..91]  Ammo per weapon (normalized, 3 weapons)
+    ///   [91..94]  Cooldown per weapon (normalized, 3 weapons)
+    ///   [94..98]  Reserved pickup slots (zeroed in the staged curriculum)
     ///   [98]      Health (normalized)
-    ///   [99]      Speed multiplier (normalized)
+    ///   [99]      Reserved buff slot (zeroed in the staged curriculum)
     ///   [100]     On ground
     ///   [101]     Is climbing
     ///   [102]     Current weapon (normalized)
+    ///   [103..106] Current look vector in world space
     pub fn compute_observation(&self) -> Vec<f32> {
         let mut obs = Vec::with_capacity(OBSERVATION_DIM);
 
@@ -352,12 +591,9 @@ impl TrainingEnv {
         let eye_y = self.player.pos_y;
         let eye_z = self.player.pos_z;
 
-        let ray_dirs = compute_ray_directions(self.player.yaw);
+        let ray_dirs = compute_ray_directions(self.player.yaw, self.player.pitch);
         for dir in &ray_dirs {
-            let hit_dist = cast_ray(
-                &self.terrain, eye_x, eye_y, eye_z,
-                dir.0, dir.1, dir.2,
-            );
+            let hit_dist = cast_ray(&self.terrain, eye_x, eye_y, eye_z, dir.0, dir.1, dir.2);
             obs.push(hit_dist / RAY_MAX_DIST); // 0=wall at face, 1=clear to max
         }
 
@@ -368,38 +604,64 @@ impl TrainingEnv {
         for dy_off in -1..=1 {
             for dz_off in -1..=1 {
                 for dx_off in -1..=1 {
-                    let block = self.terrain.get_block(
-                        px + dx_off, py + dy_off, pz + dz_off,
-                    );
+                    let block = self
+                        .terrain
+                        .get_block(px + dx_off, py + dy_off, pz + dz_off);
                     obs.push(if block != worldgen::AIR { 1.0 } else { 0.0 });
                 }
             }
         }
 
-        // [88..94]: Ammo per weapon normalized
-        for i in 0..NUM_WEAPONS {
-            let max = WEAPONS[i].max_ammo as f32;
-            obs.push(if max > 0.0 { self.weapons.ammo[i] as f32 / max } else { 0.0 });
+        // [88..91], [91..94]: weapon state. Early tasks disable combat and keep
+        // these slots at zero for checkpoint-shape compatibility.
+        if self.task.weapons_enabled() {
+            for i in 0..NUM_WEAPONS {
+                let max = WEAPONS[i].max_ammo as f32;
+                obs.push(if max > 0.0 {
+                    self.weapons.ammo[i] as f32 / max
+                } else {
+                    0.0
+                });
+            }
+
+            for i in 0..NUM_WEAPONS {
+                let cooldown = 1.0 / WEAPONS[i].fire_rate;
+                let elapsed = self.weapons.sim_time - self.weapons.last_fire_times[i];
+                let remaining = (cooldown - elapsed).max(0.0);
+                obs.push(if cooldown > 0.0 {
+                    remaining / cooldown
+                } else {
+                    0.0
+                });
+            }
+        } else {
+            obs.extend_from_slice(&[0.0; 6]);
         }
 
-        // [94..100]: Cooldown remaining normalized
-        for i in 0..NUM_WEAPONS {
-            let cooldown = 1.0 / WEAPONS[i].fire_rate;
-            let elapsed = self.weapons.sim_time - self.weapons.last_fire_times[i];
-            let remaining = (cooldown - elapsed).max(0.0);
-            obs.push(if cooldown > 0.0 { remaining / cooldown } else { 0.0 });
-        }
+        // [94..98]: pickups are disabled in the staged curriculum.
+        obs.extend_from_slice(&[0.0, 0.0, 1.0, 0.0]);
 
-        // [100]: Health
+        // [98]: Health
         obs.push(self.player.health / self.player.max_health);
-        // [101]: Speed multiplier
-        obs.push(self.player.speed_multiplier / 2.4);
-        // [102]: On ground
+        // [99]: Speed multiplier / buff state — held at zero with buffs disabled.
+        obs.push(0.0);
+        // [100]: On ground
         obs.push(if self.player.on_ground { 1.0 } else { 0.0 });
-        // [103]: Is climbing
+        // [101]: Is climbing
         obs.push(if self.player.is_climbing { 1.0 } else { 0.0 });
-        // [104]: Current weapon
-        obs.push(self.weapons.current_weapon as f32 / 4.0);
+        // [102]: Current weapon
+        obs.push(if self.task.weapons_enabled() {
+            self.weapons.current_weapon as f32 / (NUM_WEAPONS.saturating_sub(1).max(1) as f32)
+        } else {
+            0.0
+        });
+
+        // [103..106]: current look vector in world space. This makes the egocentric
+        // ray stack coherent with the world-space target vector already in the obs.
+        let cos_pitch = self.player.pitch.cos();
+        obs.push(-self.player.yaw.sin() * cos_pitch);
+        obs.push(-self.player.pitch.sin());
+        obs.push(-self.player.yaw.cos() * cos_pitch);
 
         debug_assert_eq!(obs.len(), OBSERVATION_DIM);
         obs
@@ -409,54 +671,99 @@ impl TrainingEnv {
 
     /// Compute dense reward for the current step.
     fn compute_reward(&mut self) -> f32 {
-        let mut reward = 0.0f32;
         let current_distance = self.distance_to_target();
+        let current_height_gap = positive_height_gap(self.player.pos_y, self.target_pos[1]);
+        let current_line_block_count = line_block_count(
+            &self.terrain,
+            [self.player.pos_x, self.player.pos_y, self.player.pos_z],
+            self.target_pos,
+        );
+        let current_remaining_work = self.task.remaining_work(
+            current_distance,
+            current_height_gap,
+            current_line_block_count,
+        );
 
-        // Distance decrease reward — got closer = positive, moved away = negative
-        // Scaled so sprinting straight at target (~0.6 blocks/step) gives ~+1.5/step
-        reward += (self.prev_distance - current_distance) * 2.5;
+        // Reward only reduction in remaining task work. The remaining-work
+        // definition changes by stage, but the shaping rule stays the same.
+        let progress = (self.prev_remaining_work - current_remaining_work)
+            .clamp(-PROGRESS_CLAMP, PROGRESS_CLAMP);
+        let mut reward = progress * self.task.progress_scale();
 
-        // Velocity toward target bonus — encourages speed, not just inching forward
-        let speed = self.player.horizontal_speed;
-        if speed > 0.1 {
-            let dx = self.target_pos[0] - self.player.pos_x;
-            let dz = self.target_pos[2] - self.player.pos_z;
-            let target_dist = (dx * dx + dz * dz).sqrt();
-            if target_dist > 0.1 {
-                let target_dir_x = dx / target_dist;
-                let target_dir_z = dz / target_dist;
-                let vel_dir_x = self.player.h_vel_x / speed;
-                let vel_dir_z = self.player.h_vel_z / speed;
-                let dot = vel_dir_x * target_dir_x + vel_dir_z * target_dir_z;
-                reward += dot * speed / 10.0;
+        if self.task.weapons_enabled() {
+            if self.step_blocks_destroyed > 0 {
+                reward -= self.step_blocks_destroyed as f32 * BREACH_DESTROY_COST_PER_BLOCK;
+            }
+            if let Some(weapon) = self.fired_weapon_this_step {
+                reward -= if weapon == 2 {
+                    BREACH_FIRE_COST
+                } else {
+                    BREACH_OTHER_FIRE_COST
+                };
             }
         }
 
-        // Arrival bonus
-        if self.reached_target() {
-            reward += 100.0;
+        reward -= self.task.living_cost();
+
+        if current_remaining_work < self.best_remaining_work - 0.25 {
+            self.best_remaining_work = current_remaining_work;
+            self.stagnation_timer = 0.0;
+        } else {
+            self.stagnation_timer += SIM_DT;
+            if self.stagnation_timer > 1.5 {
+                reward -= STAGNATION_DRIFT_COST;
+            }
         }
 
-        // Time penalty — small, just enough to prefer faster routes
-        reward -= 0.05;
+        let reached_target = self.reached_target();
+        let timed_out = self.episode_time >= self.episode_timeout;
+        let stalled_out = self.should_abort_for_stall(current_remaining_work);
 
-        // Update prev_distance for next step
+        if reached_target {
+            let time_left = (self.episode_timeout - self.episode_time).max(0.0);
+            reward += self.task.success_bonus() + time_left * 3.0;
+        } else if timed_out {
+            reward -= self.task.timeout_penalty();
+        } else if stalled_out {
+            reward -= self.task.stall_penalty();
+        }
+
+        // Update rolling state for next step.
         self.prev_distance = current_distance;
+        self.prev_remaining_work = current_remaining_work;
 
         reward
     }
 
-    /// Check if the episode is done.
-    fn check_done(&self) -> bool {
-        // Reached target
+    fn termination_reason(&self) -> Option<TerminationReason> {
+        let current_remaining_work = self.current_remaining_work();
         if self.reached_target() {
-            return true;
+            Some(TerminationReason::ReachedTarget)
+        } else if self.episode_time >= self.episode_timeout {
+            Some(TerminationReason::TimedOut)
+        } else if self.should_abort_for_stall(current_remaining_work) {
+            Some(TerminationReason::Stalled)
+        } else {
+            None
         }
-        // Episode timeout
-        if self.episode_time >= EPISODE_TIMEOUT {
-            return true;
-        }
-        false
+    }
+
+    fn should_abort_for_stall(&self, current_remaining_work: f32) -> bool {
+        let (min_time, max_stagnation) = self.task.stall_window();
+        let near_finish = current_remaining_work <= (self.initial_remaining_work * 0.30).max(4.0);
+        !near_finish && self.episode_time >= min_time && self.stagnation_timer >= max_stagnation
+    }
+
+    fn current_remaining_work(&self) -> f32 {
+        let distance = self.distance_to_target();
+        let height_gap = positive_height_gap(self.player.pos_y, self.target_pos[1]);
+        let obstruction_count = line_block_count(
+            &self.terrain,
+            [self.player.pos_x, self.player.pos_y, self.player.pos_z],
+            self.target_pos,
+        );
+        self.task
+            .remaining_work(distance, height_gap, obstruction_count)
     }
 
     /// Check if the player has reached the target.
@@ -512,12 +819,8 @@ impl TrainingEnv {
         // Apply knockback to player (matches client-side knockback formula)
         let player_pos = (self.player.pos_x, self.player.pos_y, self.player.pos_z);
         let explosion_pos = (pos[0], pos[1], pos[2]);
-        let (kx, ky, kz) = knockback::apply_explosion_knockback(
-            player_pos,
-            explosion_pos,
-            radius,
-            damage,
-        );
+        let (kx, ky, kz) =
+            knockback::apply_explosion_knockback(player_pos, explosion_pos, radius, damage);
         if kx.abs() > 0.01 || ky.abs() > 0.01 || kz.abs() > 0.01 {
             self.player.apply_impulse(kx, ky, kz);
         }
@@ -541,6 +844,10 @@ impl TrainingEnv {
         self.target_pos
     }
 
+    pub fn spawn_pos(&self) -> [f32; 3] {
+        self.spawn_pos
+    }
+
     /// Get the current player health.
     pub fn player_health(&self) -> f32 {
         self.player.health
@@ -548,12 +855,24 @@ impl TrainingEnv {
 
     /// Get the current weapon index.
     pub fn current_weapon(&self) -> u8 {
-        self.weapons.current_weapon as u8
+        if self.task.weapons_enabled() {
+            WEAPONS[self.weapons.current_weapon].index
+        } else {
+            0
+        }
     }
 
     /// Get whether the player is on the ground.
     pub fn on_ground(&self) -> bool {
         self.player.on_ground
+    }
+
+    pub fn player_yaw(&self) -> f32 {
+        self.player.yaw
+    }
+
+    pub fn player_pitch(&self) -> f32 {
+        self.player.pitch
     }
 
     /// Get the modified terrain chunks (for preview overlay on base terrain).
@@ -579,10 +898,7 @@ impl TrainingEnv {
 /// Picks random x, z in [50, 700] (avoiding world edges), scans down from
 /// y=47 to find the topmost solid block, and returns the position with
 /// standing eye height.
-fn find_ground_position(
-    rng: &mut rand::rngs::StdRng,
-    terrain: &EnvTerrain,
-) -> [f32; 3] {
+fn find_ground_position(rng: &mut rand::rngs::StdRng, terrain: &EnvTerrain) -> [f32; 3] {
     const MAX_ATTEMPTS: u32 = 200;
     for _ in 0..MAX_ATTEMPTS {
         let x = rng.gen_range(50.0..700.0f32);
@@ -609,28 +925,147 @@ fn find_ground_position(
     [375.5, 30.0, 375.5]
 }
 
+fn sample_episode_layout(
+    rng: &mut rand::rngs::StdRng,
+    terrain: &EnvTerrain,
+    min_dist: f32,
+    max_dist: f32,
+    task: TrainingTask,
+) -> ([f32; 3], [f32; 3]) {
+    let desired = task.layout_kind();
+    if let Some(pair) = sample_pair_for_scenario(rng, terrain, min_dist, max_dist, desired) {
+        return pair;
+    }
+
+    for _ in 0..SCENARIO_SAMPLE_ATTEMPTS {
+        let spawn = find_ground_position(rng, terrain);
+        let target = find_ground_position(rng, terrain);
+        let dist = horizontal_distance(spawn, target);
+        if dist >= min_dist && dist <= max_dist {
+            return (spawn, target);
+        }
+    }
+
+    let spawn = find_ground_position(rng, terrain);
+    let target = loop {
+        let candidate = find_ground_position(rng, terrain);
+        let dist = horizontal_distance(spawn, candidate);
+        if dist >= min_dist && dist <= max_dist {
+            break candidate;
+        }
+    };
+    (spawn, target)
+}
+
+fn sample_pair_for_scenario(
+    rng: &mut rand::rngs::StdRng,
+    terrain: &EnvTerrain,
+    min_dist: f32,
+    max_dist: f32,
+    scenario: ScenarioKind,
+) -> Option<([f32; 3], [f32; 3])> {
+    for _ in 0..SCENARIO_SAMPLE_ATTEMPTS {
+        let spawn = find_ground_position(rng, terrain);
+        let target = find_ground_position(rng, terrain);
+        let dx = target[0] - spawn[0];
+        let dz = target[2] - spawn[2];
+        let dist = (dx * dx + dz * dz).sqrt();
+        if dist < min_dist || dist > max_dist {
+            continue;
+        }
+
+        let height_gap = target[1] - spawn[1];
+        let blocked = line_block_count(terrain, spawn, target);
+        let matches = match scenario {
+            ScenarioKind::OpenRun => dist <= max_dist && height_gap.abs() <= 3.0 && blocked <= 2,
+            ScenarioKind::ElevatedTraversal => {
+                height_gap >= 3.5 && dist <= max_dist + 8.0 && (blocked >= 1 || height_gap >= 4.5)
+            }
+            ScenarioKind::Breach => dist >= min_dist * 0.85 && blocked >= 5,
+        };
+
+        if matches {
+            return Some((spawn, target));
+        }
+    }
+
+    None
+}
+
+fn line_block_count(terrain: &EnvTerrain, start: [f32; 3], end: [f32; 3]) -> u32 {
+    let dx = end[0] - start[0];
+    let dy = end[1] - start[1];
+    let dz = end[2] - start[2];
+    let horizontal_dist = (dx * dx + dz * dz).sqrt().max(1.0);
+    let steps = (horizontal_dist / 0.75).ceil().max(2.0) as u32;
+    let mut blocked = 0u32;
+
+    for step in 1..steps {
+        let t = step as f32 / steps as f32;
+        let x = start[0] + dx * t;
+        let z = start[2] + dz * t;
+        let body_y = start[1] + dy * t - 0.8;
+        let bx = x.floor() as i32;
+        let bz = z.floor() as i32;
+        let lower = body_y.floor() as i32;
+        let upper = (body_y + 0.9).floor() as i32;
+
+        if terrain.get_block(bx, lower, bz) != worldgen::AIR
+            || terrain.get_block(bx, upper, bz) != worldgen::AIR
+        {
+            blocked += 1;
+        }
+    }
+
+    blocked
+}
+
+fn positive_height_gap(player_y: f32, target_y: f32) -> f32 {
+    (target_y - player_y).max(0.0)
+}
+
+fn horizontal_distance(a: [f32; 3], b: [f32; 3]) -> f32 {
+    let dx = b[0] - a[0];
+    let dz = b[2] - a[2];
+    (dx * dx + dz * dz).sqrt()
+}
+
+fn episode_timeout_for(distance: f32, task: TrainingTask) -> f32 {
+    let task_extra = match task {
+        TrainingTask::GroundShort => 0.0,
+        TrainingTask::GroundLong => 2.0,
+        TrainingTask::Elevated => 4.0,
+        TrainingTask::Breach => 6.0,
+    };
+    (10.0 + distance * 0.35 + task_extra).clamp(EPISODE_TIMEOUT_MIN, EPISODE_TIMEOUT_MAX)
+}
+
 // ── Raycast Vision ──
 
-/// Compute 48 ray directions in a sphere pattern relative to the bot's yaw.
+/// Compute 48 ray directions in a sphere pattern relative to the bot's look.
 ///
 /// Pattern:
-///   Ring 0 (eye level, pitch=0):       8 rays every 45 degrees
-///   Ring 1 (up 30 degrees):            8 rays every 45 degrees
-///   Ring 2 (down 30 degrees):          8 rays every 45 degrees
-///   Ring 3 (up 60 degrees):            8 rays every 45 degrees
-///   Ring 4 (down 60 degrees):          8 rays every 45 degrees
-///   Vertical:                          2 rays (straight up, straight down)
-///   Forward focus (pitch=0, ±15deg):   6 rays (dense coverage ahead)
-fn compute_ray_directions(yaw: f32) -> [(f32, f32, f32); NUM_RAYS] {
+///   Ring 0 (look level):               8 rays every 45 degrees
+///   Ring 1 (look +30 degrees):         8 rays every 45 degrees
+///   Ring 2 (look -30 degrees):         8 rays every 45 degrees
+///   Ring 3 (look +60 degrees):         8 rays every 45 degrees
+///   Ring 4 (look -60 degrees):         8 rays every 45 degrees
+///   Vertical bias:                     2 rays (strong up/down offsets)
+///   Forward focus:                     6 rays (denser coverage around the current look dir)
+fn compute_ray_directions(yaw: f32, pitch: f32) -> [(f32, f32, f32); NUM_RAYS] {
     let mut dirs = [(0.0f32, 0.0f32, 0.0f32); NUM_RAYS];
     let mut idx = 0;
 
-    // Helper: yaw_offset + pitch -> (dx, dy, dz) unit vector
-    let make_dir = |yaw_offset: f32, pitch: f32| -> (f32, f32, f32) {
+    // Helper: local look offsets -> world-space unit vector.
+    let make_dir = |yaw_offset: f32, pitch_offset: f32| -> (f32, f32, f32) {
         let total_yaw = yaw + yaw_offset;
-        let cos_p = pitch.cos();
+        let total_pitch = (pitch + pitch_offset).clamp(
+            -std::f32::consts::FRAC_PI_2 + 0.01,
+            std::f32::consts::FRAC_PI_2 - 0.01,
+        );
+        let cos_p = total_pitch.cos();
         let dx = -total_yaw.sin() * cos_p;
-        let dy = pitch.sin();
+        let dy = -total_pitch.sin();
         let dz = -total_yaw.cos() * cos_p;
         (dx, dy, dz)
     };
@@ -646,19 +1081,19 @@ fn compute_ray_directions(yaw: f32) -> [(f32, f32, f32); NUM_RAYS] {
     }
 
     // Straight up and straight down
-    dirs[idx] = (0.0, 1.0, 0.0);
+    dirs[idx] = make_dir(0.0, -1.45);
     idx += 1;
-    dirs[idx] = (0.0, -1.0, 0.0);
+    dirs[idx] = make_dir(0.0, 1.45);
     idx += 1;
 
     // Forward-focused rays (denser coverage in the movement direction)
     let forward_offsets = [
-        (0.0f32, 0.15f32),   // slightly up-forward
-        (0.0, -0.15),        // slightly down-forward
-        (0.26, 0.0),         // 15 deg right
-        (-0.26, 0.0),        // 15 deg left
-        (0.26, 0.15),        // right-up
-        (-0.26, 0.15),       // left-up
+        (0.0f32, 0.15f32), // slightly up-forward
+        (0.0, -0.15),      // slightly down-forward
+        (0.26, 0.0),       // 15 deg right
+        (-0.26, 0.0),      // 15 deg left
+        (0.26, 0.15),      // right-up
+        (-0.26, 0.15),     // left-up
     ];
     for &(yaw_off, pitch) in &forward_offsets {
         dirs[idx] = make_dir(yaw_off, pitch);
@@ -673,10 +1108,13 @@ fn compute_ray_directions(yaw: f32) -> [(f32, f32, f32); NUM_RAYS] {
 /// Returns the distance to the first solid block hit, or RAY_MAX_DIST if nothing hit.
 fn cast_ray(
     terrain: &EnvTerrain,
-    origin_x: f32, origin_y: f32, origin_z: f32,
-    dir_x: f32, dir_y: f32, dir_z: f32,
+    origin_x: f32,
+    origin_y: f32,
+    origin_z: f32,
+    dir_x: f32,
+    dir_y: f32,
+    dir_z: f32,
 ) -> f32 {
-    // Normalize direction
     let len = (dir_x * dir_x + dir_y * dir_y + dir_z * dir_z).sqrt();
     if len < 0.0001 {
         return RAY_MAX_DIST;
@@ -685,80 +1123,250 @@ fn cast_ray(
     let dy = dir_y / len;
     let dz = dir_z / len;
 
-    // Current voxel position
     let mut vx = origin_x.floor() as i32;
     let mut vy = origin_y.floor() as i32;
     let mut vz = origin_z.floor() as i32;
 
-    // Step direction (+1 or -1)
     let step_x: i32 = if dx >= 0.0 { 1 } else { -1 };
     let step_y: i32 = if dy >= 0.0 { 1 } else { -1 };
     let step_z: i32 = if dz >= 0.0 { 1 } else { -1 };
 
-    // Distance along ray to next voxel boundary (tMax)
-    let t_max_x = if dx.abs() < 1e-10 {
-        f32::MAX
-    } else if dx > 0.0 {
-        ((vx as f32 + 1.0) - origin_x) / dx
+    let t_delta_x = if dx != 0.0 {
+        (1.0 / dx).abs()
     } else {
-        (vx as f32 - origin_x) / dx
+        f32::INFINITY
     };
-    let t_max_y = if dy.abs() < 1e-10 {
-        f32::MAX
-    } else if dy > 0.0 {
-        ((vy as f32 + 1.0) - origin_y) / dy
+    let t_delta_y = if dy != 0.0 {
+        (1.0 / dy).abs()
     } else {
-        (vy as f32 - origin_y) / dy
+        f32::INFINITY
     };
-    let t_max_z = if dz.abs() < 1e-10 {
-        f32::MAX
-    } else if dz > 0.0 {
-        ((vz as f32 + 1.0) - origin_z) / dz
+    let t_delta_z = if dz != 0.0 {
+        (1.0 / dz).abs()
     } else {
-        (vz as f32 - origin_z) / dz
+        f32::INFINITY
     };
 
-    let mut t_max_x = t_max_x;
-    let mut t_max_y = t_max_y;
-    let mut t_max_z = t_max_z;
+    let mut t_max_x = if dx != 0.0 {
+        (if step_x > 0 {
+            vx as f32 + 1.0 - origin_x
+        } else {
+            origin_x - vx as f32
+        }) / dx.abs()
+    } else {
+        f32::INFINITY
+    };
+    let mut t_max_y = if dy != 0.0 {
+        (if step_y > 0 {
+            vy as f32 + 1.0 - origin_y
+        } else {
+            origin_y - vy as f32
+        }) / dy.abs()
+    } else {
+        f32::INFINITY
+    };
+    let mut t_max_z = if dz != 0.0 {
+        (if step_z > 0 {
+            vz as f32 + 1.0 - origin_z
+        } else {
+            origin_z - vz as f32
+        }) / dz.abs()
+    } else {
+        f32::INFINITY
+    };
 
-    // How far along ray to cross one full voxel (tDelta)
-    let t_delta_x = if dx.abs() < 1e-10 { f32::MAX } else { (1.0 / dx).abs() };
-    let t_delta_y = if dy.abs() < 1e-10 { f32::MAX } else { (1.0 / dy).abs() };
-    let t_delta_z = if dz.abs() < 1e-10 { f32::MAX } else { (1.0 / dz).abs() };
+    let mut dist = 0.0f32;
 
-    for _ in 0..RAY_MAX_STEPS {
-        // Check current voxel
-        let block = terrain.get_block(vx, vy, vz);
-        if block != worldgen::AIR {
-            // Hit! Return distance to this voxel
-            let t = t_max_x.min(t_max_y).min(t_max_z);
-            return t.min(RAY_MAX_DIST);
+    while dist < RAY_MAX_DIST {
+        if vx < 0
+            || vy < 0
+            || vz < 0
+            || vx >= worldgen::WORLD_SIZE_X as i32
+            || vy >= worldgen::WORLD_SIZE_Y as i32
+            || vz >= worldgen::WORLD_SIZE_Z as i32
+        {
+            return RAY_MAX_DIST;
         }
 
-        // Step to next voxel (DDA)
+        if terrain.get_block(vx, vy, vz) != worldgen::AIR {
+            return dist.min(RAY_MAX_DIST);
+        }
+
         if t_max_x < t_max_y {
             if t_max_x < t_max_z {
-                if t_max_x > RAY_MAX_DIST { return RAY_MAX_DIST; }
                 vx += step_x;
+                dist = t_max_x;
                 t_max_x += t_delta_x;
             } else {
-                if t_max_z > RAY_MAX_DIST { return RAY_MAX_DIST; }
                 vz += step_z;
+                dist = t_max_z;
                 t_max_z += t_delta_z;
             }
+        } else if t_max_y < t_max_z {
+            vy += step_y;
+            dist = t_max_y;
+            t_max_y += t_delta_y;
         } else {
-            if t_max_y < t_max_z {
-                if t_max_y > RAY_MAX_DIST { return RAY_MAX_DIST; }
-                vy += step_y;
-                t_max_y += t_delta_y;
-            } else {
-                if t_max_z > RAY_MAX_DIST { return RAY_MAX_DIST; }
-                vz += step_z;
-                t_max_z += t_delta_z;
-            }
+            vz += step_z;
+            dist = t_max_z;
+            t_max_z += t_delta_z;
         }
     }
 
     RAY_MAX_DIST
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::world::{pack_chunk_id, BaseTerrain, EnvTerrain};
+    use std::collections::HashMap;
+
+    fn single_chunk_terrain() -> EnvTerrain {
+        let mut chunks = HashMap::new();
+        chunks.insert(pack_chunk_id(0, 0, 0), [worldgen::AIR; 4096]);
+        let base = BaseTerrain { chunks, seed: 0 };
+        EnvTerrain::new(Arc::new(base))
+    }
+
+    fn client_like_cast_ray(
+        terrain: &EnvTerrain,
+        origin_x: f32,
+        origin_y: f32,
+        origin_z: f32,
+        dir_x: f32,
+        dir_y: f32,
+        dir_z: f32,
+    ) -> f32 {
+        let len = (dir_x * dir_x + dir_y * dir_y + dir_z * dir_z).sqrt();
+        let dx = dir_x / len;
+        let dy = dir_y / len;
+        let dz = dir_z / len;
+
+        let mut x = origin_x.floor() as i32;
+        let mut y = origin_y.floor() as i32;
+        let mut z = origin_z.floor() as i32;
+
+        let step_x = if dx >= 0.0 { 1 } else { -1 };
+        let step_y = if dy >= 0.0 { 1 } else { -1 };
+        let step_z = if dz >= 0.0 { 1 } else { -1 };
+
+        let t_delta_x = if dx != 0.0 {
+            (1.0 / dx).abs()
+        } else {
+            f32::INFINITY
+        };
+        let t_delta_y = if dy != 0.0 {
+            (1.0 / dy).abs()
+        } else {
+            f32::INFINITY
+        };
+        let t_delta_z = if dz != 0.0 {
+            (1.0 / dz).abs()
+        } else {
+            f32::INFINITY
+        };
+
+        let mut t_max_x = if dx != 0.0 {
+            (if step_x > 0 {
+                x as f32 + 1.0 - origin_x
+            } else {
+                origin_x - x as f32
+            }) / dx.abs()
+        } else {
+            f32::INFINITY
+        };
+        let mut t_max_y = if dy != 0.0 {
+            (if step_y > 0 {
+                y as f32 + 1.0 - origin_y
+            } else {
+                origin_y - y as f32
+            }) / dy.abs()
+        } else {
+            f32::INFINITY
+        };
+        let mut t_max_z = if dz != 0.0 {
+            (if step_z > 0 {
+                z as f32 + 1.0 - origin_z
+            } else {
+                origin_z - z as f32
+            }) / dz.abs()
+        } else {
+            f32::INFINITY
+        };
+
+        let mut dist = 0.0f32;
+        while dist < RAY_MAX_DIST {
+            if x < 0
+                || y < 0
+                || z < 0
+                || x >= worldgen::WORLD_SIZE_X as i32
+                || y >= worldgen::WORLD_SIZE_Y as i32
+                || z >= worldgen::WORLD_SIZE_Z as i32
+            {
+                return RAY_MAX_DIST;
+            }
+
+            if terrain.get_block(x, y, z) != worldgen::AIR {
+                return dist.min(RAY_MAX_DIST);
+            }
+
+            if t_max_x < t_max_y {
+                if t_max_x < t_max_z {
+                    x += step_x;
+                    dist = t_max_x;
+                    t_max_x += t_delta_x;
+                } else {
+                    z += step_z;
+                    dist = t_max_z;
+                    t_max_z += t_delta_z;
+                }
+            } else if t_max_y < t_max_z {
+                y += step_y;
+                dist = t_max_y;
+                t_max_y += t_delta_y;
+            } else {
+                z += step_z;
+                dist = t_max_z;
+                t_max_z += t_delta_z;
+            }
+        }
+
+        RAY_MAX_DIST
+    }
+
+    #[test]
+    fn cast_ray_matches_client_dda_distance() {
+        let mut terrain = single_chunk_terrain();
+        terrain.set_block(8, 5, 11, worldgen::CONCRETE);
+
+        let origin = (8.5, 5.5, 8.5);
+        let dir = (0.0, 0.0, 1.0);
+
+        let expected =
+            client_like_cast_ray(&terrain, origin.0, origin.1, origin.2, dir.0, dir.1, dir.2);
+        let actual = cast_ray(&terrain, origin.0, origin.1, origin.2, dir.0, dir.1, dir.2);
+
+        assert!(
+            (expected - actual).abs() < 1e-5,
+            "expected {expected}, got {actual}"
+        );
+        assert!((actual - 2.5).abs() < 1e-5, "expected 2.5, got {actual}");
+    }
+
+    #[test]
+    fn ray_directions_follow_current_pitch() {
+        let flat = compute_ray_directions(0.0, 0.0);
+        let up = compute_ray_directions(0.0, -0.6);
+        let down = compute_ray_directions(0.0, 0.6);
+
+        assert!(
+            up[0].1 > flat[0].1,
+            "upward look should tilt center ray upward"
+        );
+        assert!(
+            down[0].1 < flat[0].1,
+            "downward look should tilt center ray downward"
+        );
+    }
 }

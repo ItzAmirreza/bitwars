@@ -63,20 +63,15 @@ impl CheckpointManager {
     /// a file named `checkpoint_ep{N}_reward{R:.1}.bin`.
     ///
     /// Returns the path to the saved weights file.
-    pub fn save(
-        &self,
-        network: &ActorCritic,
-        meta: &CheckpointMeta,
-    ) -> Result<PathBuf, String> {
+    pub fn save(&self, network: &ActorCritic, meta: &CheckpointMeta) -> Result<PathBuf, String> {
         self.ensure_dir()?;
 
-        let basename = format!(
-            "checkpoint_ep{}_reward{:.1}",
-            meta.episode, meta.mean_reward
-        );
+        let basename = format!("checkpoint_ep{}_r{:.1}", meta.episode, meta.mean_reward);
 
         // Save network weights (safetensors)
-        let weights_path = self.checkpoint_dir.join(format!("{}.safetensors", basename));
+        let weights_path = self
+            .checkpoint_dir
+            .join(format!("{}.safetensors", basename));
         network
             .save(&weights_path)
             .map_err(|e| format!("Failed to save weights: {}", e))?;
@@ -105,11 +100,7 @@ impl CheckpointManager {
     ///
     /// `path` should be the `.safetensors` weights file. The `.meta` file
     /// is expected alongside it with the same basename.
-    pub fn load(
-        &self,
-        path: &Path,
-        network: &mut ActorCritic,
-    ) -> Result<CheckpointMeta, String> {
+    pub fn load(&self, path: &Path, network: &mut ActorCritic) -> Result<CheckpointMeta, String> {
         // Load weights
         network
             .load(path)
@@ -117,8 +108,8 @@ impl CheckpointManager {
 
         // Load metadata
         let meta_path = path.with_extension("meta");
-        let meta_bytes = fs::read(&meta_path)
-            .map_err(|e| format!("Failed to read meta file: {}", e))?;
+        let meta_bytes =
+            fs::read(&meta_path).map_err(|e| format!("Failed to read meta file: {}", e))?;
         let meta: CheckpointMeta = bincode::deserialize(&meta_bytes)
             .map_err(|e| format!("Failed to deserialize meta: {}", e))?;
 
@@ -156,11 +147,7 @@ impl CheckpointManager {
                             }
                         },
                         Err(e) => {
-                            log::warn!(
-                                "Skipping unreadable meta {}: {}",
-                                meta_path.display(),
-                                e
-                            );
+                            log::warn!("Skipping unreadable meta {}: {}", meta_path.display(), e);
                         }
                     }
                 }

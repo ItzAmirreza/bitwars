@@ -20,8 +20,16 @@ bincode = "1.3"
 chrono = { version = "0.4", features = ["serde"] }
 ctrlc = "3.4"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+candle-core = { version = "0.8", features = ["accelerate", "metal"] }
+candle-nn = { version = "0.8", features = ["accelerate", "metal"] }
+metal = "0.27"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[profile.dev]
+opt-level = 1
 
 # Optimize candle and rayon even in dev builds — they're 10-50x slower without
 [profile.dev.package.candle-core]

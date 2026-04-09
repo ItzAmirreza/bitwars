@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 interface CheckpointInfo {
@@ -27,12 +27,18 @@ const labelStyle: React.CSSProperties = {
 export default function CheckpointManager() {
   const [checkpoints, setCheckpoints] = useState<CheckpointInfo[]>([]);
   const [sortBy, setSortBy] = useState<'episode' | 'reward'>('episode');
+  const [actionStatus, setActionStatus] = useState<{ msg: string; ok: boolean } | null>(null);
+
+  const inFlightRef = useRef(false);
 
   const fetchCheckpoints = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const list = await invoke<CheckpointInfo[]>('list_checkpoints');
       setCheckpoints(list);
     } catch { /* ignore */ }
+    inFlightRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -52,10 +58,34 @@ export default function CheckpointManager() {
 
   const handleLoad = async (path: string) => {
     try {
-      await invoke('load_checkpoint', { path });
+      const msg = await invoke<string>('load_checkpoint', { path });
+      setActionStatus({ msg, ok: true });
     } catch (e) {
-      console.error(e);
+      setActionStatus({ msg: String(e), ok: false });
     }
+    setTimeout(() => setActionStatus(null), 3000);
+  };
+
+  const handleDelete = async (path: string) => {
+    try {
+      const msg = await invoke<string>('delete_checkpoint', { path });
+      setActionStatus({ msg, ok: true });
+      await fetchCheckpoints();
+    } catch (e) {
+      setActionStatus({ msg: String(e), ok: false });
+    }
+    setTimeout(() => setActionStatus(null), 3000);
+  };
+
+  const handleClear = async () => {
+    try {
+      const msg = await invoke<string>('clear_checkpoints');
+      setActionStatus({ msg, ok: true });
+      await fetchCheckpoints();
+    } catch (e) {
+      setActionStatus({ msg: String(e), ok: false });
+    }
+    setTimeout(() => setActionStatus(null), 3000);
   };
 
   const formatSize = (bytes: number) => {
@@ -69,6 +99,22 @@ export default function CheckpointManager() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div style={labelStyle}>CHECKPOINTS ({checkpoints.length})</div>
         <div style={{ display: 'flex', gap: 4 }}>
+          <button
+            onClick={handleClear}
+            disabled={checkpoints.length === 0}
+            style={{
+              background: checkpoints.length === 0 ? '#1f1f1f' : '#2a2a2a',
+              color: checkpoints.length === 0 ? '#555' : '#ff6666',
+              border: `2px solid ${checkpoints.length === 0 ? '#2a2a2a' : '#3a3a3a'}`,
+              padding: '2px 8px',
+              fontFamily: 'var(--font-pixel)',
+              fontSize: 7,
+              cursor: checkpoints.length === 0 ? 'default' : 'pointer',
+              textTransform: 'uppercase',
+            }}
+          >
+            clear
+          </button>
           {(['episode', 'reward'] as const).map((s) => (
             <button
               key={s}
@@ -90,6 +136,19 @@ export default function CheckpointManager() {
         </div>
       </div>
 
+      {actionStatus && (
+        <div style={{
+          padding: '4px 8px',
+          marginBottom: 8,
+          background: actionStatus.ok ? '#1a2a1a' : '#2a1a1a',
+          border: `2px solid ${actionStatus.ok ? '#00ff88' : '#ff4444'}`,
+          fontFamily: 'var(--font-mono)',
+          fontSize: 10,
+          color: actionStatus.ok ? '#00ff88' : '#ff4444',
+        }}>
+          {actionStatus.msg}
+        </div>
+      )}
       <div style={{ maxHeight: 200, overflowY: 'auto' }}>
         {sorted.length === 0 && (
           <div style={{ color: '#555', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
@@ -132,6 +191,20 @@ export default function CheckpointManager() {
               }}
             >
               LOAD
+            </button>
+            <button
+              onClick={() => handleDelete(cp.path)}
+              style={{
+                background: '#2a2a2a',
+                color: '#ff6666',
+                border: '2px solid #3a3a3a',
+                padding: '2px 8px',
+                fontFamily: 'var(--font-pixel)',
+                fontSize: 7,
+                cursor: 'pointer',
+              }}
+            >
+              DEL
             </button>
           </div>
         ))}

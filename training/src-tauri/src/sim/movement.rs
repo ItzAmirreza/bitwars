@@ -6,8 +6,7 @@
 //! Crouching and sliding are omitted — bots don't use them.
 
 use super::collision::{
-    check_ceiling, get_ground_level, is_against_wall, move_with_collision,
-    WALL_CLIMB_SPEED,
+    check_ceiling, get_ground_level, is_against_wall, move_with_collision, WALL_CLIMB_SPEED,
 };
 use super::world::EnvTerrain;
 
@@ -176,14 +175,20 @@ impl PlayerMovement {
     /// delta is in seconds.
     pub fn update(&mut self, delta: f32, action: &MoveAction, world: &EnvTerrain) {
         // Apply look direction
-        self.yaw = action.yaw;
-        self.pitch = action.pitch.clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
+        self.yaw = wrap_angle(action.yaw);
+        self.pitch = action
+            .pitch
+            .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
 
         // Sprint state (persists through jumps like Minecraft)
         self.is_sprinting = action.sprint && action.forward > 0.0;
 
         // Target speed
-        let mut target_speed = if self.is_sprinting { SPRINT_SPEED } else { SPEED };
+        let mut target_speed = if self.is_sprinting {
+            SPRINT_SPEED
+        } else {
+            SPEED
+        };
         target_speed *= self.speed_multiplier;
 
         // Input direction
@@ -234,8 +239,7 @@ impl PlayerMovement {
                 }
             } else if self.on_ground {
                 // Ground friction when no input
-                let cur_speed =
-                    (self.h_vel_x * self.h_vel_x + self.h_vel_z * self.h_vel_z).sqrt();
+                let cur_speed = (self.h_vel_x * self.h_vel_x + self.h_vel_z * self.h_vel_z).sqrt();
                 if cur_speed > 0.1 {
                     let drop = GROUND_FRICTION * delta;
                     let factor = (cur_speed - drop).max(0.0) / cur_speed;
@@ -249,8 +253,7 @@ impl PlayerMovement {
         }
 
         // Soft speed clamping (gradual deceleration instead of hard cap)
-        self.horizontal_speed =
-            (self.h_vel_x * self.h_vel_x + self.h_vel_z * self.h_vel_z).sqrt();
+        self.horizontal_speed = (self.h_vel_x * self.h_vel_x + self.h_vel_z * self.h_vel_z).sqrt();
         let max_speed = target_speed * 1.1;
         if self.horizontal_speed > max_speed {
             let over_speed = self.horizontal_speed - max_speed;
@@ -409,4 +412,9 @@ impl PlayerMovement {
         self.pos_y = self.pos_y.clamp(MIN_Y, MAX_Y);
         self.pos_z = self.pos_z.clamp(MIN_BOUND, MAX_Z);
     }
+}
+
+fn wrap_angle(angle: f32) -> f32 {
+    let two_pi = std::f32::consts::PI * 2.0;
+    (angle + std::f32::consts::PI).rem_euclid(two_pi) - std::f32::consts::PI
 }

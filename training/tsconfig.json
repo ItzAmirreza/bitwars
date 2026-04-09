@@ -11,6 +11,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
+    "types": ["node", "react", "react-dom"],
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,

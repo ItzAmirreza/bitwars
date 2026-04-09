@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 interface TrainingStats {
@@ -8,6 +8,27 @@ interface TrainingStats {
   mean_episode_length: number;
   steps_per_sec: number;
   elapsed_secs: number;
+  success_rate: number;
+  timeout_rate: number;
+  stall_rate: number;
+  rpg_usage_rate: number;
+  block_destroy_rate: number;
+  policy_loss: number;
+  value_loss: number;
+  entropy: number;
+  approx_kl: number;
+  explained_variance: number;
+  current_task: string;
+  device: string;
+}
+
+interface TrainingConfigView {
+  lr: number;
+  gamma: number;
+  entropy_coeff: number;
+  num_envs: number;
+  rollout_length: number;
+  seed: number;
 }
 
 const panelStyle: React.CSSProperties = {
@@ -51,14 +72,24 @@ interface TrainingStatusResponse {
 export default function TrainingControls() {
   const [status, setStatus] = useState<'stopped' | 'running' | 'paused'>('stopped');
   const [stats, setStats] = useState<TrainingStats | null>(null);
-  const [numEnvs, setNumEnvs] = useState(64);
-  const [lr, setLr] = useState(0.0003);
-  const [entropyCoeff, setEntropyCoeff] = useState(0.01);
-  const [gamma, setGamma] = useState(0.99);
+  const [numEnvs, setNumEnvs] = useState(32);
+  const [lr, setLr] = useState(0.00025);
+  const [entropyCoeff, setEntropyCoeff] = useState(0.004);
+  const [gamma, setGamma] = useState(0.995);
+  const [rolloutLength, setRolloutLength] = useState(256);
 
   // Query backend for actual training status on mount (fixes state loss on tab switch)
   useEffect(() => {
-    const syncStatus = async () => {
+    const syncBackendState = async () => {
+      try {
+        const config = await invoke<TrainingConfigView>('get_training_config');
+        setNumEnvs(config.num_envs);
+        setLr(config.lr);
+        setEntropyCoeff(config.entropy_coeff);
+        setGamma(config.gamma);
+        setRolloutLength(config.rollout_length);
+      } catch { /* ignore */ }
+
       try {
         const s = await invoke<TrainingStatusResponse>('get_training_status');
         if (s.is_running && s.is_paused) setStatus('paused');
@@ -66,11 +97,14 @@ export default function TrainingControls() {
         else setStatus('stopped');
       } catch { /* ignore */ }
     };
-    syncStatus();
+    syncBackendState();
   }, []);
 
+  const inFlightRef = useRef(false);
+
   const pollStats = useCallback(async () => {
-    // Always poll — sync status from backend too
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
       const s = await invoke<TrainingStatusResponse>('get_training_status');
       if (s.is_running && s.is_paused) setStatus('paused');
@@ -80,17 +114,31 @@ export default function TrainingControls() {
 
     try {
       const s = await invoke<TrainingStats>('get_training_stats');
-      setStats(s);
+      setStats(normalizeTrainingStats(s));
     } catch { /* ignore */ }
+    inFlightRef.current = false;
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(pollStats, 1000);
+    const interval = setInterval(pollStats, 2000);
     return () => clearInterval(interval);
   }, [pollStats]);
 
+  const handleApplySettings = async () => {
+    await invoke('update_hyperparams', {
+      params: {
+        lr,
+        gamma,
+        entropy_coeff: entropyCoeff,
+        num_envs: numEnvs,
+        rollout_length: rolloutLength,
+      },
+    });
+  };
+
   const handleStart = async () => {
     try {
+      await handleApplySettings();
       await invoke('start_training');
       setStatus('running');
     } catch (e) {
@@ -140,6 +188,10 @@ export default function TrainingControls() {
     const s = Math.floor(secs % 60);
     return `${h}h ${m}m ${s}s`;
   };
+
+  const renderMetric = (value: number, digits = 0) => (
+    Number.isFinite(value) ? value.toFixed(digits) : '--'
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -204,20 +256,62 @@ export default function TrainingControls() {
             <div>
               <div style={labelStyle}>MEAN REWARD</div>
               <div style={{ ...valueStyle, color: stats.mean_reward > 0 ? '#00ff88' : '#ff4444' }}>
-                {stats.mean_reward.toFixed(1)}
+                {renderMetric(stats.mean_reward, 1)}
               </div>
             </div>
             <div>
               <div style={labelStyle}>EP LENGTH</div>
-              <div style={valueStyle}>{stats.mean_episode_length.toFixed(0)}</div>
+              <div style={valueStyle}>{renderMetric(stats.mean_episode_length, 0)}</div>
+            </div>
+            <div>
+              <div style={labelStyle}>TASK</div>
+              <div style={{ ...valueStyle, fontSize: 14, color: '#88ddff' }}>
+                {stats.current_task || 'pending'}
+              </div>
             </div>
             <div>
               <div style={labelStyle}>STEPS/SEC</div>
-              <div style={valueStyle}>{stats.steps_per_sec.toFixed(0)}</div>
+              <div style={valueStyle}>{renderMetric(stats.steps_per_sec, 0)}</div>
             </div>
             <div>
               <div style={labelStyle}>ELAPSED</div>
               <div style={valueStyle}>{formatTime(stats.elapsed_secs)}</div>
+            </div>
+            <div>
+              <div style={labelStyle}>SUCCESS</div>
+              <div style={valueStyle}>{renderMetric(stats.success_rate * 100, 0)}%</div>
+            </div>
+            <div>
+              <div style={labelStyle}>TIMEOUT</div>
+              <div style={{ ...valueStyle, color: '#ffaa00' }}>{renderMetric(stats.timeout_rate * 100, 0)}%</div>
+            </div>
+            <div>
+              <div style={labelStyle}>STALL</div>
+              <div style={{ ...valueStyle, color: '#ff6666' }}>{renderMetric(stats.stall_rate * 100, 0)}%</div>
+            </div>
+            <div>
+              <div style={labelStyle}>RPG USE</div>
+              <div style={valueStyle}>{renderMetric(stats.rpg_usage_rate * 100, 1)}%</div>
+            </div>
+            <div>
+              <div style={labelStyle}>BLOCKS/EP</div>
+              <div style={valueStyle}>{renderMetric(stats.block_destroy_rate, 1)}</div>
+            </div>
+            <div>
+              <div style={labelStyle}>KL</div>
+              <div style={valueStyle}>{renderMetric(stats.approx_kl, 4)}</div>
+            </div>
+            <div>
+              <div style={labelStyle}>ENTROPY</div>
+              <div style={valueStyle}>{renderMetric(stats.entropy, 2)}</div>
+            </div>
+            <div>
+              <div style={labelStyle}>EXPLAINED VAR</div>
+              <div style={valueStyle}>{renderMetric(stats.explained_variance, 2)}</div>
+            </div>
+            <div>
+              <div style={labelStyle}>DEVICE</div>
+              <div style={{ ...valueStyle, fontSize: 13 }}>{stats.device || 'pending'}</div>
             </div>
           </div>
         </div>
@@ -248,12 +342,33 @@ export default function TrainingControls() {
             />
           </div>
           <div>
+            <div style={labelStyle}>ROLLOUT</div>
+            <input
+              type="number"
+              value={rolloutLength}
+              onChange={(e) => setRolloutLength(parseInt(e.target.value) || 256)}
+              min={64}
+              max={2048}
+              step={64}
+              disabled={status !== 'stopped'}
+              style={{
+                background: '#0a0a0a',
+                border: '2px solid #3a3a3a',
+                color: '#e0e0e0',
+                padding: '4px 8px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 14,
+                width: '100%',
+              }}
+            />
+          </div>
+          <div>
             <div style={labelStyle}>LEARNING RATE</div>
             <input
               type="number"
               value={lr}
-              onChange={(e) => setLr(parseFloat(e.target.value) || 0.0003)}
-              step={0.0001}
+              onChange={(e) => setLr(parseFloat(e.target.value) || 0.00025)}
+              step={0.00001}
               style={{
                 background: '#0a0a0a',
                 border: '2px solid #3a3a3a',
@@ -270,7 +385,7 @@ export default function TrainingControls() {
             <input
               type="number"
               value={entropyCoeff}
-              onChange={(e) => setEntropyCoeff(parseFloat(e.target.value) || 0.01)}
+              onChange={(e) => setEntropyCoeff(parseFloat(e.target.value) || 0.004)}
               step={0.001}
               style={{
                 background: '#0a0a0a',
@@ -288,8 +403,8 @@ export default function TrainingControls() {
             <input
               type="number"
               value={gamma}
-              onChange={(e) => setGamma(parseFloat(e.target.value) || 0.99)}
-              step={0.01}
+              onChange={(e) => setGamma(parseFloat(e.target.value) || 0.995)}
+              step={0.001}
               min={0}
               max={1}
               style={{
@@ -304,7 +419,49 @@ export default function TrainingControls() {
             />
           </div>
         </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: '#777' }}>
+            Defaults are backend-selected for this machine.
+          </div>
+          <button
+            onClick={handleApplySettings}
+            style={buttonStyle(true, '#4488ff')}
+          >
+            APPLY
+          </button>
+        </div>
       </div>
     </div>
   );
+}
+
+function normalizeTrainingStats(raw: TrainingStats): TrainingStats {
+  return {
+    episode: coerceFinite(raw.episode, 0),
+    total_steps: coerceFinite(raw.total_steps, 0),
+    mean_reward: coerceFinite(raw.mean_reward, 0),
+    mean_episode_length: coerceFinite(raw.mean_episode_length, 0),
+    steps_per_sec: coerceFinite(raw.steps_per_sec, 0),
+    elapsed_secs: coerceFinite(raw.elapsed_secs, 0),
+    success_rate: clamp01(coerceFinite(raw.success_rate, 0)),
+    timeout_rate: clamp01(coerceFinite(raw.timeout_rate, 0)),
+    stall_rate: clamp01(coerceFinite(raw.stall_rate, 0)),
+    rpg_usage_rate: clamp01(coerceFinite(raw.rpg_usage_rate, 0)),
+    block_destroy_rate: coerceFinite(raw.block_destroy_rate, 0),
+    policy_loss: coerceFinite(raw.policy_loss, 0),
+    value_loss: coerceFinite(raw.value_loss, 0),
+    entropy: coerceFinite(raw.entropy, 0),
+    approx_kl: coerceFinite(raw.approx_kl, 0),
+    explained_variance: coerceFinite(raw.explained_variance, 0),
+    current_task: typeof raw.current_task === 'string' ? raw.current_task : '',
+    device: typeof raw.device === 'string' ? raw.device : 'unknown',
+  };
+}
+
+function coerceFinite(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }

@@ -122,7 +122,11 @@ impl EnvTerrain {
 
         let chunk_id = pack_chunk_id(cx as u8, cy as u8, cz as u8);
         match self.get_chunk(chunk_id) {
-            Some(data) => data[lx + ly * worldgen::CHUNK_SIZE + lz * worldgen::CHUNK_SIZE * worldgen::CHUNK_SIZE],
+            Some(data) => {
+                data[lx
+                    + ly * worldgen::CHUNK_SIZE
+                    + lz * worldgen::CHUNK_SIZE * worldgen::CHUNK_SIZE]
+            }
             None => worldgen::AIR,
         }
     }
@@ -148,7 +152,9 @@ impl EnvTerrain {
 
         let chunk_id = pack_chunk_id(cx as u8, cy as u8, cz as u8);
         if let Some(data) = self.get_chunk_mut(chunk_id) {
-            data[lx + ly * worldgen::CHUNK_SIZE + lz * worldgen::CHUNK_SIZE * worldgen::CHUNK_SIZE] = block_type;
+            data[lx
+                + ly * worldgen::CHUNK_SIZE
+                + lz * worldgen::CHUNK_SIZE * worldgen::CHUNK_SIZE] = block_type;
         }
     }
 

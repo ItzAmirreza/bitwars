@@ -170,6 +170,18 @@ impl AbilitySystem {
         None
     }
 
+    /// Find the nearest currently available pickup to the given player position.
+    pub fn nearest_available_pickup(&self, player_pos: (f32, f32, f32)) -> Option<&AbilityPickup> {
+        self.pickups
+            .iter()
+            .filter(|pickup| pickup.is_available())
+            .min_by(|a, b| {
+                let da = distance_sq(player_pos, (a.pos_x, a.pos_y, a.pos_z));
+                let db = distance_sq(player_pos, (b.pos_x, b.pos_y, b.pos_z));
+                da.total_cmp(&db)
+            })
+    }
+
     /// Apply a buff (replaces existing buff of same type).
     fn apply_buff(&mut self, ability_type: AbilityType) {
         // Remove existing buff of same type
@@ -231,7 +243,9 @@ impl AbilitySystem {
 
     /// Check if a specific buff is active.
     pub fn has_buff(&self, ability_type: AbilityType) -> bool {
-        self.active_buffs.iter().any(|b| b.ability_type == ability_type)
+        self.active_buffs
+            .iter()
+            .any(|b| b.ability_type == ability_type)
     }
 
     /// Reset: clear all buffs and reset all pickup respawn timers.
@@ -252,4 +266,11 @@ fn simple_hash(seed: u64, index: u64) -> u64 {
     h = h.wrapping_mul(0xc4ceb9fe1a85ec53);
     h ^= h >> 33;
     h
+}
+
+fn distance_sq(a: (f32, f32, f32), b: (f32, f32, f32)) -> f32 {
+    let dx = a.0 - b.0;
+    let dy = a.1 - b.1;
+    let dz = a.2 - b.2;
+    dx * dx + dy * dy + dz * dz
 }

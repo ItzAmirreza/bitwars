@@ -49,10 +49,7 @@ impl VecEnv {
     /// - observations: Vec of obs vectors, one per env
     /// - rewards: Vec of scalar rewards, one per env
     /// - dones: Vec of episode-done flags, one per env
-    pub fn step_all(
-        &mut self,
-        actions: &[Vec<f32>],
-    ) -> (Vec<Vec<f32>>, Vec<f32>, Vec<bool>) {
+    pub fn step_all(&mut self, actions: &[Vec<f32>]) -> (Vec<Vec<f32>>, Vec<f32>, Vec<bool>) {
         debug_assert_eq!(
             actions.len(),
             self.num_envs,

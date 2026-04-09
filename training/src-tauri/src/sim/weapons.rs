@@ -1,14 +1,14 @@
 //! Weapon system for bot training simulation.
 //!
-//! Weapon definitions match shared/game-constants.json exactly.
+//! Uses the default infantry loadout from shared/game-constants.json:
+//! rifle, shotgun, and RPG.
 //! Includes fire rate enforcement, ammo tracking, and projectile physics.
-//! Grenade launcher is excluded — too complex for bot training.
 
 use super::world::EnvTerrain;
 use crate::worldgen;
 
 // ── Number of weapons available to the bot ──
-pub const NUM_WEAPONS: usize = 5;
+pub const NUM_WEAPONS: usize = 3;
 
 // ── Delivery types ──
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,8 +40,7 @@ pub struct WeaponDef {
     pub close_range_damage_mult: f32,
 }
 
-/// All weapons available to the bot, indexed 0..4.
-/// Grenade launcher (game index 4) is excluded.
+/// All weapons available to the bot, indexed 0..2.
 pub const WEAPONS: [WeaponDef; NUM_WEAPONS] = [
     // 0: Rifle
     WeaponDef {
@@ -90,38 +89,6 @@ pub const WEAPONS: [WeaponDef; NUM_WEAPONS] = [
         spread: 0.0,
         close_range_threshold: 0.0,
         close_range_damage_mult: 1.0,
-    },
-    // 3: Machine Gun
-    WeaponDef {
-        index: 3,
-        name: "Machine Gun",
-        damage: 11,
-        radius: 0.0,
-        fire_rate: 13.0,
-        max_ammo: 200,
-        max_range: 90.0,
-        projectile_speed: 0.0,
-        delivery: Delivery::Hitscan,
-        pellets: 1,
-        spread: 0.0,
-        close_range_threshold: 0.0,
-        close_range_damage_mult: 1.0,
-    },
-    // 4: Sniper (game index 5)
-    WeaponDef {
-        index: 4,
-        name: "Sniper",
-        damage: 85,
-        radius: 0.0,
-        fire_rate: 0.7,
-        max_ammo: 5,
-        max_range: 200.0,
-        projectile_speed: 280.0,
-        delivery: Delivery::Projectile,
-        pellets: 1,
-        spread: 0.0,
-        close_range_threshold: 30.0,
-        close_range_damage_mult: 0.35,
     },
 ];
 
@@ -207,17 +174,15 @@ impl WeaponState {
     }
 }
 
-// ── Projectile (RPG / Sniper) ──
+// ── Projectile (RPG) ──
 
 /// Gravity for client-side infantry projectiles.
-/// From client WeaponRegistry: RPG gravity = 2.0, Sniper gravity = 0.0.
+/// From client WeaponRegistry: RPG gravity = 2.0.
 const RPG_GRAVITY: f32 = 2.0;
-const SNIPER_GRAVITY: f32 = 0.0;
 
 fn projectile_gravity(weapon_idx: usize) -> f32 {
     match weapon_idx {
         2 => RPG_GRAVITY, // RPG
-        4 => SNIPER_GRAVITY, // Sniper (now index 4)
         _ => 0.0,
     }
 }
@@ -273,10 +238,31 @@ impl Projectile {
         // Apply gravity
         self.vel_y -= gravity * dt;
 
-        // Move
-        self.pos_x += self.vel_x * dt;
-        self.pos_y += self.vel_y * dt;
-        self.pos_z += self.vel_z * dt;
+        // Match the client projectile manager's per-frame tunneling prevention by
+        // subdividing large projectile steps into 1-block segments.
+        let speed =
+            (self.vel_x * self.vel_x + self.vel_y * self.vel_y + self.vel_z * self.vel_z).sqrt();
+        let step_dist = speed * dt;
+        let sub_steps = step_dist.ceil().max(1.0) as u32;
+        let sub_dist = step_dist / sub_steps as f32;
+        let (dir_x, dir_y, dir_z) = if speed > 1e-5 {
+            (self.vel_x / speed, self.vel_y / speed, self.vel_z / speed)
+        } else {
+            (0.0, 0.0, 0.0)
+        };
+
+        for _ in 0..sub_steps {
+            self.pos_x += dir_x * sub_dist;
+            self.pos_y += dir_y * sub_dist;
+            self.pos_z += dir_z * sub_dist;
+
+            let bx = self.pos_x.floor() as i32;
+            let by = self.pos_y.floor() as i32;
+            let bz = self.pos_z.floor() as i32;
+            if world.get_block(bx, by, bz) != worldgen::AIR {
+                return true;
+            }
+        }
 
         self.time_alive += dt;
 
@@ -293,14 +279,6 @@ impl Projectile {
             || self.pos_y < -10.0
             || self.pos_y > worldgen::WORLD_SIZE_Y as f32 + 20.0
         {
-            return true;
-        }
-
-        // Check terrain collision
-        let bx = self.pos_x.floor() as i32;
-        let by = self.pos_y.floor() as i32;
-        let bz = self.pos_z.floor() as i32;
-        if world.get_block(bx, by, bz) != worldgen::AIR {
             return true;
         }
 

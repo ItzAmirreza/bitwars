@@ -2,7 +2,10 @@ use candle_core::{Device, Result as CandleResult, Tensor};
 use candle_nn::{AdamW, Optimizer, ParamsAdamW};
 use serde::{Deserialize, Serialize};
 
-use super::network::{ActorCritic, LSTMState, CONTINUOUS_ACTION_DIM, HIDDEN_SIZE, OBS_DIM};
+use super::network::{
+    ActorCritic, LSTMState, ACTION_PARAM_DIM, BINARY_ACTION_DIM, CONTINUOUS_ACTION_DIM,
+    HIDDEN_SIZE, OBS_DIM, POLICY_WEAPON_DIM, POLICY_WEAPON_INDICES,
+};
 
 /// PPO hyperparameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,7 +29,7 @@ impl Default for PPOConfig {
             gamma: 0.99,
             gae_lambda: 0.95,
             clip_epsilon: 0.2,
-            entropy_coeff: 0.01,
+            entropy_coeff: 0.004,
             value_coeff: 0.5,
             max_grad_norm: 0.5,
             num_epochs: 4,
@@ -58,23 +61,39 @@ pub struct RolloutBuffer {
     pub hidden_h: Vec<Vec<f32>>,
     /// LSTM c state at the time of each transition.
     pub hidden_c: Vec<Vec<f32>>,
-    capacity: usize,
+    rollout_steps: usize,
+    num_envs: usize,
 }
 
 impl RolloutBuffer {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(rollout_steps: usize) -> Self {
         Self {
-            observations: Vec::with_capacity(capacity),
-            actions: Vec::with_capacity(capacity),
-            weapon_indices: Vec::with_capacity(capacity),
-            log_probs: Vec::with_capacity(capacity),
-            values: Vec::with_capacity(capacity),
-            rewards: Vec::with_capacity(capacity),
-            dones: Vec::with_capacity(capacity),
-            hidden_h: Vec::with_capacity(capacity),
-            hidden_c: Vec::with_capacity(capacity),
-            capacity,
+            observations: Vec::new(),
+            actions: Vec::new(),
+            weapon_indices: Vec::new(),
+            log_probs: Vec::new(),
+            values: Vec::new(),
+            rewards: Vec::new(),
+            dones: Vec::new(),
+            hidden_h: Vec::new(),
+            hidden_c: Vec::new(),
+            rollout_steps,
+            num_envs: 0,
         }
+    }
+
+    pub fn configure(&mut self, num_envs: usize) {
+        self.num_envs = num_envs;
+        let capacity = self.rollout_steps * num_envs;
+        self.observations = Vec::with_capacity(capacity);
+        self.actions = Vec::with_capacity(capacity);
+        self.weapon_indices = Vec::with_capacity(capacity);
+        self.log_probs = Vec::with_capacity(capacity);
+        self.values = Vec::with_capacity(capacity);
+        self.rewards = Vec::with_capacity(capacity);
+        self.dones = Vec::with_capacity(capacity);
+        self.hidden_h = Vec::with_capacity(capacity);
+        self.hidden_c = Vec::with_capacity(capacity);
     }
 
     pub fn clear(&mut self) {
@@ -90,11 +109,23 @@ impl RolloutBuffer {
     }
 
     pub fn is_full(&self) -> bool {
-        self.observations.len() >= self.capacity
+        self.num_envs > 0 && self.num_steps() >= self.rollout_steps
     }
 
     pub fn len(&self) -> usize {
         self.observations.len()
+    }
+
+    pub fn num_steps(&self) -> usize {
+        if self.num_envs == 0 {
+            0
+        } else {
+            self.observations.len() / self.num_envs
+        }
+    }
+
+    pub fn num_envs(&self) -> usize {
+        self.num_envs
     }
 
     pub fn push(
@@ -121,31 +152,37 @@ impl RolloutBuffer {
     }
 }
 
-/// Compute Generalized Advantage Estimation.
-pub fn compute_gae(
+/// Compute Generalized Advantage Estimation for a time-major `[t][env]` rollout.
+pub fn compute_gae_per_env(
     rewards: &[f32],
     values: &[f32],
     dones: &[bool],
+    bootstrap_values: &[f32],
+    num_envs: usize,
+    rollout_steps: usize,
     gamma: f32,
     lambda: f32,
-    last_value: f32,
 ) -> (Vec<f32>, Vec<f32>) {
-    let t = rewards.len();
-    let mut advantages = vec![0.0_f32; t];
-    let mut last_gae = 0.0_f32;
+    let total = rewards.len();
+    let mut advantages = vec![0.0_f32; total];
+    let mut returns = vec![0.0_f32; total];
 
-    for i in (0..t).rev() {
-        let next_value = if i == t - 1 { last_value } else { values[i + 1] };
-        let next_non_terminal = if dones[i] { 0.0 } else { 1.0 };
-        let delta = rewards[i] + gamma * next_value * next_non_terminal - values[i];
-        last_gae = delta + gamma * lambda * next_non_terminal * last_gae;
-        advantages[i] = last_gae;
+    for env_idx in 0..num_envs {
+        let mut last_gae = 0.0f32;
+        for step in (0..rollout_steps).rev() {
+            let idx = step * num_envs + env_idx;
+            let next_value = if step + 1 == rollout_steps {
+                bootstrap_values[env_idx]
+            } else {
+                values[(step + 1) * num_envs + env_idx]
+            };
+            let next_non_terminal = if dones[idx] { 0.0 } else { 1.0 };
+            let delta = rewards[idx] + gamma * next_value * next_non_terminal - values[idx];
+            last_gae = delta + gamma * lambda * next_non_terminal * last_gae;
+            advantages[idx] = last_gae;
+            returns[idx] = last_gae + values[idx];
+        }
     }
-
-    let returns: Vec<f32> = advantages.iter()
-        .zip(values.iter())
-        .map(|(adv, val)| adv + val)
-        .collect();
 
     (advantages, returns)
 }
@@ -164,9 +201,12 @@ pub struct PPOTrainer {
     device: Device,
 }
 
+const ENTROPY_DECAY_EPISODES: f32 = 20_000.0;
+const MIN_ENTROPY_COEFF: f32 = 0.0008;
+
 impl PPOTrainer {
     pub fn new(config: PPOConfig) -> CandleResult<Self> {
-        let device = Device::Cpu;
+        let device = select_best_device();
         let network = ActorCritic::new(&device)?;
         let optimizer = AdamW::new(
             network.var_map().all_vars(),
@@ -196,6 +236,7 @@ impl PPOTrainer {
         self.env_states = (0..num_envs)
             .map(|_| (zeros.clone(), zeros.clone()))
             .collect();
+        self.buffer.configure(num_envs);
     }
 
     /// Reset the LSTM state for a specific environment (call on episode done).
@@ -227,10 +268,16 @@ impl PPOTrainer {
         let (actions, log_probs, values, new_state) =
             self.network.sample_actions_batch(&obs_tensor, &state)?;
 
-        // Update per-env states from the new batched state
-        for i in 0..num_envs {
-            let (h, c) = new_state.to_vecs(i)?;
-            self.env_states[i] = (h, c);
+        // Pull hidden state back in one batched transfer instead of per-row reads.
+        let h_all: Vec<Vec<f32>> = new_state.h.to_vec2()?;
+        let c_all: Vec<Vec<f32>> = new_state.c.to_vec2()?;
+        for (slot, (h, c)) in self
+            .env_states
+            .iter_mut()
+            .zip(h_all.into_iter().zip(c_all.into_iter()))
+            .take(num_envs)
+        {
+            *slot = (h, c);
         }
 
         Ok((actions, log_probs, values))
@@ -248,13 +295,14 @@ impl PPOTrainer {
         hidden_states: &[(Vec<f32>, Vec<f32>)],
     ) {
         for i in 0..observations.len() {
-            let weapon_idx = actions[i].get(CONTINUOUS_ACTION_DIM)
+            let weapon_idx = actions[i]
+                .get(ACTION_PARAM_DIM)
                 .map(|&v| v as usize)
                 .unwrap_or(0);
 
             self.buffer.push(
                 observations[i].clone(),
-                actions[i][..CONTINUOUS_ACTION_DIM].to_vec(),
+                actions[i][..ACTION_PARAM_DIM].to_vec(),
                 weapon_idx,
                 log_probs[i],
                 values[i],
@@ -280,50 +328,142 @@ impl PPOTrainer {
         self.buffer.is_full()
     }
 
+    pub fn set_learning_rate(&mut self, lr: f64) {
+        self.optimizer.set_learning_rate(lr);
+        self.config.lr = lr;
+    }
+
+    pub fn effective_entropy_coeff(&self) -> f32 {
+        let start = self.config.entropy_coeff.max(0.0);
+        if start <= MIN_ENTROPY_COEFF {
+            return start;
+        }
+
+        let end = (start * 0.2).max(MIN_ENTROPY_COEFF).min(start);
+        let progress = (self.total_episodes as f32 / ENTROPY_DECAY_EPISODES).clamp(0.0, 1.0);
+        start + (end - start) * progress
+    }
+
+    pub fn get_values(&self, observations: &[Vec<f32>]) -> CandleResult<Vec<f32>> {
+        let num_envs = observations.len();
+        let obs_flat: Vec<f32> = observations.iter().flatten().copied().collect();
+        let obs_tensor = Tensor::from_slice(&obs_flat, (num_envs, OBS_DIM), &self.device)?;
+        let state = LSTMState::stack(&self.env_states, &self.device)?;
+        let (_, _, _, values, _) = self.network.forward(&obs_tensor, &state)?;
+        values.squeeze(1)?.to_vec1()
+    }
+
+    pub fn deterministic_action_for_state(
+        &self,
+        observation: &[f32],
+        state: &(Vec<f32>, Vec<f32>),
+    ) -> CandleResult<(Vec<f32>, (Vec<f32>, Vec<f32>))> {
+        let obs_tensor = Tensor::from_slice(observation, (1, OBS_DIM), &self.device)?;
+        let lstm_state = LSTMState::stack(std::slice::from_ref(state), &self.device)?;
+        let (action_params, _log_std, weapon_logits, _value, new_state) =
+            self.network.forward(&obs_tensor, &lstm_state)?;
+
+        let cont_means = action_params
+            .narrow(1, 0, CONTINUOUS_ACTION_DIM)?
+            .tanh()?
+            .to_vec2::<f32>()?;
+        let binary_probs = candle_nn::ops::sigmoid(&action_params.narrow(
+            1,
+            CONTINUOUS_ACTION_DIM,
+            BINARY_ACTION_DIM,
+        )?)?
+        .to_vec2::<f32>()?;
+        let weapon_logits = weapon_logits
+            .narrow(1, 0, POLICY_WEAPON_DIM)?
+            .to_vec2::<f32>()?;
+
+        let mut action = Vec::with_capacity(ACTION_PARAM_DIM + 1);
+        action.extend(cont_means[0].iter().copied());
+        action.extend(
+            binary_probs[0]
+                .iter()
+                .map(|&p| if p >= 0.5 { 1.0 } else { 0.0 }),
+        );
+
+        let weapon_choice = weapon_logits[0]
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .map(|(idx, _)| idx)
+            .unwrap_or(0);
+        action.push(POLICY_WEAPON_INDICES[weapon_choice] as f32);
+
+        let h_all = new_state.h.to_vec2()?;
+        let c_all = new_state.c.to_vec2()?;
+        Ok((action, (h_all[0].clone(), c_all[0].clone())))
+    }
+
+    pub fn device_label(&self) -> String {
+        format!("{:?}", self.device)
+    }
+
     /// PPO update using stored hidden states for LSTM evaluation.
-    pub fn update(&mut self) -> CandleResult<PPOUpdateStats> {
+    pub fn update(&mut self, bootstrap_values: &[f32]) -> CandleResult<PPOUpdateStats> {
         let buffer_len = self.buffer.len();
         if buffer_len == 0 {
             return Ok(PPOUpdateStats {
-                policy_loss: 0.0, value_loss: 0.0, entropy: 0.0,
-                approx_kl: 0.0, explained_variance: 0.0,
+                policy_loss: 0.0,
+                value_loss: 0.0,
+                entropy: 0.0,
+                approx_kl: 0.0,
+                explained_variance: 0.0,
             });
         }
 
-        // Bootstrap last value using last observation + its hidden state
-        let last_obs = &self.buffer.observations[buffer_len - 1];
-        let last_obs_tensor = Tensor::from_slice(last_obs, (1, OBS_DIM), &self.device)?;
-        let last_h = &self.buffer.hidden_h[buffer_len - 1];
-        let last_c = &self.buffer.hidden_c[buffer_len - 1];
-        let last_state = LSTMState::from_vecs(last_h, last_c, &self.device)?;
-        let (_, _, _, last_val, _) = self.network.forward(&last_obs_tensor, &last_state)?;
-        let last_value: f32 = last_val.squeeze(0)?.squeeze(0)?.to_scalar()?;
+        let num_envs = self.buffer.num_envs();
+        let rollout_steps = self.buffer.num_steps();
+        if bootstrap_values.len() != num_envs {
+            candle_core::bail!(
+                "bootstrap values length {} did not match num_envs {}",
+                bootstrap_values.len(),
+                num_envs
+            )
+        }
 
         // GAE
-        let (advantages, returns) = compute_gae(
+        let (advantages, returns) = compute_gae_per_env(
             &self.buffer.rewards,
             &self.buffer.values,
             &self.buffer.dones,
+            bootstrap_values,
+            num_envs,
+            rollout_steps,
             self.config.gamma,
             self.config.gae_lambda,
-            last_value,
         );
 
         // Normalize advantages
         let adv_mean = advantages.iter().sum::<f32>() / advantages.len() as f32;
-        let adv_var = advantages.iter().map(|a| (a - adv_mean).powi(2)).sum::<f32>()
+        let adv_var = advantages
+            .iter()
+            .map(|a| (a - adv_mean).powi(2))
+            .sum::<f32>()
             / advantages.len() as f32;
         let adv_std = (adv_var + 1e-8).sqrt();
-        let norm_advantages: Vec<f32> = advantages.iter().map(|a| (a - adv_mean) / adv_std).collect();
+        let norm_advantages: Vec<f32> = advantages
+            .iter()
+            .map(|a| (a - adv_mean) / adv_std)
+            .collect();
 
         // Flatten buffer into tensors
         let obs_flat: Vec<f32> = self.buffer.observations.iter().flatten().copied().collect();
         let obs_tensor = Tensor::from_slice(&obs_flat, (buffer_len, OBS_DIM), &self.device)?;
 
         let act_flat: Vec<f32> = self.buffer.actions.iter().flatten().copied().collect();
-        let actions_tensor = Tensor::from_slice(&act_flat, (buffer_len, CONTINUOUS_ACTION_DIM), &self.device)?;
+        let actions_tensor =
+            Tensor::from_slice(&act_flat, (buffer_len, ACTION_PARAM_DIM), &self.device)?;
 
-        let weapon_indices: Vec<u32> = self.buffer.weapon_indices.iter().map(|&w| w as u32).collect();
+        let weapon_indices: Vec<u32> = self
+            .buffer
+            .weapon_indices
+            .iter()
+            .map(|&w| w as u32)
+            .collect();
         let weapon_tensor = Tensor::from_slice(&weapon_indices, buffer_len, &self.device)?;
 
         // Flatten hidden states into tensors [buffer_len, HIDDEN_SIZE]
@@ -342,6 +482,7 @@ impl PPOTrainer {
         let mut total_entropy = 0.0f32;
         let mut total_approx_kl = 0.0f32;
         let mut num_updates = 0u32;
+        let entropy_coeff = self.effective_entropy_coeff();
 
         let mut indices: Vec<usize> = (0..buffer_len).collect();
 
@@ -352,7 +493,8 @@ impl PPOTrainer {
             while start + self.config.minibatch_size <= buffer_len {
                 let end = start + self.config.minibatch_size;
                 let mb_idx: Vec<u32> = indices[start..end].iter().map(|&i| i as u32).collect();
-                let idx_tensor = Tensor::from_slice(&mb_idx, self.config.minibatch_size, &self.device)?;
+                let idx_tensor =
+                    Tensor::from_slice(&mb_idx, self.config.minibatch_size, &self.device)?;
 
                 let mb_obs = obs_tensor.index_select(&idx_tensor, 0)?;
                 let mb_actions = actions_tensor.index_select(&idx_tensor, 0)?;
@@ -368,7 +510,8 @@ impl PPOTrainer {
 
                 // Evaluate with stored hidden states
                 let (new_log_probs, values, entropy) =
-                    self.network.evaluate_actions(&mb_obs, &mb_actions, &mb_weapons, &mb_state)?;
+                    self.network
+                        .evaluate_actions(&mb_obs, &mb_actions, &mb_weapons, &mb_state)?;
 
                 let log_ratio = (&new_log_probs - &mb_old_lp)?;
                 let ratio = log_ratio.exp()?;
@@ -388,7 +531,7 @@ impl PPOTrainer {
                 let entropy_scalar: f32 = entropy.to_scalar()?;
                 let loss = (&policy_loss
                     + value_loss.affine(self.config.value_coeff as f64, 0.0)?)?
-                    .broadcast_sub(&entropy.affine(self.config.entropy_coeff as f64, 0.0)?)?;
+                .broadcast_sub(&entropy.affine(entropy_coeff as f64, 0.0)?)?;
 
                 self.optimizer.backward_step(&loss)?;
 
@@ -402,14 +545,7 @@ impl PPOTrainer {
             }
         }
 
-        // Explained variance
-        let values_vec = &self.buffer.values;
-        let val_mean = values_vec.iter().sum::<f32>() / values_vec.len() as f32;
-        let val_var = values_vec.iter().map(|v| (v - val_mean).powi(2)).sum::<f32>()
-            / values_vec.len() as f32;
-        let residual_var = returns.iter().zip(values_vec.iter())
-            .map(|(r, v)| (r - v).powi(2)).sum::<f32>() / returns.len() as f32;
-        let explained_variance = if val_var < 1e-8 { 0.0 } else { 1.0 - residual_var / val_var };
+        let explained_variance = explained_variance(&returns, &self.buffer.values);
 
         self.buffer.clear();
 
@@ -424,6 +560,31 @@ impl PPOTrainer {
     }
 }
 
+fn explained_variance(returns: &[f32], values: &[f32]) -> f32 {
+    if returns.is_empty() || values.is_empty() || returns.len() != values.len() {
+        return 0.0;
+    }
+
+    let returns_mean = returns.iter().sum::<f32>() / returns.len() as f32;
+    let returns_var = returns
+        .iter()
+        .map(|r| (r - returns_mean).powi(2))
+        .sum::<f32>()
+        / returns.len() as f32;
+    let residual_var = returns
+        .iter()
+        .zip(values.iter())
+        .map(|(r, v)| (r - v).powi(2))
+        .sum::<f32>()
+        / returns.len() as f32;
+
+    if returns_var < 1e-8 {
+        0.0
+    } else {
+        1.0 - residual_var / returns_var
+    }
+}
+
 fn shuffle_indices(indices: &mut [usize]) {
     use rand::Rng;
     let mut rng = rand::thread_rng();
@@ -431,5 +592,78 @@ fn shuffle_indices(indices: &mut [usize]) {
     for i in (1..n).rev() {
         let j = rng.gen_range(0..=i);
         indices.swap(i, j);
+    }
+}
+
+fn select_best_device() -> Device {
+    #[cfg(target_os = "macos")]
+    {
+        if candle_core::utils::metal_is_available() {
+            if metal::Device::system_default().is_none() {
+                log::warn!(
+                    "Metal framework is present but this process cannot see a default Metal device; falling back to CPU"
+                );
+                return Device::Cpu;
+            }
+            let previous_hook = std::panic::take_hook();
+            std::panic::set_hook(Box::new(|_| {}));
+            let result = std::panic::catch_unwind(|| Device::new_metal(0));
+            std::panic::set_hook(previous_hook);
+
+            match result {
+                Ok(Ok(device)) => return device,
+                Ok(Err(err)) => {
+                    log::warn!("Metal device unavailable, falling back to CPU: {err}");
+                }
+                Err(_) => {
+                    log::warn!("Metal device initialization panicked, falling back to CPU");
+                }
+            }
+        }
+    }
+    Device::Cpu
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_gae_per_env, explained_variance};
+
+    #[test]
+    fn gae_respects_environment_boundaries() {
+        let rewards = vec![1.0, 10.0, 2.0, 20.0];
+        let values = vec![0.5, 5.0, 0.25, 2.5];
+        let dones = vec![false, true, false, false];
+        let bootstrap_values = vec![0.0, 100.0];
+
+        let (advantages, returns) =
+            compute_gae_per_env(&rewards, &values, &dones, &bootstrap_values, 2, 2, 1.0, 1.0);
+
+        assert!((advantages[0] - 2.5).abs() < 1e-5);
+        assert!((advantages[2] - 1.75).abs() < 1e-5);
+        assert!((advantages[1] - 5.0).abs() < 1e-5);
+        assert!((advantages[3] - 117.5).abs() < 1e-4);
+
+        assert!((returns[0] - 3.0).abs() < 1e-5);
+        assert!((returns[1] - 10.0).abs() < 1e-5);
+        assert!((returns[2] - 2.0).abs() < 1e-5);
+        assert!((returns[3] - 120.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn explained_variance_uses_returns_as_baseline() {
+        let returns = vec![10.0, 12.0, 14.0, 16.0];
+        let values = vec![9.0, 11.0, 15.0, 17.0];
+
+        let ev = explained_variance(&returns, &values);
+
+        assert!(ev > 0.0);
+        assert!(ev < 1.0);
+    }
+
+    #[test]
+    #[ignore]
+    fn print_selected_training_device() {
+        let trainer = super::PPOTrainer::new(super::PPOConfig::default()).expect("trainer");
+        println!("selected_device={}", trainer.device_label());
     }
 }
