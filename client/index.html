@@ -11,5 +11,50 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script async src="https://jam.pieter.com/2026/widget.js"></script>
+    <script>
+      (() => {
+        const WIDGET_URL = "https://vibej.am";
+        const MENU_SELECTOR = "#root .absolute.inset-0.z-10";
+
+        function getWidget() {
+          return Array.from(document.querySelectorAll("a")).find((anchor) => (
+            anchor.href.replace(/\/$/, "") === WIDGET_URL &&
+            anchor.textContent?.includes("Vibe Jam 2026")
+          )) ?? null;
+        }
+
+        function inMainMenu() {
+          return document.querySelector(MENU_SELECTOR) !== null;
+        }
+
+        function syncWidgetVisibility() {
+          const widget = getWidget();
+          if (!widget) return;
+          widget.style.display = inMainMenu() ? "" : "none";
+        }
+
+        const observer = new MutationObserver(() => {
+          syncWidgetVisibility();
+        });
+
+        observer.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+        });
+
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", syncWidgetVisibility, {
+            once: true,
+          });
+        } else {
+          syncWidgetVisibility();
+        }
+
+        window.addEventListener("load", syncWidgetVisibility, { once: true });
+        window.setTimeout(syncWidgetVisibility, 250);
+        window.setTimeout(syncWidgetVisibility, 1000);
+      })();
+    </script>
   </body>
 </html>

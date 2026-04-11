@@ -13,7 +13,6 @@ import { GameScreen } from "./screens/GameScreen";
 import { useMatchSession } from "./screens/hooks/useMatchSession";
 import { consumeAuthCallback } from "./auth";
 import { getPortalContext, getPortalUsernameCandidates } from "./portal";
-import { useVibeJamWidget } from "./vibeJamWidget";
 
 const UPDATE_RELOAD_AT_KEY = "bitwars-update-reload-at";
 const UPDATE_RELOAD_TARGET_KEY = "bitwars-update-reload-target";
@@ -253,14 +252,9 @@ function App() {
   } = useGameStore();
   const handlingSessionLossRef = useRef(false);
   const matchSession = useMatchSession(connection, identity);
-  const showVibeJamWidget = connected &&
-    !error &&
-    (screen === "login" || screen === "lobby");
 
   const canReloadForUpdate =
     !connection || screen !== "game" || matchSession.phase !== "active";
-
-  useVibeJamWidget(showVibeJamWidget);
 
   const handleSessionLoss = useCallback(
     (message: string) => {
