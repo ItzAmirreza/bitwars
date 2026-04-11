@@ -38,7 +38,7 @@ function PixelBar({
 }
 
 export function LobbyScreen() {
-  const { username, identity, connection, resetSession } =
+  const { username, identity, connection, setScreen, resetSession } =
     useGameStore();
   const settings = useGameStore((s) => s.settings);
   const [mounted, setMounted] = useState(false);
@@ -93,6 +93,11 @@ export function LobbyScreen() {
   useEffect(() => {
     menuAudio.setMasterVolume(settings.masterVolume);
   }, [settings.masterVolume]);
+
+  const handleEnterGame = () => {
+    menuAudio.playUIDeploy();
+    setScreen("game");
+  };
 
   const handleUseGuest = () => {
     menuAudio.playUIClick();
@@ -276,6 +281,42 @@ export function LobbyScreen() {
                 boxShadow: "6px 6px 0 #00000044",
               }}
             >
+              {/* Play button */}
+              <button
+                onClick={handleEnterGame}
+                onMouseEnter={() => menuAudio.playUIHover()}
+                style={{
+                  width: "100%",
+                  background: "#ff6b35",
+                  border: "4px solid #000",
+                  color: "#000",
+                  fontFamily: "var(--font-pixel)",
+                  fontSize: "20px",
+                  letterSpacing: "0.2em",
+                  padding: "20px 24px",
+                  cursor: "pointer",
+                  transition: "all 0.1s",
+                  boxShadow: "5px 5px 0 #00000066",
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.transform = "translate(-2px, -2px)";
+                  e.currentTarget.style.boxShadow = "7px 7px 0 #00000066";
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.transform = "translate(0, 0)";
+                  e.currentTarget.style.boxShadow = "5px 5px 0 #00000066";
+                }}
+                onMouseDown={(e) => {
+                  e.currentTarget.style.transform = "translate(3px, 3px)";
+                  e.currentTarget.style.boxShadow = "1px 1px 0 #00000066";
+                }}
+                onMouseUp={(e) => {
+                  e.currentTarget.style.transform = "translate(-2px, -2px)";
+                  e.currentTarget.style.boxShadow = "7px 7px 0 #00000066";
+                }}
+              >
+                PLAY
+              </button>
 
               <p
                 style={{
