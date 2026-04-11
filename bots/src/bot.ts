@@ -2,8 +2,11 @@ import { ENTITY_KINDS, PLAYER, WORLD, WEAPONS_CONFIG } from '../../client/src/sh
 import { DbConnection } from '../../client/src/module_bindings/index.ts';
 import { buildPlayerMovementFlags } from '../../client/src/game/playerMovementFlags.ts';
 import { WorldSnapshot, type BotVec3 } from './world.ts';
+import { NeuralNavigator } from './neural.ts';
+import { buildObservation } from './observation.ts';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const MATCH_STATE_ACTIVE = 1;
 const WORLD_CHUNK_RADIUS = 5;
@@ -55,6 +58,13 @@ const MAX_VIEW_DOT = -0.2;
 const SPAWN_RUSH_MS = 4200;
 const BREACH_COOLDOWN_MS = 2400;
 const MIN_SAFE_FOOT_Y = 3;
+
+const NAV_MAX_YAW_DELTA = 0.35;
+const NAV_MAX_PITCH_DELTA = 0.25;
+const NAV_MODEL_PATH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../model/navigation.safetensors',
+);
 
 type IdentityLike = {
   toHexString?: () => string;
@@ -254,9 +264,31 @@ export class HeadlessBitBot {
   private lastBreachAt = 0;
   private lastBreachLoadoutRequestAt = 0;
 
+  // ── Neural navigation state ──
+  private neuralNav: NeuralNavigator | null = null;
+  private navYaw = 0;
+  private navPitch = 0;
+  private prevVelocity: BotVec3 = { x: 0, y: 0, z: 0 };
+  private navStagnationTimer = 0;
+  private navPrevDist = 0;
+  private navInitialDist = 0;
+  private navLastTargetX = 0;
+  private navLastTargetZ = 0;
+  private lastGrounded = true;
+  private lastClimbing = false;
+  private lastSprinting = false;
+  private usingNeuralThisTick = false;
+  private wasUsingNeural = false;
+  private pendingNeuralJump = false;
+
   constructor(options: BotRuntimeOptions) {
     this.options = options;
     this.activeName = options.name;
+    try {
+      this.neuralNav = new NeuralNavigator(NAV_MODEL_PATH);
+    } catch {
+      console.warn(`[bot:${options.name}] neural model not found, using classic navigation`);
+    }
   }
 
   start(): void {
@@ -1415,6 +1447,96 @@ export class HeadlessBitBot {
     return true;
   }
 
+  private neuralNavigate(
+    me: PlayerRow,
+    navTarget: BotVec3,
+    dtSec: number,
+  ): { moveX: number; moveZ: number; sprinting: boolean; shouldJump: boolean } {
+    // Track stagnation (how stuck the bot is)
+    const dx = navTarget.x - me.pos.x;
+    const dz = navTarget.z - me.pos.z;
+    const distToTarget = Math.sqrt(dx * dx + dz * dz);
+
+    if (
+      this.navLastTargetX !== navTarget.x ||
+      this.navLastTargetZ !== navTarget.z ||
+      this.navInitialDist <= 0
+    ) {
+      this.navInitialDist = distToTarget;
+      this.navPrevDist = distToTarget;
+      this.navStagnationTimer = 0;
+      this.navLastTargetX = navTarget.x;
+      this.navLastTargetZ = navTarget.z;
+    }
+
+    if (distToTarget < this.navPrevDist - 0.25) {
+      this.navStagnationTimer = 0;
+      this.navPrevDist = distToTarget;
+    } else {
+      this.navStagnationTimer += dtSec;
+    }
+
+    // Weapon ammo (normalized)
+    const ammo: [number, number, number] = [
+      this.normalizeAmmo(RIFLE_INDEX),
+      this.normalizeAmmo(SHOTGUN_INDEX),
+      this.normalizeAmmo(RPG_INDEX),
+    ];
+
+    const obs = buildObservation(this.world, {
+      pos: me.pos,
+      vel: this.prevVelocity,
+      yaw: this.navYaw,
+      pitch: this.navPitch,
+      targetPos: navTarget,
+      initialDistance: this.navInitialDist,
+      onGround: this.lastGrounded,
+      isClimbing: this.lastClimbing,
+      isSprinting: this.lastSprinting,
+      health: me.health,
+      maxHealth: me.maxHealth,
+      currentWeapon: this.selectedWeapon,
+      stagnation: Math.min(this.navStagnationTimer / 8, 1),
+      ammo,
+      cooldowns: [0, 0, 0],
+    });
+
+    const action = this.neuralNav!.forward(obs);
+
+    // Update navigation yaw/pitch.
+    // No timestep scaling — the model outputs per-step deltas and we apply one step
+    // per bot tick. This gives slower but more stable turning than 3x scaling.
+    this.navYaw += action.yawDelta * NAV_MAX_YAW_DELTA;
+    this.navPitch = clamp(
+      this.navPitch + action.pitchDelta * NAV_MAX_PITCH_DELTA,
+      -Math.PI / 2 + 0.01,
+      Math.PI / 2 - 0.01,
+    );
+
+    // Convert forward/strafe to world-space using navigation yaw
+    const sinN = Math.sin(this.navYaw);
+    const cosN = Math.cos(this.navYaw);
+    let moveX = -sinN * action.forward + cosN * action.strafe;
+    let moveZ = -cosN * action.forward + -sinN * action.strafe;
+    const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
+    if (len > 0.001) {
+      moveX /= len;
+      moveZ /= len;
+    }
+
+    return {
+      moveX,
+      moveZ,
+      sprinting: action.sprint && action.forward > 0,
+      shouldJump: action.jump,
+    };
+  }
+
+  private normalizeAmmo(weapon: number): number {
+    const max = Number(WEAPONS_CONFIG[weapon]?.maxAmmo ?? 1);
+    return max > 0 ? this.getAmmoForWeapon(weapon) / max : 0;
+  }
+
   private computeMovement(me: PlayerRow, target: BotTarget | null, now: number, dtSec: number): {
     nextPos: BotVec3;
     velocity: BotVec3;
@@ -1505,9 +1627,23 @@ export class HeadlessBitBot {
         desiredMoveZ = toward.x * this.strafeSign * 0.7 - toward.z * 0.15;
         desiredGoal = { x: me.pos.x - toward.x * 3, z: me.pos.z - toward.z * 3 };
       } else if (distance > IDEAL_RIFLE_RANGE + 10) {
-        desiredMoveX = toward.x + toward.z * this.strafeSign * 0.55;
-        desiredMoveZ = toward.z - toward.x * this.strafeSign * 0.55;
-        sprinting = true;
+        if (this.neuralNav) {
+          // Use neural navigation to path toward distant target
+          if (!this.usingNeuralThisTick) {
+            this.navYaw = this.yaw;
+            this.navPitch = this.pitch;
+          }
+          this.usingNeuralThisTick = true;
+          const nav = this.neuralNavigate(me, { x: targetPos.x, y: targetPos.y, z: targetPos.z }, dtSec);
+          desiredMoveX = nav.moveX;
+          desiredMoveZ = nav.moveZ;
+          sprinting = nav.sprinting;
+          this.pendingNeuralJump = nav.shouldJump;
+        } else {
+          desiredMoveX = toward.x + toward.z * this.strafeSign * 0.55;
+          desiredMoveZ = toward.z - toward.x * this.strafeSign * 0.55;
+          sprinting = true;
+        }
         desiredGoal = { x: targetPos.x, z: targetPos.z };
       } else if ((target.kind === 'player' && distance < IDEAL_RIFLE_RANGE - 6) || me.health <= PLAYER.maxHealth * 0.38) {
         desiredMoveX = -toward.x * 0.7 + toward.z * this.strafeSign * 0.95;
@@ -1529,6 +1665,29 @@ export class HeadlessBitBot {
       ) {
         this.tryStartJump(now);
       }
+    } else if (this.neuralNav) {
+      // ── Neural navigation ──
+      this.coverDirective = null;
+      if (!this.wasUsingNeural) {
+        // Transitioning to neural nav: sync yaw + reset LSTM
+        this.navYaw = this.yaw;
+        this.navPitch = this.pitch;
+        this.neuralNav?.resetState();
+        this.navStagnationTimer = 0;
+        this.navInitialDist = 0;
+      }
+      this.usingNeuralThisTick = true;
+      const navTarget: BotVec3 = { x: this.moveDirective.x, y: me.pos.y, z: this.moveDirective.z };
+      const nav = this.neuralNavigate(me, navTarget, dtSec);
+      desiredMoveX = nav.moveX;
+      desiredMoveZ = nav.moveZ;
+      sprinting = nav.sprinting;
+      this.pendingNeuralJump = nav.shouldJump;
+      desiredGoal = { x: this.moveDirective.x, z: this.moveDirective.z };
+      const goalDist = normalize2D(this.moveDirective.x - me.pos.x, this.moveDirective.z - me.pos.z).len;
+      if (goalDist <= WAYPOINT_RADIUS) {
+        this.moveDirective = this.chooseWaypoint(now, me);
+      }
     } else {
       this.coverDirective = null;
       const goalDx = this.moveDirective.x - me.pos.x;
@@ -1544,17 +1703,20 @@ export class HeadlessBitBot {
       }
     }
 
-    if (now < this.forcedUnstickUntil && this.forcedUnstickDir) {
-      desiredMoveX = this.forcedUnstickDir.x;
-      desiredMoveZ = this.forcedUnstickDir.z;
-      sprinting = true;
-      desiredGoal = {
-        x: clamp(me.pos.x + this.forcedUnstickDir.x * 8, 1, WORLD.sizeX - 1),
-        z: clamp(me.pos.z + this.forcedUnstickDir.z * 8, 1, WORLD.sizeZ - 1),
-      };
-    } else if (this.forcedUnstickUntil !== 0) {
-      this.forcedUnstickUntil = 0;
-      this.forcedUnstickDir = null;
+    // Skip forced unstick when neural is active (model handles stuck situations)
+    if (!this.usingNeuralThisTick) {
+      if (now < this.forcedUnstickUntil && this.forcedUnstickDir) {
+        desiredMoveX = this.forcedUnstickDir.x;
+        desiredMoveZ = this.forcedUnstickDir.z;
+        sprinting = true;
+        desiredGoal = {
+          x: clamp(me.pos.x + this.forcedUnstickDir.x * 8, 1, WORLD.sizeX - 1),
+          z: clamp(me.pos.z + this.forcedUnstickDir.z * 8, 1, WORLD.sizeZ - 1),
+        };
+      } else if (this.forcedUnstickUntil !== 0) {
+        this.forcedUnstickUntil = 0;
+        this.forcedUnstickDir = null;
+      }
     }
 
     const move = normalize2D(desiredMoveX, desiredMoveZ);
@@ -1569,10 +1731,17 @@ export class HeadlessBitBot {
       this.verticalVelocity = 0;
     }
 
+    // Neural model jump
+    if (this.pendingNeuralJump && grounded) {
+      this.tryStartJump(now);
+      this.pendingNeuralJump = false;
+    }
+
     const speed = grounded ? (sprinting ? SPRINT_SPEED : WALK_SPEED) : AIR_STRAFE_SPEED;
-    const steeredMove = grounded
-      ? this.chooseTraversalDirection(me, move, currentFootY, speed, dtSec, target, seekingCover)
-      : { x: move.x, z: move.z };
+    // Neural model already chose a good direction; skip angle probing
+    const steeredMove = this.usingNeuralThisTick || !grounded
+      ? { x: move.x, z: move.z }
+      : this.chooseTraversalDirection(me, move, currentFootY, speed, dtSec, target, seekingCover);
     let nextX = me.pos.x;
     let nextZ = me.pos.z;
     let nextEyeY = grounded && currentGroundFootY !== null ? currentGroundFootY + BOT_EYE_HEIGHT : me.pos.y;
@@ -1709,6 +1878,9 @@ export class HeadlessBitBot {
       const horiz = Math.max(0.001, Math.sqrt(tx * tx + tz * tz));
       desiredYaw = Math.atan2(-tx, -tz);
       desiredPitch = clamp(Math.atan2(ty, horiz), -1.0, 1.0);
+    } else if (this.usingNeuralThisTick) {
+      desiredYaw = this.navYaw;
+      desiredPitch = clamp(this.navPitch, -1.0, 1.0);
     } else if (Math.abs(movement.x) > 0.01 || Math.abs(movement.z) > 0.01) {
       desiredYaw = Math.atan2(-movement.x, -movement.z);
       desiredPitch = 0;
@@ -1901,6 +2073,12 @@ export class HeadlessBitBot {
       this.forcedUnstickDir = null;
       this.burstShotsRemaining = 0;
       this.nextFireAt = 0;
+      // Reset neural nav state on death
+      this.neuralNav?.resetState();
+      this.navStagnationTimer = 0;
+      this.navInitialDist = 0;
+      this.usingNeuralThisTick = false;
+      this.prevVelocity = { x: 0, y: 0, z: 0 };
       if (!this.pendingLoadout) {
         this.pendingLoadout = this.chooseRandomLoadout();
         void this.applyPendingLoadout();
@@ -1944,11 +2122,21 @@ export class HeadlessBitBot {
     }
     this.updateProgressState(me, now);
 
+    this.usingNeuralThisTick = false;
+    this.pendingNeuralJump = false;
+
     const target = this.getPreferredTarget(me, now);
     this.chooseWeaponForTarget(me, target);
     const movement = this.computeMovement(me, target, now, dtSec);
     this.updateLook(me, target, movement.velocity, dtSec);
     this.maybeFire(me, target, this.selectedWeapon, now);
+
+    // Track state for next neural observation
+    this.prevVelocity = movement.velocity;
+    this.lastGrounded = movement.grounded;
+    this.lastClimbing = movement.climbing;
+    this.lastSprinting = movement.sprinting;
+    this.wasUsingNeural = this.usingNeuralThisTick;
 
     this.sendPosition({
       pos: movement.nextPos,

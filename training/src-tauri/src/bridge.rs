@@ -227,6 +227,10 @@ pub struct CheckpointInfo {
     pub mean_episode_length: f32,
     pub timestamp: String,
     pub file_size_bytes: u64,
+    pub success_rate: f32,
+    pub stall_rate: f32,
+    pub timeout_rate: f32,
+    pub task: String,
 }
 
 /// Training status for frontend to query on mount.
@@ -469,7 +473,7 @@ pub async fn list_checkpoints(
 
         // Try to read the .meta sidecar for accurate data
         let meta_path = path.with_extension("meta");
-        let (episode, mean_reward, mean_episode_length, timestamp) =
+        let (episode, mean_reward, mean_episode_length, timestamp, success_rate, stall_rate, timeout_rate, task) =
             if let Ok(meta_bytes) = std::fs::read(&meta_path) {
                 if let Ok(meta) =
                     bincode::deserialize::<crate::rl::checkpoint::CheckpointMeta>(&meta_bytes)
@@ -479,18 +483,22 @@ pub async fn list_checkpoints(
                         meta.mean_reward,
                         meta.mean_episode_length,
                         meta.timestamp,
+                        meta.success_rate,
+                        meta.stall_rate,
+                        meta.timeout_rate,
+                        meta.task,
                     )
                 } else {
                     // Corrupt meta — fall back to filename parsing
                     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                     let (ep, r) = parse_checkpoint_stem(stem);
-                    (ep, r, 0.0, "unknown".to_string())
+                    (ep, r, 0.0, "unknown".to_string(), 0.0, 0.0, 0.0, String::new())
                 }
             } else {
                 // No meta file — fall back to filename parsing
                 let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                 let (ep, r) = parse_checkpoint_stem(stem);
-                (ep, r, 0.0, "unknown".to_string())
+                (ep, r, 0.0, "unknown".to_string(), 0.0, 0.0, 0.0, String::new())
             };
 
         checkpoints.push(CheckpointInfo {
@@ -500,6 +508,10 @@ pub async fn list_checkpoints(
             mean_episode_length,
             timestamp,
             file_size_bytes,
+            success_rate,
+            stall_rate,
+            timeout_rate,
+            task,
         });
     }
 

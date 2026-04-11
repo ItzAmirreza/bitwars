@@ -24,7 +24,7 @@ pub const POLICY_WEAPON_DIM: usize = POLICY_WEAPON_INDICES.len();
 pub const HIDDEN_SIZE: usize = 256;
 /// Actor/critic head hidden size.
 const HEAD_HIDDEN: usize = 128;
-const INITIAL_ACTION_BIAS: [f32; ACTION_PARAM_DIM] = [0.0, 0.0, 0.0, 0.0, -1.4, 0.9, -1.2];
+const INITIAL_ACTION_BIAS: [f32; ACTION_PARAM_DIM] = [0.4, 0.0, 0.0, 0.0, -1.4, 0.9, -1.2];
 const INITIAL_WEAPON_BIAS: [f32; WEAPON_HEAD_DIM] = [0.7, -0.1, 0.0, -5.0, -5.0];
 
 // ── LSTM Hidden State ──
@@ -278,14 +278,16 @@ impl ActorCritic {
     /// actions: [batch, CONTINUOUS_ACTION_DIM]
     /// weapon_indices: [batch] u32
     /// state: LSTMState for this batch (stored from collection time)
+    ///
+    /// Returns (log_probs, values, entropy, new_lstm_state).
     pub fn evaluate_actions(
         &self,
         obs: &Tensor,
         actions: &Tensor,
         weapon_indices: &Tensor,
         state: &LSTMState,
-    ) -> CandleResult<(Tensor, Tensor, Tensor)> {
-        let (action_params, log_std, weapon_logits, value, _new_state) =
+    ) -> CandleResult<(Tensor, Tensor, Tensor, LSTMState)> {
+        let (action_params, log_std, weapon_logits, value, new_state) =
             self.forward(obs, state)?;
         let batch_size = obs.dim(0)?;
 
@@ -351,7 +353,7 @@ impl ActorCritic {
         )?;
         let value_squeezed = value.squeeze(1)?;
 
-        Ok((total_log_prob, value_squeezed, total_entropy))
+        Ok((total_log_prob, value_squeezed, total_entropy, new_state))
     }
 
     #[allow(dead_code)]

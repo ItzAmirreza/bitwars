@@ -93,6 +93,31 @@ fn should_advance_task(
     }
 }
 
+/// Build checkpoint metadata from current training state.
+fn build_checkpoint_meta(
+    trainer: &PPOTrainer,
+    mean_reward: f32,
+    mean_episode_length: f32,
+    step_count: u64,
+    success_rate: f32,
+    stall_rate: f32,
+    timeout_rate: f32,
+    task: &str,
+) -> CheckpointMeta {
+    CheckpointMeta {
+        episode: trainer.total_episodes,
+        total_steps: step_count,
+        mean_reward,
+        mean_episode_length,
+        timestamp: chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string(),
+        config: trainer.config.clone(),
+        success_rate,
+        stall_rate,
+        timeout_rate,
+        task: task.to_string(),
+    }
+}
+
 /// Save a checkpoint (shared helper for manual + auto save).
 fn do_save_checkpoint(
     checkpoint_mgr: &CheckpointManager,
@@ -100,19 +125,30 @@ fn do_save_checkpoint(
     mean_reward: f32,
     mean_episode_length: f32,
     step_count: u64,
+    success_rate: f32,
+    stall_rate: f32,
+    timeout_rate: f32,
+    task: &str,
 ) {
-    let meta = CheckpointMeta {
-        episode: trainer.total_episodes,
-        total_steps: step_count,
+    let meta = build_checkpoint_meta(
+        trainer,
         mean_reward,
         mean_episode_length,
-        timestamp: chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string(),
-        config: trainer.config.clone(),
-    };
+        step_count,
+        success_rate,
+        stall_rate,
+        timeout_rate,
+        task,
+    );
     match checkpoint_mgr.save(&trainer.network, &meta) {
         Ok(path) => log::info!("Checkpoint saved: {}", path.display()),
         Err(e) => log::error!("Failed to save checkpoint: {}", e),
     }
+}
+
+/// Score for ranking checkpoints: success rate dominates, reward breaks ties.
+fn checkpoint_score(success_rate: f32, mean_reward: f32) -> f32 {
+    success_rate * 10000.0 + mean_reward
 }
 
 pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, seed: u64) {
@@ -180,6 +216,12 @@ pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, 
     let mut step_count: u64 = 0;
     let mut sim_step: u64 = 0;
     let mut last_auto_save_ep: u64 = 0;
+    let mut best_checkpoint_score: f32 = f32::NEG_INFINITY;
+    let mut success_rate: f32 = 0.0;
+    let mut stall_rate: f32 = 0.0;
+    let mut timeout_rate: f32 = 0.0;
+    let mut mean_reward: f32 = 0.0;
+    let mut mean_length: f32 = 0.0;
     let mut last_update_stats = crate::rl::ppo::PPOUpdateStats {
         policy_loss: 0.0,
         value_loss: 0.0,
@@ -313,6 +355,24 @@ pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, 
         }
 
         if paused {
+            // Check for manual save request while paused
+            if let Ok(mut s) = state.lock() {
+                if s.checkpoint_save_requested {
+                    s.checkpoint_save_requested = false;
+                    drop(s);
+                    do_save_checkpoint(
+                        &checkpoint_mgr,
+                        &trainer,
+                        mean_reward,
+                        mean_length,
+                        step_count,
+                        success_rate,
+                        stall_rate,
+                        timeout_rate,
+                        active_task.label(),
+                    );
+                }
+            }
             std::thread::sleep(std::time::Duration::from_millis(100));
             continue;
         }
@@ -611,7 +671,7 @@ pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, 
         } else {
             &episode_rewards
         };
-        let mean_reward = if recent_r.is_empty() {
+        mean_reward = if recent_r.is_empty() {
             0.0
         } else {
             recent_r.iter().sum::<f32>() / recent_r.len() as f32
@@ -622,14 +682,14 @@ pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, 
         } else {
             &episode_lengths
         };
-        let mean_length = if recent_l.is_empty() {
+        mean_length = if recent_l.is_empty() {
             0.0
         } else {
             recent_l.iter().sum::<f32>() / recent_l.len() as f32
         };
-        let success_rate = bool_rate(&episode_successes);
-        let timeout_rate = bool_rate(&episode_timeouts);
-        let stall_rate = bool_rate(&episode_stalls);
+        success_rate = bool_rate(&episode_successes);
+        timeout_rate = bool_rate(&episode_timeouts);
+        stall_rate = bool_rate(&episode_stalls);
         let rpg_usage_rate = mean_or_zero(&episode_rpg_usage);
         let block_destroy_rate = mean_or_zero(&episode_blocks_destroyed);
 
@@ -685,7 +745,31 @@ pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, 
                 mean_reward,
                 mean_length,
                 step_count,
+                success_rate,
+                stall_rate,
+                timeout_rate,
+                active_task.label(),
             );
+        }
+
+        // 10. Auto-save best checkpoint when score improves
+        let current_score = checkpoint_score(success_rate, mean_reward);
+        if current_score > best_checkpoint_score && trainer.total_episodes >= 100 {
+            best_checkpoint_score = current_score;
+            let meta = build_checkpoint_meta(
+                &trainer,
+                mean_reward,
+                mean_length,
+                step_count,
+                success_rate,
+                stall_rate,
+                timeout_rate,
+                active_task.label(),
+            );
+            match checkpoint_mgr.save_best(&trainer.network, &meta) {
+                Ok(_) => {}
+                Err(e) => log::error!("Failed to save best checkpoint: {}", e),
+            }
         }
     }
 
@@ -711,12 +795,19 @@ pub fn run_training(state: SharedState, ppo_config: PPOConfig, num_envs: usize, 
         } else {
             recent_l.iter().sum::<f32>() / recent_l.len() as f32
         };
+        let final_success = bool_rate(&episode_successes);
+        let final_stall = bool_rate(&episode_stalls);
+        let final_timeout = bool_rate(&episode_timeouts);
         do_save_checkpoint(
             &checkpoint_mgr,
             &trainer,
             mean_reward,
             mean_length,
             step_count,
+            final_success,
+            final_stall,
+            final_timeout,
+            active_task.label(),
         );
     }
 

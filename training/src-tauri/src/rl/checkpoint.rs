@@ -15,6 +15,14 @@ pub struct CheckpointMeta {
     pub mean_episode_length: f32,
     pub timestamp: String,
     pub config: PPOConfig,
+    #[serde(default)]
+    pub success_rate: f32,
+    #[serde(default)]
+    pub stall_rate: f32,
+    #[serde(default)]
+    pub timeout_rate: f32,
+    #[serde(default)]
+    pub task: String,
 }
 
 /// Manages saving, loading, listing, and cleaning up model checkpoints.
@@ -66,7 +74,11 @@ impl CheckpointManager {
     pub fn save(&self, network: &ActorCritic, meta: &CheckpointMeta) -> Result<PathBuf, String> {
         self.ensure_dir()?;
 
-        let basename = format!("checkpoint_ep{}_r{:.1}", meta.episode, meta.mean_reward);
+        let success_pct = (meta.success_rate * 100.0).round() as u32;
+        let basename = format!(
+            "checkpoint_ep{}_s{}pct_r{:.1}",
+            meta.episode, success_pct, meta.mean_reward
+        );
 
         // Save network weights (safetensors)
         let weights_path = self
@@ -84,14 +96,45 @@ impl CheckpointManager {
             .map_err(|e| format!("Failed to write meta file: {}", e))?;
 
         log::info!(
-            "Saved checkpoint: ep={}, reward={:.1}, path={}",
+            "Saved checkpoint: ep={}, success={}%, reward={:.1}, path={}",
             meta.episode,
+            success_pct,
             meta.mean_reward,
             weights_path.display()
         );
 
         // Clean up old checkpoints
         self.cleanup()?;
+
+        Ok(weights_path)
+    }
+
+    /// Save as the "best" checkpoint (never cleaned up by rotation).
+    pub fn save_best(
+        &self,
+        network: &ActorCritic,
+        meta: &CheckpointMeta,
+    ) -> Result<PathBuf, String> {
+        self.ensure_dir()?;
+
+        let weights_path = self.checkpoint_dir.join("best.safetensors");
+        network
+            .save(&weights_path)
+            .map_err(|e| format!("Failed to save best weights: {}", e))?;
+
+        let meta_path = self.checkpoint_dir.join("best.meta");
+        let meta_bytes =
+            bincode::serialize(meta).map_err(|e| format!("Failed to serialize meta: {}", e))?;
+        fs::write(&meta_path, meta_bytes)
+            .map_err(|e| format!("Failed to write best meta: {}", e))?;
+
+        let success_pct = (meta.success_rate * 100.0).round() as u32;
+        log::info!(
+            "New best checkpoint: ep={}, success={}%, reward={:.1}",
+            meta.episode,
+            success_pct,
+            meta.mean_reward,
+        );
 
         Ok(weights_path)
     }
@@ -135,6 +178,11 @@ impl CheckpointManager {
         for entry in entries {
             let entry = entry.map_err(|e| format!("Failed to read dir entry: {}", e))?;
             let path = entry.path();
+
+            // Skip the "best" checkpoint — it's managed separately
+            if path.file_stem().and_then(|s| s.to_str()) == Some("best") {
+                continue;
+            }
 
             if path.extension().and_then(|e| e.to_str()) == Some("safetensors") {
                 let meta_path = path.with_extension("meta");

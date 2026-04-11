@@ -199,10 +199,21 @@ pub struct PPOTrainer {
     /// Stored as (h_vec, c_vec) pairs for easy cloning.
     env_states: Vec<(Vec<f32>, Vec<f32>)>,
     device: Device,
+    /// Initial learning rate (for annealing).
+    initial_lr: f64,
 }
 
-const ENTROPY_DECAY_EPISODES: f32 = 20_000.0;
-const MIN_ENTROPY_COEFF: f32 = 0.0008;
+/// Sequence length for truncated BPTT during PPO updates.
+/// Each sequence is processed step-by-step through the LSTM, allowing gradients
+/// to flow through time instead of treating each timestep independently.
+const SEQ_LEN: usize = 8;
+
+const ENTROPY_DECAY_EPISODES: f32 = 50_000.0;
+const MIN_ENTROPY_COEFF: f32 = 0.003;
+
+/// LR anneals linearly from the initial value down to 10% over this many episodes.
+const LR_DECAY_EPISODES: f32 = 30_000.0;
+const LR_MIN_FRACTION: f64 = 0.1;
 
 impl PPOTrainer {
     pub fn new(config: PPOConfig) -> CandleResult<Self> {
@@ -218,6 +229,7 @@ impl PPOTrainer {
         )?;
         let buffer = RolloutBuffer::new(config.rollout_length);
 
+        let initial_lr = config.lr;
         Ok(Self {
             network,
             optimizer,
@@ -227,6 +239,7 @@ impl PPOTrainer {
             total_episodes: 0,
             env_states: Vec::new(),
             device,
+            initial_lr,
         })
     }
 
@@ -333,6 +346,12 @@ impl PPOTrainer {
         self.config.lr = lr;
     }
 
+    /// Linearly anneal the learning rate from initial down to 10% over LR_DECAY_EPISODES.
+    fn effective_lr(&self) -> f64 {
+        let progress = (self.total_episodes as f64 / LR_DECAY_EPISODES as f64).clamp(0.0, 1.0);
+        self.initial_lr * (1.0 - progress * (1.0 - LR_MIN_FRACTION))
+    }
+
     pub fn effective_entropy_coeff(&self) -> f32 {
         let start = self.config.entropy_coeff.max(0.0);
         if start <= MIN_ENTROPY_COEFF {
@@ -402,7 +421,12 @@ impl PPOTrainer {
         format!("{:?}", self.device)
     }
 
-    /// PPO update using stored hidden states for LSTM evaluation.
+    /// PPO update using sequence-based minibatches for proper LSTM training.
+    ///
+    /// Instead of shuffling individual timesteps (which destroys LSTM temporal
+    /// coherence), we group consecutive timesteps into sequences of SEQ_LEN
+    /// and shuffle sequences. Each sequence is processed step-by-step through
+    /// the LSTM, allowing gradients to flow through time (truncated BPTT).
     pub fn update(&mut self, bootstrap_values: &[f32]) -> CandleResult<PPOUpdateStats> {
         let buffer_len = self.buffer.len();
         if buffer_len == 0 {
@@ -450,7 +474,7 @@ impl PPOTrainer {
             .map(|a| (a - adv_mean) / adv_std)
             .collect();
 
-        // Flatten buffer into tensors
+        // ── Build flat tensors from buffer ──
         let obs_flat: Vec<f32> = self.buffer.observations.iter().flatten().copied().collect();
         let obs_tensor = Tensor::from_slice(&obs_flat, (buffer_len, OBS_DIM), &self.device)?;
 
@@ -466,17 +490,46 @@ impl PPOTrainer {
             .collect();
         let weapon_tensor = Tensor::from_slice(&weapon_indices, buffer_len, &self.device)?;
 
-        // Flatten hidden states into tensors [buffer_len, HIDDEN_SIZE]
-        let h_flat: Vec<f32> = self.buffer.hidden_h.iter().flatten().copied().collect();
-        let c_flat: Vec<f32> = self.buffer.hidden_c.iter().flatten().copied().collect();
-        let h_tensor = Tensor::from_slice(&h_flat, (buffer_len, HIDDEN_SIZE), &self.device)?;
-        let c_tensor = Tensor::from_slice(&c_flat, (buffer_len, HIDDEN_SIZE), &self.device)?;
-
         let old_log_probs = Tensor::from_slice(&self.buffer.log_probs, buffer_len, &self.device)?;
         let advantages_tensor = Tensor::from_slice(&norm_advantages, buffer_len, &self.device)?;
         let returns_tensor = Tensor::from_slice(&returns, buffer_len, &self.device)?;
 
-        // Training loop
+        // ── Build sequence index map ──
+        // Buffer layout is time-major interleaved: index = step * num_envs + env
+        // Each sequence is SEQ_LEN consecutive steps for one environment.
+        let num_seqs_per_env = rollout_steps / SEQ_LEN;
+        let total_sequences = num_seqs_per_env * num_envs;
+        let seqs_per_mb = (self.config.minibatch_size / SEQ_LEN).max(1);
+
+        // seq_buf_indices[seq_id][t] = buffer index for that timestep
+        let mut seq_buf_indices: Vec<[usize; SEQ_LEN]> = Vec::with_capacity(total_sequences);
+        // Initial hidden state for each sequence (from buffer at first step)
+        let mut init_h_flat: Vec<f32> = Vec::with_capacity(total_sequences * HIDDEN_SIZE);
+        let mut init_c_flat: Vec<f32> = Vec::with_capacity(total_sequences * HIDDEN_SIZE);
+
+        for env in 0..num_envs {
+            for s in 0..num_seqs_per_env {
+                let start_step = s * SEQ_LEN;
+                let mut indices = [0usize; SEQ_LEN];
+                for t in 0..SEQ_LEN {
+                    indices[t] = (start_step + t) * num_envs + env;
+                }
+                let first_idx = indices[0];
+                init_h_flat.extend_from_slice(&self.buffer.hidden_h[first_idx]);
+                init_c_flat.extend_from_slice(&self.buffer.hidden_c[first_idx]);
+                seq_buf_indices.push(indices);
+            }
+        }
+
+        let init_h_tensor =
+            Tensor::from_slice(&init_h_flat, (total_sequences, HIDDEN_SIZE), &self.device)?;
+        let init_c_tensor =
+            Tensor::from_slice(&init_c_flat, (total_sequences, HIDDEN_SIZE), &self.device)?;
+
+        // Pre-extract dones for hidden state resets (avoids borrowing buffer in loop)
+        let dones_buf: Vec<bool> = self.buffer.dones.clone();
+
+        // ── Training loop with sequence-based minibatches ──
         let mut total_policy_loss = 0.0f32;
         let mut total_value_loss = 0.0f32;
         let mut total_entropy = 0.0f32;
@@ -484,54 +537,114 @@ impl PPOTrainer {
         let mut num_updates = 0u32;
         let entropy_coeff = self.effective_entropy_coeff();
 
-        let mut indices: Vec<usize> = (0..buffer_len).collect();
+        // Anneal learning rate — fast early learning, stable later
+        let lr = self.effective_lr();
+        self.optimizer.set_learning_rate(lr);
+
+        let mut seq_order: Vec<usize> = (0..total_sequences).collect();
 
         for _epoch in 0..self.config.num_epochs {
-            shuffle_indices(&mut indices);
+            shuffle_indices(&mut seq_order);
 
-            let mut start = 0;
-            while start + self.config.minibatch_size <= buffer_len {
-                let end = start + self.config.minibatch_size;
-                let mb_idx: Vec<u32> = indices[start..end].iter().map(|&i| i as u32).collect();
-                let idx_tensor =
-                    Tensor::from_slice(&mb_idx, self.config.minibatch_size, &self.device)?;
+            let mut mb_start = 0;
+            while mb_start + seqs_per_mb <= total_sequences {
+                let mb_seq_ids = &seq_order[mb_start..mb_start + seqs_per_mb];
 
-                let mb_obs = obs_tensor.index_select(&idx_tensor, 0)?;
-                let mb_actions = actions_tensor.index_select(&idx_tensor, 0)?;
-                let mb_weapons = weapon_tensor.index_select(&idx_tensor, 0)?;
-                let mb_old_lp = old_log_probs.index_select(&idx_tensor, 0)?;
-                let mb_advantages = advantages_tensor.index_select(&idx_tensor, 0)?;
-                let mb_returns = returns_tensor.index_select(&idx_tensor, 0)?;
+                // Gather initial hidden states for this minibatch of sequences
+                let seq_idx: Vec<u32> = mb_seq_ids.iter().map(|&s| s as u32).collect();
+                let seq_idx_tensor =
+                    Tensor::from_slice(&seq_idx, seqs_per_mb, &self.device)?;
+                let mut state = LSTMState {
+                    h: init_h_tensor.index_select(&seq_idx_tensor, 0)?,
+                    c: init_c_tensor.index_select(&seq_idx_tensor, 0)?,
+                };
 
-                // Gather stored hidden states for this minibatch
-                let mb_h = h_tensor.index_select(&idx_tensor, 0)?;
-                let mb_c = c_tensor.index_select(&idx_tensor, 0)?;
-                let mb_state = LSTMState { h: mb_h, c: mb_c };
+                // Process SEQ_LEN steps sequentially (truncated BPTT)
+                let mut step_log_probs: Vec<Tensor> = Vec::with_capacity(SEQ_LEN);
+                let mut step_values: Vec<Tensor> = Vec::with_capacity(SEQ_LEN);
+                let mut step_old_lp: Vec<Tensor> = Vec::with_capacity(SEQ_LEN);
+                let mut step_advantages: Vec<Tensor> = Vec::with_capacity(SEQ_LEN);
+                let mut step_returns: Vec<Tensor> = Vec::with_capacity(SEQ_LEN);
+                let mut seq_entropy_sum = 0.0f32;
 
-                // Evaluate with stored hidden states
-                let (new_log_probs, values, entropy) =
-                    self.network
-                        .evaluate_actions(&mb_obs, &mb_actions, &mb_weapons, &mb_state)?;
+                for t in 0..SEQ_LEN {
+                    // Gather buffer indices for timestep t across sequences
+                    let buf_idx: Vec<u32> = mb_seq_ids
+                        .iter()
+                        .map(|&s| seq_buf_indices[s][t] as u32)
+                        .collect();
+                    let idx_t = Tensor::from_slice(&buf_idx, seqs_per_mb, &self.device)?;
 
-                let log_ratio = (&new_log_probs - &mb_old_lp)?;
+                    let obs_t = obs_tensor.index_select(&idx_t, 0)?;
+                    let act_t = actions_tensor.index_select(&idx_t, 0)?;
+                    let wpn_t = weapon_tensor.index_select(&idx_t, 0)?;
+
+                    step_old_lp.push(old_log_probs.index_select(&idx_t, 0)?);
+                    step_advantages.push(advantages_tensor.index_select(&idx_t, 0)?);
+                    step_returns.push(returns_tensor.index_select(&idx_t, 0)?);
+
+                    // Forward pass with current hidden state — gradients flow through
+                    let (log_probs_t, values_t, entropy_t, new_state) =
+                        self.network
+                            .evaluate_actions(&obs_t, &act_t, &wpn_t, &state)?;
+
+                    step_log_probs.push(log_probs_t);
+                    step_values.push(values_t);
+                    seq_entropy_sum += entropy_t.to_scalar::<f32>()?;
+
+                    // Reset hidden states where episodes ended (zero out done envs)
+                    let dones_t: Vec<bool> = mb_seq_ids
+                        .iter()
+                        .map(|&s| dones_buf[seq_buf_indices[s][t]])
+                        .collect();
+                    if dones_t.iter().any(|&d| d) {
+                        let mask: Vec<f32> = dones_t
+                            .iter()
+                            .map(|&d| if d { 0.0 } else { 1.0 })
+                            .collect();
+                        let mask =
+                            Tensor::from_slice(&mask, (seqs_per_mb, 1), &self.device)?
+                                .broadcast_as(new_state.h.shape())?;
+                        state = LSTMState {
+                            h: (new_state.h * &mask)?,
+                            c: (new_state.c * &mask)?,
+                        };
+                    } else {
+                        state = new_state;
+                    }
+                }
+
+                // Concatenate all timestep results → [seqs_per_mb * SEQ_LEN]
+                let all_log_probs = Tensor::cat(&step_log_probs, 0)?;
+                let all_values = Tensor::cat(&step_values, 0)?;
+                let all_old_lp = Tensor::cat(&step_old_lp, 0)?;
+                let all_advantages = Tensor::cat(&step_advantages, 0)?;
+                let all_returns = Tensor::cat(&step_returns, 0)?;
+                let avg_entropy = Tensor::new(
+                    seq_entropy_sum / SEQ_LEN as f32,
+                    &self.device,
+                )?;
+
+                // PPO clipped surrogate loss
+                let log_ratio = (&all_log_probs - &all_old_lp)?;
                 let ratio = log_ratio.exp()?;
+                let approx_kl: f32 =
+                    log_ratio.sqr()?.mean_all()?.to_scalar::<f32>()? * 0.5;
 
-                let approx_kl: f32 = log_ratio.sqr()?.mean_all()?.to_scalar::<f32>()? * 0.5;
-
-                let surr1 = (&ratio * &mb_advantages)?;
+                let surr1 = (&ratio * &all_advantages)?;
                 let ratio_clamped = ratio.clamp(
                     1.0 - self.config.clip_epsilon as f64,
                     1.0 + self.config.clip_epsilon as f64,
                 )?;
-                let surr2 = (&ratio_clamped * &mb_advantages)?;
+                let surr2 = (&ratio_clamped * &all_advantages)?;
                 let policy_loss = surr1.minimum(&surr2)?.mean_all()?.neg()?;
 
-                let value_loss = (&values - &mb_returns)?.sqr()?.mean_all()?;
+                let value_loss = (&all_values - &all_returns)?.sqr()?.mean_all()?;
 
-                let entropy_scalar: f32 = entropy.to_scalar()?;
+                let entropy_scalar: f32 = avg_entropy.to_scalar()?;
                 let loss = (&policy_loss
                     + value_loss.affine(self.config.value_coeff as f64, 0.0)?)?
-                .broadcast_sub(&entropy.affine(entropy_coeff as f64, 0.0)?)?;
+                .broadcast_sub(&avg_entropy.affine(entropy_coeff as f64, 0.0)?)?;
 
                 self.optimizer.backward_step(&loss)?;
 
@@ -541,7 +654,7 @@ impl PPOTrainer {
                 total_approx_kl += approx_kl;
                 num_updates += 1;
 
-                start = end;
+                mb_start += seqs_per_mb;
             }
         }
 

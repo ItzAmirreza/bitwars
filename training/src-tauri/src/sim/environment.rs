@@ -23,7 +23,7 @@ const SIM_DT: f32 = 1.0 / 30.0;
 
 /// Per-episode timeout is derived from target distance and active task.
 const EPISODE_TIMEOUT_MIN: f32 = 12.0;
-const EPISODE_TIMEOUT_MAX: f32 = 30.0;
+const EPISODE_TIMEOUT_MAX: f32 = 40.0;
 
 /// Target is a 3x3 block area on the ground.
 const TARGET_SIZE: f32 = 3.0;
@@ -48,10 +48,12 @@ const MAX_YAW_DELTA_PER_STEP: f32 = 0.35;
 const MAX_PITCH_DELTA_PER_STEP: f32 = 0.25;
 
 const PROGRESS_CLAMP: f32 = 2.0;
-const BREACH_FIRE_COST: f32 = 0.02;
 const BREACH_OTHER_FIRE_COST: f32 = 0.05;
-const BREACH_DESTROY_COST_PER_BLOCK: f32 = 0.008;
+/// Positive reward per block destroyed — encourages RPG use for breaching.
+const BREACH_DESTROY_REWARD_PER_BLOCK: f32 = 0.012;
 const STAGNATION_DRIFT_COST: f32 = 0.02;
+/// Per-step bonus for moving fast toward the target (at max sprint speed).
+const VELOCITY_TOWARD_TARGET_BONUS: f32 = 0.04;
 
 // ── Step result types ──
 
@@ -188,55 +190,55 @@ impl TrainingTask {
 
     fn progress_scale(self) -> f32 {
         match self {
-            Self::GroundShort => 6.0,
-            Self::GroundLong => 6.0,
-            Self::Elevated => 5.5,
-            Self::Breach => 5.0,
+            Self::GroundShort => 10.0,
+            Self::GroundLong => 10.0,
+            Self::Elevated => 9.0,
+            Self::Breach => 8.0,
         }
     }
 
     fn living_cost(self) -> f32 {
         match self {
-            Self::GroundShort => 0.02,
-            Self::GroundLong => 0.025,
-            Self::Elevated => 0.03,
-            Self::Breach => 0.035,
+            Self::GroundShort => 0.028,
+            Self::GroundLong => 0.033,
+            Self::Elevated => 0.04,
+            Self::Breach => 0.045,
         }
     }
 
     fn success_bonus(self) -> f32 {
         match self {
-            Self::GroundShort => 120.0,
-            Self::GroundLong => 135.0,
-            Self::Elevated => 145.0,
-            Self::Breach => 160.0,
+            Self::GroundShort => 30.0,
+            Self::GroundLong => 35.0,
+            Self::Elevated => 40.0,
+            Self::Breach => 50.0,
         }
     }
 
     fn timeout_penalty(self) -> f32 {
         match self {
-            Self::GroundShort => 25.0,
-            Self::GroundLong => 30.0,
-            Self::Elevated => 35.0,
-            Self::Breach => 40.0,
+            Self::GroundShort => 10.0,
+            Self::GroundLong => 12.0,
+            Self::Elevated => 15.0,
+            Self::Breach => 18.0,
         }
     }
 
     fn stall_penalty(self) -> f32 {
         match self {
-            Self::GroundShort => 15.0,
-            Self::GroundLong => 18.0,
-            Self::Elevated => 24.0,
-            Self::Breach => 28.0,
+            Self::GroundShort => 6.0,
+            Self::GroundLong => 8.0,
+            Self::Elevated => 10.0,
+            Self::Breach => 12.0,
         }
     }
 
     fn stall_window(self) -> (f32, f32) {
         match self {
-            Self::GroundShort => (6.0, 4.5),
-            Self::GroundLong => (8.0, 5.5),
-            Self::Elevated => (10.0, 7.0),
-            Self::Breach => (12.0, 8.0),
+            Self::GroundShort => (5.0, 3.5),
+            Self::GroundLong => (6.5, 4.0),
+            Self::Elevated => (8.0, 5.5),
+            Self::Breach => (10.0, 7.5),
         }
     }
 
@@ -330,18 +332,16 @@ impl TrainingEnv {
             sample_episode_layout(&mut self.rng, &self.terrain, min_dist, max_dist, self.task);
         self.spawn_pos = spawn_pos;
         self.target_pos = target_pos;
-        self.episode_timeout = episode_timeout_for(
-            horizontal_distance(self.spawn_pos, self.target_pos),
-            self.task,
-        );
 
         // Reset player at spawn
         self.player
             .reset(self.spawn_pos[0], self.spawn_pos[1], self.spawn_pos[2]);
-        // Face toward target
+        // Face toward target.
+        // forward = (-sin(yaw), -cos(yaw)), so to face (dx, dz) we need
+        // yaw = atan2(-dx, -dz).
         let dx = self.target_pos[0] - self.spawn_pos[0];
         let dz = self.target_pos[2] - self.spawn_pos[2];
-        self.player.yaw = dx.atan2(-dz);
+        self.player.yaw = (-dx).atan2(-dz);
 
         // Reset weapons
         self.weapons.reset();
@@ -369,6 +369,13 @@ impl TrainingEnv {
             &self.terrain,
             [self.player.pos_x, self.player.pos_y, self.player.pos_z],
             self.target_pos,
+        );
+
+        // Set timeout after computing obstruction count (Breach needs extra time per obstruction)
+        self.episode_timeout = episode_timeout_for(
+            horizontal_distance(self.spawn_pos, self.target_pos),
+            initial_line_block_count,
+            self.task,
         );
         let initial_remaining_work = self.task.remaining_work(
             self.prev_distance,
@@ -531,57 +538,96 @@ impl TrainingEnv {
 
     /// Compute the observation vector with raycast vision.
     ///
-    /// Layout (106 floats):
-    ///   [0..3]    Position (normalized)
-    ///   [3..6]    Velocity (normalized)
-    ///   [6..9]    Target position (normalized)
-    ///   [9..12]   Direction to target (unit vector)
-    ///   [12]      Distance to target (normalized)
+    /// Layout (106 floats) — fully egocentric for navigation:
+    ///   [0]       sin(relative_yaw_to_target)  — positive = target to the right
+    ///   [1]       cos(relative_yaw_to_target)  — 1.0 = facing target directly
+    ///   [2]       target elevation angle / (π/2) — positive = target above
+    ///   [3]       horizontal distance / 50      — distance to target
+    ///   [4]       height difference / 20        — signed: positive = target above
+    ///   [5]       progress ratio                — 0=start, 1=at target
+    ///   [6]       forward speed / 20            — egocentric forward velocity
+    ///   [7]       lateral speed / 20            — egocentric lateral velocity
+    ///   [8]       vertical speed / 20           — vertical velocity
+    ///   [9]       time remaining fraction       — 1.0=full, 0.0=timeout
+    ///   [10]      stagnation level              — 0=fresh, 1=stuck
+    ///   [11]      on ground                     — 1.0 if grounded
+    ///   [12]      distance to target / 50 (clamped to 1.0)
     ///   [13..61]  48 raycast distances (0=wall at face, 1=clear to max range)
     ///   [61..88]  3x3x3 immediate terrain grid (27 values, for close collision)
     ///   [88..91]  Ammo per weapon (normalized, 3 weapons)
     ///   [91..94]  Cooldown per weapon (normalized, 3 weapons)
-    ///   [94..98]  Reserved pickup slots (zeroed in the staged curriculum)
-    ///   [98]      Health (normalized)
-    ///   [99]      Reserved buff slot (zeroed in the staged curriculum)
-    ///   [100]     On ground
-    ///   [101]     Is climbing
-    ///   [102]     Current weapon (normalized)
-    ///   [103..106] Current look vector in world space
+    ///   [94]      current pitch / (π/2)
+    ///   [95]      is climbing
+    ///   [96]      is sprinting
+    ///   [97]      health / max_health
+    ///   [98]      current weapon (normalized)
+    ///   [99]      speed multiplier / 3.0
+    ///   [100..106] reserved (zeros)
     pub fn compute_observation(&self) -> Vec<f32> {
         let mut obs = Vec::with_capacity(OBSERVATION_DIM);
 
-        let world_sx = worldgen::WORLD_SIZE_X as f32;
-        let world_sy = worldgen::WORLD_SIZE_Y as f32;
-        let world_sz = worldgen::WORLD_SIZE_Z as f32;
-
-        // [0..3]: Position normalized
-        obs.push(self.player.pos_x / world_sx);
-        obs.push(self.player.pos_y / world_sy);
-        obs.push(self.player.pos_z / world_sz);
-
-        // [3..6]: Velocity normalized
-        let max_speed = 35.0f32;
-        obs.push(self.player.h_vel_x / max_speed);
-        obs.push(self.player.vel_y / max_speed);
-        obs.push(self.player.h_vel_z / max_speed);
-
-        // [6..9]: Target position normalized
-        obs.push(self.target_pos[0] / world_sx);
-        obs.push(self.target_pos[1] / world_sy);
-        obs.push(self.target_pos[2] / world_sz);
-
-        // [9..12]: Direction to target (unit vector)
+        // ── Egocentric target direction ──
         let dx = self.target_pos[0] - self.player.pos_x;
         let dy = self.target_pos[1] - self.player.pos_y;
         let dz = self.target_pos[2] - self.player.pos_z;
-        let dist = (dx * dx + dy * dy + dz * dz).sqrt().max(0.001);
-        obs.push(dx / dist);
-        obs.push(dy / dist);
-        obs.push(dz / dist);
+        let dist_hz = (dx * dx + dz * dz).sqrt().max(0.001);
+        let dist_3d = (dx * dx + dy * dy + dz * dz).sqrt().max(0.001);
 
-        // [12]: Distance to target normalized
-        obs.push((dist / 100.0).min(1.0));
+        // Forward and right vectors in XZ plane from player yaw
+        let sin_yaw = self.player.yaw.sin();
+        let cos_yaw = self.player.yaw.cos();
+        let fwd_x = -sin_yaw;
+        let fwd_z = -cos_yaw;
+        let right_x = cos_yaw;
+        let right_z = -sin_yaw;
+
+        // Project target onto forward/right to get relative yaw
+        let target_fwd = dx * fwd_x + dz * fwd_z;
+        let target_right = dx * right_x + dz * right_z;
+        let relative_yaw = target_right.atan2(target_fwd);
+
+        // Target elevation angle (positive = above)
+        let elevation_angle = (dy / dist_3d).clamp(-1.0, 1.0).asin();
+
+        // [0]: sin(relative_yaw) — positive = target to the right
+        obs.push(relative_yaw.sin());
+        // [1]: cos(relative_yaw) — 1.0 = facing directly at target
+        obs.push(relative_yaw.cos());
+        // [2]: elevation angle normalized
+        obs.push(elevation_angle / std::f32::consts::FRAC_PI_2);
+        // [3]: horizontal distance (better normalization for 8-36 block range)
+        obs.push(dist_hz / 50.0);
+        // [4]: height difference (signed, in blocks)
+        obs.push(dy / 20.0);
+        // [5]: progress ratio
+        let progress_ratio = if self.initial_remaining_work > 0.01 {
+            (1.0 - self.prev_remaining_work / self.initial_remaining_work).clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
+        obs.push(progress_ratio);
+
+        // ── Egocentric velocity ──
+        let forward_speed = self.player.h_vel_x * fwd_x + self.player.h_vel_z * fwd_z;
+        let lateral_speed = self.player.h_vel_x * right_x + self.player.h_vel_z * right_z;
+        let ego_vel_norm = 20.0f32;
+        // [6]: forward speed
+        obs.push(forward_speed / ego_vel_norm);
+        // [7]: lateral speed
+        obs.push(lateral_speed / ego_vel_norm);
+        // [8]: vertical speed
+        obs.push(self.player.vel_y / ego_vel_norm);
+
+        // ── Time and urgency ──
+        // [9]: time remaining fraction
+        obs.push((1.0 - self.episode_time / self.episode_timeout).clamp(0.0, 1.0));
+        // [10]: stagnation level
+        obs.push((self.stagnation_timer / 8.0).min(1.0));
+        // [11]: on ground
+        obs.push(if self.player.on_ground { 1.0 } else { 0.0 });
+
+        // [12]: distance to target (clamped)
+        obs.push((dist_hz / 50.0).min(1.0));
 
         // [13..61]: 48 raycast distances
         // Cast rays in a sphere pattern: 8 horizontal at eye level, 8 at +30deg,
@@ -638,30 +684,24 @@ impl TrainingEnv {
             obs.extend_from_slice(&[0.0; 6]);
         }
 
-        // [94..98]: pickups are disabled in the staged curriculum.
-        obs.extend_from_slice(&[0.0, 0.0, 1.0, 0.0]);
-
-        // [98]: Health
-        obs.push(self.player.health / self.player.max_health);
-        // [99]: Speed multiplier / buff state — held at zero with buffs disabled.
-        obs.push(0.0);
-        // [100]: On ground
-        obs.push(if self.player.on_ground { 1.0 } else { 0.0 });
-        // [101]: Is climbing
+        // [94]: current pitch
+        obs.push(self.player.pitch / std::f32::consts::FRAC_PI_2);
+        // [95]: is climbing
         obs.push(if self.player.is_climbing { 1.0 } else { 0.0 });
-        // [102]: Current weapon
+        // [96]: is sprinting
+        obs.push(if self.player.is_sprinting { 1.0 } else { 0.0 });
+        // [97]: health
+        obs.push(self.player.health / self.player.max_health);
+        // [98]: current weapon
         obs.push(if self.task.weapons_enabled() {
             self.weapons.current_weapon as f32 / (NUM_WEAPONS.saturating_sub(1).max(1) as f32)
         } else {
             0.0
         });
-
-        // [103..106]: current look vector in world space. This makes the egocentric
-        // ray stack coherent with the world-space target vector already in the obs.
-        let cos_pitch = self.player.pitch.cos();
-        obs.push(-self.player.yaw.sin() * cos_pitch);
-        obs.push(-self.player.pitch.sin());
-        obs.push(-self.player.yaw.cos() * cos_pitch);
+        // [99]: speed multiplier
+        obs.push(self.player.speed_multiplier / 3.0);
+        // [100..106]: reserved
+        obs.extend_from_slice(&[0.0; 6]);
 
         debug_assert_eq!(obs.len(), OBSERVATION_DIM);
         obs
@@ -691,19 +731,31 @@ impl TrainingEnv {
         let mut reward = progress * self.task.progress_scale();
 
         if self.task.weapons_enabled() {
+            // Reward block destruction — each cleared block opens the path.
             if self.step_blocks_destroyed > 0 {
-                reward -= self.step_blocks_destroyed as f32 * BREACH_DESTROY_COST_PER_BLOCK;
+                reward += self.step_blocks_destroyed as f32 * BREACH_DESTROY_REWARD_PER_BLOCK;
             }
+            // RPG fire (weapon 2) is free — it's the essential breaching tool.
+            // Penalize non-RPG fire to discourage wasting time with rifle/shotgun.
             if let Some(weapon) = self.fired_weapon_this_step {
-                reward -= if weapon == 2 {
-                    BREACH_FIRE_COST
-                } else {
-                    BREACH_OTHER_FIRE_COST
-                };
+                if weapon != 2 {
+                    reward -= BREACH_OTHER_FIRE_COST;
+                }
             }
         }
 
         reward -= self.task.living_cost();
+
+        // Dense velocity-toward-target bonus: rewards moving fast toward the goal.
+        let to_target_x = self.target_pos[0] - self.player.pos_x;
+        let to_target_z = self.target_pos[2] - self.player.pos_z;
+        let h_dist = (to_target_x * to_target_x + to_target_z * to_target_z).sqrt();
+        if h_dist > 1.0 {
+            let dir_x = to_target_x / h_dist;
+            let dir_z = to_target_z / h_dist;
+            let vel_toward = self.player.h_vel_x * dir_x + self.player.h_vel_z * dir_z;
+            reward += (vel_toward / 18.0).clamp(0.0, 1.0) * VELOCITY_TOWARD_TARGET_BONUS;
+        }
 
         if current_remaining_work < self.best_remaining_work - 0.25 {
             self.best_remaining_work = current_remaining_work;
@@ -711,7 +763,10 @@ impl TrainingEnv {
         } else {
             self.stagnation_timer += SIM_DT;
             if self.stagnation_timer > 1.5 {
-                reward -= STAGNATION_DRIFT_COST;
+                // Escalating cost: the longer stuck, the worse it gets.
+                // At 1.5s: 1x, at 3.0s: 2x, at 4.5s: 3x, etc.
+                let escalation = self.stagnation_timer / 1.5;
+                reward -= STAGNATION_DRIFT_COST * escalation;
             }
         }
 
@@ -720,8 +775,10 @@ impl TrainingEnv {
         let stalled_out = self.should_abort_for_stall(current_remaining_work);
 
         if reached_target {
+            // Speed-scaled success bonus: up to 2x for very fast completion.
             let time_left = (self.episode_timeout - self.episode_time).max(0.0);
-            reward += self.task.success_bonus() + time_left * 3.0;
+            let speed_multiplier = 1.0 + time_left / self.episode_timeout;
+            reward += self.task.success_bonus() * speed_multiplier;
         } else if timed_out {
             reward -= self.task.timeout_penalty();
         } else if stalled_out {
@@ -750,7 +807,7 @@ impl TrainingEnv {
 
     fn should_abort_for_stall(&self, current_remaining_work: f32) -> bool {
         let (min_time, max_stagnation) = self.task.stall_window();
-        let near_finish = current_remaining_work <= (self.initial_remaining_work * 0.30).max(4.0);
+        let near_finish = current_remaining_work <= (self.initial_remaining_work * 0.20).max(3.0);
         !near_finish && self.episode_time >= min_time && self.stagnation_timer >= max_stagnation
     }
 
@@ -1030,14 +1087,22 @@ fn horizontal_distance(a: [f32; 3], b: [f32; 3]) -> f32 {
     (dx * dx + dz * dz).sqrt()
 }
 
-fn episode_timeout_for(distance: f32, task: TrainingTask) -> f32 {
+fn episode_timeout_for(distance: f32, obstruction_count: u32, task: TrainingTask) -> f32 {
     let task_extra = match task {
         TrainingTask::GroundShort => 0.0,
         TrainingTask::GroundLong => 2.0,
         TrainingTask::Elevated => 4.0,
         TrainingTask::Breach => 6.0,
     };
-    (10.0 + distance * 0.35 + task_extra).clamp(EPISODE_TIMEOUT_MIN, EPISODE_TIMEOUT_MAX)
+    // Give extra time per obstruction on Breach — each blocked section requires
+    // the bot to aim, fire RPG, wait for explosion, then navigate through.
+    let obstruction_extra = if task == TrainingTask::Breach {
+        obstruction_count as f32 * 0.3
+    } else {
+        0.0
+    };
+    (10.0 + distance * 0.35 + task_extra + obstruction_extra)
+        .clamp(EPISODE_TIMEOUT_MIN, EPISODE_TIMEOUT_MAX)
 }
 
 // ── Raycast Vision ──
@@ -1367,6 +1432,61 @@ mod tests {
         assert!(
             down[0].1 < flat[0].1,
             "downward look should tilt center ray downward"
+        );
+    }
+
+    #[test]
+    fn spawn_facing_points_toward_target() {
+        // forward = (-sin(yaw), -cos(yaw)) must align with (dx, dz)
+        let cases: &[([f32; 2], &str)] = &[
+            ([10.0, 0.0], "+X"),
+            ([-10.0, 0.0], "-X"),
+            ([0.0, 10.0], "+Z"),
+            ([0.0, -10.0], "-Z"),
+            ([7.0, 7.0], "+X+Z"),
+            ([-7.0, 7.0], "-X+Z"),
+        ];
+
+        for &([dx, dz], label) in cases {
+            let yaw = (-dx).atan2(-dz);
+            let fwd_x = -yaw.sin();
+            let fwd_z = -yaw.cos();
+            let dist = (dx * dx + dz * dz).sqrt();
+            let dot = (fwd_x * dx + fwd_z * dz) / dist;
+            assert!(
+                dot > 0.99,
+                "spawn facing failed for {label}: forward=({fwd_x:.3},{fwd_z:.3}), target=({:.3},{:.3}), dot={dot:.4}",
+                dx / dist,
+                dz / dist
+            );
+        }
+    }
+
+    #[test]
+    fn egocentric_obs_target_ahead_gives_cos_one() {
+        // When facing directly at target, cos(relative_yaw) ≈ 1.0
+        let base = Arc::new(BaseTerrain { chunks: std::collections::HashMap::new(), seed: 0 });
+        let mut env = TrainingEnv::new(base, 42);
+        // Manually set up a scenario: player at (5, 5, 5), target at (5, 5, 15)
+        env.player.reset(5.0, 5.0, 5.0);
+        env.target_pos = [5.0, 5.0, 15.0];
+        // Face toward +Z: yaw = atan2(-0, -10) = π
+        env.player.yaw = (0.0f32).atan2(-10.0); // π
+        env.initial_remaining_work = 10.0;
+        env.prev_remaining_work = 10.0;
+        env.episode_timeout = 20.0;
+
+        let obs = env.compute_observation();
+        // obs[0] = sin(relative_yaw), obs[1] = cos(relative_yaw)
+        assert!(
+            obs[1] > 0.95,
+            "cos(relative_yaw) should be ~1.0 when facing target, got {}",
+            obs[1]
+        );
+        assert!(
+            obs[0].abs() < 0.1,
+            "sin(relative_yaw) should be ~0.0 when facing target, got {}",
+            obs[0]
         );
     }
 }
