@@ -579,6 +579,13 @@ function App() {
     reloadForUpdate,
   ]);
 
+  useEffect(() => {
+    document.body.dataset.screen = screen;
+    return () => {
+      delete document.body.dataset.screen;
+    };
+  }, [screen]);
+
   if (!connected && !error) {
     return <LoadingScreen />;
   }
