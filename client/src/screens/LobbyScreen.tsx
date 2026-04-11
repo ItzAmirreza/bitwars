@@ -38,7 +38,7 @@ function PixelBar({
 }
 
 export function LobbyScreen() {
-  const { username, identity, connection, setScreen, resetSession } =
+  const { username, identity, connection, resetSession } =
     useGameStore();
   const settings = useGameStore((s) => s.settings);
   const [mounted, setMounted] = useState(false);
@@ -100,8 +100,6 @@ export function LobbyScreen() {
     resetConnection();
     resetSession(null);
   };
-
-  const accentOrange = "#ff6b35";
 
   return (
     <div
