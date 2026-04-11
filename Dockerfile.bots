@@ -22,7 +22,7 @@ ENV BOT_COUNT=10
 ENV BOT_PREFIX=BOT
 ENV SPACETIMEDB_URI=wss://maincloud.spacetimedb.com
 ENV SPACETIMEDB_MODULE=bitwars
-ENV BOT_TICK_MS=100
+ENV BOT_TICK_MS=33
 ENV BOT_USERNAME_FILE=/app/bots/gamer_usernames.txt
 
 CMD ["bun", "run", "bots:runtime"]
