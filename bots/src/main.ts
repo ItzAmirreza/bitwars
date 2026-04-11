@@ -1,4 +1,5 @@
 import { HeadlessBitBot } from './bot.ts';
+import { runtimeDiagnostics } from './diagnostics.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -128,18 +129,22 @@ const bots = Array.from({ length: config.count }, (_, index) => {
   });
 });
 
+runtimeDiagnostics.start();
+
 for (const bot of bots) {
   bot.start();
 }
 
 console.log(
-  `[bots] started ${config.count} bot(s) on ${config.moduleName} via ${config.uri} at ${config.tickMs}ms tick`,
+  `[bots] started ${config.count} bot(s) on ${config.moduleName} via ${config.uri} at ${config.tickMs}ms tick ` +
+  `(diagnostics=${runtimeDiagnostics.isEnabled() ? `on/${runtimeDiagnostics.getIntervalMs()}ms` : 'off'})`,
 );
 
 const shutdown = (): void => {
   for (const bot of bots) {
     bot.stop();
   }
+  runtimeDiagnostics.stop();
   process.exit(0);
 };
 

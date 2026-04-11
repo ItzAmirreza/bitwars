@@ -10,6 +10,7 @@ import {
 import { WorldSnapshot, type BotVec3 } from './world.ts';
 import { NeuralNavigator } from './neural.ts';
 import { buildObservation } from './observation.ts';
+import { runtimeDiagnostics } from './diagnostics.ts';
 import { BotMovementState } from './movement.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -63,6 +64,11 @@ const HARD_RECONCILE_DIST = 2.5;
 const HARD_RECONCILE_Y = 1.8;
 const SOFT_RECONCILE_DIST = 0.45;
 const SOFT_RECONCILE_Y = 0.55;
+const AIRBORNE_RECONCILE_DIST = 4.0;
+const AIRBORNE_RECONCILE_Y = 3.2;
+const SENT_MOVEMENT_HISTORY_MS = 1500;
+const SENT_SNAPSHOT_MATCH_DIST = 0.12;
+const SENT_SNAPSHOT_MATCH_VEL = 0.8;
 const NAV_MAX_YAW_DELTA = 0.35;
 const NAV_MAX_PITCH_DELTA = 0.25;
 const NAV_MODEL_PATH = path.resolve(
@@ -171,6 +177,15 @@ type SearchHotspot = {
   members: number;
 };
 
+type SentMovementSample = {
+  at: number;
+  pos: BotVec3;
+  vel: BotVec3;
+  grounded: boolean;
+  climbing: boolean;
+  sprinting: boolean;
+};
+
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
@@ -243,6 +258,7 @@ export class HeadlessBitBot {
   private yaw = 0;
   private pitch = 0;
   private movementState: BotMovementState | null = null;
+  private sentMovementHistory: SentMovementSample[] = [];
   private lastTickAt = 0;
   private nextFireAt = 0;
   private burstShotsRemaining = 0;
@@ -495,6 +511,7 @@ export class HeadlessBitBot {
   }
 
   private syncMovementState(me: PlayerRow): void {
+    const now = Date.now();
     const snapshot = this.movementSnapshotFromPlayer(me);
     if (!this.movementState) {
       this.movementState = BotMovementState.fromSnapshot(snapshot);
@@ -512,7 +529,34 @@ export class HeadlessBitBot {
     const dy = snapshot.pos.y - this.movementState.pos.y;
     const dz = snapshot.pos.z - this.movementState.pos.z;
     const horizontalDrift = Math.sqrt(dx * dx + dz * dz);
-    const hardReset = horizontalDrift > HARD_RECONCILE_DIST || Math.abs(dy) > HARD_RECONCILE_Y;
+    const verticalDrift = Math.abs(dy);
+    const matchedSentSample = this.matchRecentSentSnapshot(snapshot, now);
+    const localAirborne =
+      !this.movementState.onGround ||
+      this.movementState.isClimbing ||
+      Math.abs(this.movementState.velY) > 0.4;
+    const snapshotAirborne =
+      !snapshot.grounded ||
+      snapshot.climbing ||
+      Math.abs(snapshot.vel.y) > 0.4;
+    const hardReset = localAirborne || snapshotAirborne
+      ? horizontalDrift > AIRBORNE_RECONCILE_DIST || verticalDrift > AIRBORNE_RECONCILE_Y
+      : horizontalDrift > HARD_RECONCILE_DIST || verticalDrift > HARD_RECONCILE_Y;
+    const softReset =
+      !localAirborne &&
+      !snapshotAirborne &&
+      (horizontalDrift > SOFT_RECONCILE_DIST || verticalDrift > SOFT_RECONCILE_Y);
+    if (matchedSentSample && !hardReset) {
+      runtimeDiagnostics.recordReconcile(this.activeName, horizontalDrift, verticalDrift, 'none');
+      return;
+    }
+
+    runtimeDiagnostics.recordReconcile(
+      this.activeName,
+      horizontalDrift,
+      verticalDrift,
+      hardReset ? 'hard' : softReset ? 'soft' : 'none',
+    );
 
     if (hardReset) {
       this.movementState.syncHard(snapshot);
@@ -526,7 +570,7 @@ export class HeadlessBitBot {
       return;
     }
 
-    if (horizontalDrift > SOFT_RECONCILE_DIST || Math.abs(dy) > SOFT_RECONCILE_Y) {
+    if (softReset) {
       this.movementState.nudgeToward(snapshot, 0.35, 0.45);
     }
   }
@@ -541,6 +585,38 @@ export class HeadlessBitBot {
       vel: this.movementState.velocity(),
       rot: { yaw: this.yaw, pitch: this.pitch },
     };
+  }
+
+  private pruneSentMovementHistory(now: number): void {
+    const cutoff = now - SENT_MOVEMENT_HISTORY_MS;
+    this.sentMovementHistory = this.sentMovementHistory.filter((sample) => sample.at >= cutoff);
+  }
+
+  private matchRecentSentSnapshot(snapshot: {
+    pos: BotVec3;
+    vel: BotVec3;
+    grounded: boolean;
+    climbing: boolean;
+    sprinting: boolean;
+  }, now: number): SentMovementSample | null {
+    this.pruneSentMovementHistory(now);
+    for (let i = this.sentMovementHistory.length - 1; i >= 0; i--) {
+      const sample = this.sentMovementHistory[i]!;
+      const dx = sample.pos.x - snapshot.pos.x;
+      const dy = sample.pos.y - snapshot.pos.y;
+      const dz = sample.pos.z - snapshot.pos.z;
+      const posDrift = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (posDrift > SENT_SNAPSHOT_MATCH_DIST) continue;
+      const dvx = sample.vel.x - snapshot.vel.x;
+      const dvy = sample.vel.y - snapshot.vel.y;
+      const dvz = sample.vel.z - snapshot.vel.z;
+      const velDrift = Math.sqrt(dvx * dvx + dvy * dvy + dvz * dvz);
+      if (velDrift > SENT_SNAPSHOT_MATCH_VEL) continue;
+      if (sample.grounded !== snapshot.grounded) continue;
+      if (sample.climbing !== snapshot.climbing) continue;
+      return sample;
+    }
+    return null;
   }
 
   private async claimUsername(): Promise<void> {
@@ -719,6 +795,16 @@ export class HeadlessBitBot {
     movementFlags: number;
   }): void {
     if (!this.conn) return;
+    const now = Date.now();
+    this.sentMovementHistory.push({
+      at: now,
+      pos: { ...payload.pos },
+      vel: { ...payload.vel },
+      grounded: hasPlayerMovementFlag(payload.movementFlags, PLAYER_MOVEMENT_FLAG_GROUNDED),
+      climbing: hasPlayerMovementFlag(payload.movementFlags, PLAYER_MOVEMENT_FLAG_CLIMBING),
+      sprinting: hasPlayerMovementFlag(payload.movementFlags, PLAYER_MOVEMENT_FLAG_SPRINTING),
+    });
+    this.pruneSentMovementHistory(now);
     void this.conn.reducers.updatePosition(payload).catch((error: unknown) => {
       console.error(`[bot:${this.activeName}] update_position failed`, error);
     });
@@ -2078,98 +2164,109 @@ export class HeadlessBitBot {
     const me = this.getSelf();
     if (!conn || !me) return;
 
+    const tickStartedAt = performance.now();
     const now = Date.now();
-    const dtSec = clamp((now - this.lastTickAt) / 1000, 1 / 120, 0.25);
+    const actualDtMs = this.lastTickAt > 0 ? now - this.lastTickAt : this.options.tickMs;
+    const dtSec = clamp(actualDtMs / 1000, 1 / 120, 0.25);
     this.lastTickAt = now;
     this.refreshWorldSubscription(false);
 
-    if (me.health <= 0) {
-      this.coverDirective = null;
-      this.trackedTarget = null;
-      this.movementState = null;
-      this.forcedUnstickUntil = 0;
-      this.forcedUnstickDir = null;
-      this.burstShotsRemaining = 0;
-      this.nextFireAt = 0;
-      // Reset neural nav state on death
-      this.neuralNav?.resetState();
-      this.navStagnationTimer = 0;
-      this.navInitialDist = 0;
+    try {
+      if (me.health <= 0) {
+        this.coverDirective = null;
+        this.trackedTarget = null;
+        this.movementState = null;
+        this.sentMovementHistory = [];
+        this.forcedUnstickUntil = 0;
+        this.forcedUnstickDir = null;
+        this.burstShotsRemaining = 0;
+        this.nextFireAt = 0;
+        // Reset neural nav state on death
+        this.neuralNav?.resetState();
+        this.navStagnationTimer = 0;
+        this.navInitialDist = 0;
+        this.usingNeuralThisTick = false;
+        if (!this.pendingLoadout) {
+          this.pendingLoadout = this.chooseRandomLoadout();
+          void this.applyPendingLoadout();
+        }
+        if (this.respawnAt === 0) {
+          this.respawnAt = now + RESPAWN_DELAY_MS;
+        }
+        if (now >= this.respawnAt) {
+          this.sendRespawn();
+          this.respawnAt = 0;
+        }
+        this.lastHealth = PLAYER.maxHealth;
+        this.lastSpawnProtected = false;
+        return;
+      }
+      this.respawnAt = 0;
+
+      if (!this.isMatchActive()) {
+        return;
+      }
+
+      this.syncCurrentLoadoutFromDb(me);
+      this.syncMovementState(me);
+      const self = this.getActiveSelf(me);
+
+      if (me.spawnProtected && !this.lastSpawnProtected) {
+        this.spawnRushUntil = now + SPAWN_RUSH_MS;
+        this.moveDirective = this.chooseSpawnExitWaypoint(self, now);
+        if (this.pendingLoadout) {
+          void this.applyPendingLoadout();
+        }
+      }
+      this.lastSpawnProtected = me.spawnProtected;
+
+      if (me.health < this.lastHealth) {
+        this.underFireUntil = now + randomBetween(1600, 2600);
+        this.coverDirective = null;
+        this.strafeFlipAt = now;
+      }
+      this.lastHealth = me.health;
+      if (this.heardContact && now >= this.heardContact.expiresAt) {
+        this.heardContact = null;
+      }
+      this.updateProgressState(self, now);
+
       this.usingNeuralThisTick = false;
-      if (!this.pendingLoadout) {
-        this.pendingLoadout = this.chooseRandomLoadout();
-        void this.applyPendingLoadout();
-      }
-      if (this.respawnAt === 0) {
-        this.respawnAt = now + RESPAWN_DELAY_MS;
-      }
-      if (now >= this.respawnAt) {
-        this.sendRespawn();
-        this.respawnAt = 0;
-      }
-      this.lastHealth = PLAYER.maxHealth;
-      this.lastSpawnProtected = false;
-      return;
+      this.pendingNeuralJump = false;
+
+      const target = this.getPreferredTarget(self, now);
+      this.chooseWeaponForTarget(self, target);
+      const movement = this.computeMovement(self, target, now, dtSec);
+      const liveSelf = this.getActiveSelf(me);
+      this.updateLook(liveSelf, target, movement.velocity, dtSec);
+      this.maybeFire(liveSelf, target, this.selectedWeapon, now);
+
+      // Track state for next neural observation
+      this.lastGrounded = movement.grounded;
+      this.lastClimbing = movement.climbing;
+      this.lastSprinting = movement.sprinting;
+      this.wasUsingNeural = this.usingNeuralThisTick;
+
+      this.sendPosition({
+        pos: movement.nextPos,
+        vel: movement.velocity,
+        rot: { yaw: this.yaw, pitch: this.pitch },
+        weapon: this.selectedWeapon,
+        movementFlags: buildPlayerMovementFlags({
+          sprinting: movement.sprinting,
+          crouching: false,
+          sliding: false,
+          climbing: movement.climbing,
+          grounded: movement.grounded,
+        }),
+      });
+    } finally {
+      runtimeDiagnostics.recordTick(
+        this.activeName,
+        actualDtMs,
+        this.options.tickMs,
+        performance.now() - tickStartedAt,
+      );
     }
-    this.respawnAt = 0;
-
-    if (!this.isMatchActive()) {
-      return;
-    }
-
-    this.syncCurrentLoadoutFromDb(me);
-    this.syncMovementState(me);
-    const self = this.getActiveSelf(me);
-
-    if (me.spawnProtected && !this.lastSpawnProtected) {
-      this.spawnRushUntil = now + SPAWN_RUSH_MS;
-      this.moveDirective = this.chooseSpawnExitWaypoint(self, now);
-      if (this.pendingLoadout) {
-        void this.applyPendingLoadout();
-      }
-    }
-    this.lastSpawnProtected = me.spawnProtected;
-
-    if (me.health < this.lastHealth) {
-      this.underFireUntil = now + randomBetween(1600, 2600);
-      this.coverDirective = null;
-      this.strafeFlipAt = now;
-    }
-    this.lastHealth = me.health;
-    if (this.heardContact && now >= this.heardContact.expiresAt) {
-      this.heardContact = null;
-    }
-    this.updateProgressState(self, now);
-
-    this.usingNeuralThisTick = false;
-    this.pendingNeuralJump = false;
-
-    const target = this.getPreferredTarget(self, now);
-    this.chooseWeaponForTarget(self, target);
-    const movement = this.computeMovement(self, target, now, dtSec);
-    const liveSelf = this.getActiveSelf(me);
-    this.updateLook(liveSelf, target, movement.velocity, dtSec);
-    this.maybeFire(liveSelf, target, this.selectedWeapon, now);
-
-    // Track state for next neural observation
-    this.lastGrounded = movement.grounded;
-    this.lastClimbing = movement.climbing;
-    this.lastSprinting = movement.sprinting;
-    this.wasUsingNeural = this.usingNeuralThisTick;
-
-    this.sendPosition({
-      pos: movement.nextPos,
-      vel: movement.velocity,
-      rot: { yaw: this.yaw, pitch: this.pitch },
-      weapon: this.selectedWeapon,
-      movementFlags: buildPlayerMovementFlags({
-        sprinting: movement.sprinting,
-        crouching: false,
-        sliding: false,
-        climbing: movement.climbing,
-        grounded: movement.grounded,
-      }),
-    });
-
   }
 }
