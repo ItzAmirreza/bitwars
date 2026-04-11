@@ -138,8 +138,43 @@ function buildMetaPlugin(): Plugin {
   }
 }
 
+function inlineMainCssPlugin(): Plugin {
+  return {
+    name: 'bitwars-inline-main-css',
+    apply: 'build',
+    writeBundle(options, bundle) {
+      const outDir = options.dir ?? path.resolve(configDir, 'dist')
+      const indexHtmlPath = path.resolve(outDir, 'index.html')
+      if (!fs.existsSync(indexHtmlPath)) {
+        return
+      }
+
+      let html = fs.readFileSync(indexHtmlPath, 'utf-8')
+
+      html = html.replace(
+        /<link rel="stylesheet"[^>]*href="([^"]+\.css)"[^>]*>/g,
+        (tag, href: string) => {
+          const fileName = href.startsWith('/') ? href.slice(1) : href
+          const cssAsset = bundle[fileName]
+          if (!cssAsset || cssAsset.type !== 'asset') {
+            return tag
+          }
+
+          const cssSource = typeof cssAsset.source === 'string'
+            ? cssAsset.source
+            : Buffer.from(cssAsset.source).toString('utf-8')
+
+          return `<style>${cssSource}</style>`
+        },
+      )
+
+      fs.writeFileSync(indexHtmlPath, html)
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), buildMetaPlugin()],
+  plugins: [react(), tailwindcss(), buildMetaPlugin(), inlineMainCssPlugin()],
   define: {
     __GIT_BRANCH__: JSON.stringify(buildBranch),
     __GIT_COMMIT__: JSON.stringify(buildCommit),
