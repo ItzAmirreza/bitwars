@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 :root {
+  --cache-bust-20260411: 1;
   --c-bg: #0a0c14;
   --c-bg2: #0e1018;
   --c-surface: #12161e;
