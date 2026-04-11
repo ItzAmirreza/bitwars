@@ -14,7 +14,7 @@ type CliConfig = {
 
 function parseArgs(argv: string[]): CliConfig {
   const envCount = Number(process.env.BOT_COUNT ?? 10);
-  const envTickMs = Number(process.env.BOT_TICK_MS ?? 100);
+  const envTickMs = Number(process.env.BOT_TICK_MS ?? 33);
   const config: CliConfig = {
     count: Number.isFinite(envCount) && envCount > 0 ? Math.floor(envCount) : 10,
     prefix: process.env.BOT_PREFIX ?? 'BOT',
@@ -26,7 +26,7 @@ function parseArgs(argv: string[]): CliConfig {
       process.env.SPACETIMEDB_MODULE ??
       process.env.VITE_MODULE_NAME ??
       'bitwars',
-    tickMs: Number.isFinite(envTickMs) && envTickMs > 0 ? Math.floor(envTickMs) : 100,
+    tickMs: Number.isFinite(envTickMs) && envTickMs > 0 ? Math.floor(envTickMs) : 33,
     usernameFile:
       process.env.BOT_USERNAME_FILE ??
       path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../gamer_usernames.txt'),
@@ -49,7 +49,7 @@ function parseArgs(argv: string[]): CliConfig {
       config.moduleName = value;
       i++;
     } else if (arg === '--tick-ms' && value) {
-      config.tickMs = Math.max(50, Math.floor(Number(value) || config.tickMs));
+      config.tickMs = Math.max(20, Math.floor(Number(value) || config.tickMs));
       i++;
     } else if (arg === '--username-file' && value) {
       config.usernameFile = path.resolve(value);

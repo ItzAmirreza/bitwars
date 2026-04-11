@@ -44,8 +44,8 @@ body {
   image-rendering: pixelated;
 }
 
-/* Hide the Vibe Jam widget when in-game so it doesn't overlap the weapon HUD */
-body[data-screen="game"] a[href*="jam.pieter.com"] {
+/* Show the Vibe Jam widget only on the lobby screen */
+body:not([data-screen="lobby"]) a[href*="jam.pieter.com"] {
   display: none !important;
 }
 

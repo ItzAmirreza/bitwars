@@ -94,15 +94,6 @@ export function LobbyScreen() {
     menuAudio.setMasterVolume(settings.masterVolume);
   }, [settings.masterVolume]);
 
-  const handleEnterGame = () => {
-    menuAudio.playUIDeploy();
-    setScreen("game");
-  };
-  const handleEnterPerf = () => {
-    menuAudio.playUIDeploy();
-    sessionStorage.setItem("bitwars-open-perf", "1");
-    setScreen("game");
-  };
   const handleUseGuest = () => {
     menuAudio.playUIClick();
     useGuestProfile();
@@ -287,71 +278,6 @@ export function LobbyScreen() {
                 boxShadow: "6px 6px 0 #00000044",
               }}
             >
-              {/* Play button */}
-              <button
-                onClick={handleEnterGame}
-                onMouseEnter={() => menuAudio.playUIHover()}
-                style={{
-                  width: "100%",
-                  background: accentOrange,
-                  border: "4px solid #000",
-                  color: "#000",
-                  fontFamily: "var(--font-pixel)",
-                  fontSize: "20px",
-                  letterSpacing: "0.2em",
-                  padding: "20px 24px",
-                  cursor: "pointer",
-                  transition: "all 0.1s",
-                  boxShadow: "5px 5px 0 #00000066",
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.transform = "translate(-2px, -2px)";
-                  e.currentTarget.style.boxShadow = "7px 7px 0 #00000066";
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.transform = "translate(0, 0)";
-                  e.currentTarget.style.boxShadow = "5px 5px 0 #00000066";
-                }}
-                onMouseDown={(e) => {
-                  e.currentTarget.style.transform = "translate(3px, 3px)";
-                  e.currentTarget.style.boxShadow = "1px 1px 0 #00000066";
-                }}
-                onMouseUp={(e) => {
-                  e.currentTarget.style.transform = "translate(-2px, -2px)";
-                  e.currentTarget.style.boxShadow = "7px 7px 0 #00000066";
-                }}
-              >
-                PLAY
-              </button>
-
-              {/* Test harness button */}
-              <button
-                onClick={handleEnterPerf}
-                onMouseEnter={() => menuAudio.playUIHover()}
-                style={{
-                  width: "100%",
-                  marginTop: "10px",
-                  fontSize: "8px",
-                  padding: "10px 14px",
-                  letterSpacing: "0.1em",
-                  fontFamily: "var(--font-pixel)",
-                  border: "2px solid #2a2e3e",
-                  color: "#6b7080",
-                  background: "transparent",
-                  cursor: "pointer",
-                  transition: "all 0.1s",
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.borderColor = "#00e5ff";
-                  e.currentTarget.style.color = "#00e5ff";
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.borderColor = "#2a2e3e";
-                  e.currentTarget.style.color = "#6b7080";
-                }}
-              >
-                PLAY + TEST HARNESS
-              </button>
 
               <p
                 style={{

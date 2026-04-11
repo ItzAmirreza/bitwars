@@ -1,9 +1,16 @@
 import { ENTITY_KINDS, PLAYER, WORLD, WEAPONS_CONFIG } from '../../client/src/shared-config.ts';
 import { DbConnection } from '../../client/src/module_bindings/index.ts';
-import { buildPlayerMovementFlags } from '../../client/src/game/playerMovementFlags.ts';
+import {
+  buildPlayerMovementFlags,
+  hasPlayerMovementFlag,
+  PLAYER_MOVEMENT_FLAG_CLIMBING,
+  PLAYER_MOVEMENT_FLAG_GROUNDED,
+  PLAYER_MOVEMENT_FLAG_SPRINTING,
+} from '../../client/src/game/playerMovementFlags.ts';
 import { WorldSnapshot, type BotVec3 } from './world.ts';
 import { NeuralNavigator } from './neural.ts';
 import { buildObservation } from './observation.ts';
+import { BotMovementState } from './movement.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,10 +19,7 @@ const MATCH_STATE_ACTIVE = 1;
 const WORLD_CHUNK_RADIUS = 5;
 const WORLD_CHUNK_MARGIN = 2;
 const BOT_EYE_HEIGHT = PLAYER.eyeHeight;
-const BOT_HALF_WIDTH = 0.24;
-const WALK_SPEED = 5.2;
-const SPRINT_SPEED = 9.4;
-const AIR_STRAFE_SPEED = 6.4;
+const BOT_HALF_WIDTH = 0.3;
 const RIFLE_INDEX = 0;
 const SHOTGUN_INDEX = 1;
 const RPG_INDEX = 2;
@@ -40,14 +44,9 @@ const MAX_TURN_RATE = Math.PI * 1.35;
 const MAX_PITCH_RATE = Math.PI * 1.1;
 const WAYPOINT_RADIUS = 2.5;
 const WAYPOINT_LIFETIME_MS = 9000;
-const MAX_STEP_UP = 1.2;
+const MAX_STEP_UP = 0.6;
 const MAX_CLIMB_UP = 1.85;
-const JUMP_SPEED = 9.5;
-const JUMP_GRAVITY_ASCENDING = -22;
-const JUMP_GRAVITY_DESCENDING = -40;
-const TERMINAL_VELOCITY = -35;
-const CLIMB_SPEED = 4.0;
-const JUMP_COOLDOWN_MS = 850;
+const JUMP_COOLDOWN_MS = 140;
 const STUCK_REPATH_MS = 900;
 const MIN_IDLE_RADIUS = 24;
 const MAX_IDLE_RADIUS = 52;
@@ -59,6 +58,11 @@ const SPAWN_RUSH_MS = 4200;
 const BREACH_COOLDOWN_MS = 2400;
 const MIN_SAFE_FOOT_Y = 3;
 
+const TRAINING_STEP_SEC = 1 / 30;
+const HARD_RECONCILE_DIST = 2.5;
+const HARD_RECONCILE_Y = 1.8;
+const SOFT_RECONCILE_DIST = 0.45;
+const SOFT_RECONCILE_Y = 0.55;
 const NAV_MAX_YAW_DELTA = 0.35;
 const NAV_MAX_PITCH_DELTA = 0.25;
 const NAV_MODEL_PATH = path.resolve(
@@ -79,6 +83,7 @@ type PlayerRow = {
   profileId: number | bigint;
   username: string;
   characterPreset: number;
+  movementFlags: number;
   pos: BotVec3;
   vel: BotVec3;
   rot: { yaw: number; pitch: number };
@@ -237,6 +242,7 @@ export class HeadlessBitBot {
   private strafeFlipAt = 0;
   private yaw = 0;
   private pitch = 0;
+  private movementState: BotMovementState | null = null;
   private lastTickAt = 0;
   private nextFireAt = 0;
   private burstShotsRemaining = 0;
@@ -244,7 +250,6 @@ export class HeadlessBitBot {
   private respawnAt = 0;
   private claimedUsername = false;
   private activeName: string;
-  private verticalVelocity = 0;
   private jumpCooldownUntil = 0;
   private blockedSince = 0;
   private lastHealth = PLAYER.maxHealth;
@@ -268,7 +273,6 @@ export class HeadlessBitBot {
   private neuralNav: NeuralNavigator | null = null;
   private navYaw = 0;
   private navPitch = 0;
-  private prevVelocity: BotVec3 = { x: 0, y: 0, z: 0 };
   private navStagnationTimer = 0;
   private navPrevDist = 0;
   private navInitialDist = 0;
@@ -358,8 +362,8 @@ export class HeadlessBitBot {
 
   private refreshWorldSubscription(force: boolean): void {
     const me = this.getSelf();
-    const centerX = me?.pos.x ?? WORLD.sizeX * 0.5;
-    const centerZ = me?.pos.z ?? WORLD.sizeZ * 0.5;
+    const centerX = this.movementState?.pos.x ?? me?.pos.x ?? WORLD.sizeX * 0.5;
+    const centerZ = this.movementState?.pos.z ?? me?.pos.z ?? WORLD.sizeZ * 0.5;
     const nextCx = clamp(
       Math.floor(centerX / WORLD.chunkSize),
       0,
@@ -470,6 +474,73 @@ export class HeadlessBitBot {
       }
     }
     return null;
+  }
+
+  private movementSnapshotFromPlayer(me: PlayerRow): {
+    pos: BotVec3;
+    vel: BotVec3;
+    grounded: boolean;
+    climbing: boolean;
+    sprinting: boolean;
+  } {
+    const climbing = hasPlayerMovementFlag(me.movementFlags, PLAYER_MOVEMENT_FLAG_CLIMBING);
+    const grounded = hasPlayerMovementFlag(me.movementFlags, PLAYER_MOVEMENT_FLAG_GROUNDED) && !climbing;
+    return {
+      pos: me.pos,
+      vel: me.vel,
+      grounded,
+      climbing,
+      sprinting: hasPlayerMovementFlag(me.movementFlags, PLAYER_MOVEMENT_FLAG_SPRINTING),
+    };
+  }
+
+  private syncMovementState(me: PlayerRow): void {
+    const snapshot = this.movementSnapshotFromPlayer(me);
+    if (!this.movementState) {
+      this.movementState = BotMovementState.fromSnapshot(snapshot);
+      this.yaw = me.rot.yaw;
+      this.pitch = me.rot.pitch;
+      this.navYaw = this.yaw;
+      this.navPitch = this.pitch;
+      this.lastGrounded = snapshot.grounded;
+      this.lastClimbing = snapshot.climbing;
+      this.lastSprinting = snapshot.sprinting;
+      return;
+    }
+
+    const dx = snapshot.pos.x - this.movementState.pos.x;
+    const dy = snapshot.pos.y - this.movementState.pos.y;
+    const dz = snapshot.pos.z - this.movementState.pos.z;
+    const horizontalDrift = Math.sqrt(dx * dx + dz * dz);
+    const hardReset = horizontalDrift > HARD_RECONCILE_DIST || Math.abs(dy) > HARD_RECONCILE_Y;
+
+    if (hardReset) {
+      this.movementState.syncHard(snapshot);
+      this.yaw = me.rot.yaw;
+      this.pitch = me.rot.pitch;
+      this.navYaw = this.yaw;
+      this.navPitch = this.pitch;
+      this.lastGrounded = snapshot.grounded;
+      this.lastClimbing = snapshot.climbing;
+      this.lastSprinting = snapshot.sprinting;
+      return;
+    }
+
+    if (horizontalDrift > SOFT_RECONCILE_DIST || Math.abs(dy) > SOFT_RECONCILE_Y) {
+      this.movementState.nudgeToward(snapshot, 0.35, 0.45);
+    }
+  }
+
+  private getActiveSelf(me: PlayerRow): PlayerRow {
+    if (!this.movementState) {
+      return me;
+    }
+    return {
+      ...me,
+      pos: { ...this.movementState.pos },
+      vel: this.movementState.velocity(),
+      rot: { yaw: this.yaw, pitch: this.pitch },
+    };
   }
 
   private async claimUsername(): Promise<void> {
@@ -1438,15 +1509,6 @@ export class HeadlessBitBot {
     return best ?? { x: desired.x, z: desired.z };
   }
 
-  private tryStartJump(now: number): boolean {
-    if (now < this.jumpCooldownUntil) {
-      return false;
-    }
-    this.verticalVelocity = JUMP_SPEED;
-    this.jumpCooldownUntil = now + JUMP_COOLDOWN_MS;
-    return true;
-  }
-
   private neuralNavigate(
     me: PlayerRow,
     navTarget: BotVec3,
@@ -1476,60 +1538,64 @@ export class HeadlessBitBot {
       this.navStagnationTimer += dtSec;
     }
 
-    // Weapon ammo (normalized)
+    // Weapon ammo (normalized, constant across sub-steps)
     const ammo: [number, number, number] = [
       this.normalizeAmmo(RIFLE_INDEX),
       this.normalizeAmmo(SHOTGUN_INDEX),
       this.normalizeAmmo(RPG_INDEX),
     ];
+    const stagnation = Math.min(this.navStagnationTimer / 8, 1);
 
-    const obs = buildObservation(this.world, {
-      pos: me.pos,
-      vel: this.prevVelocity,
-      yaw: this.navYaw,
-      pitch: this.navPitch,
-      targetPos: navTarget,
-      initialDistance: this.navInitialDist,
-      onGround: this.lastGrounded,
-      isClimbing: this.lastClimbing,
-      isSprinting: this.lastSprinting,
-      health: me.health,
-      maxHealth: me.maxHealth,
-      currentWeapon: this.selectedWeapon,
-      stagnation: Math.min(this.navStagnationTimer / 8, 1),
-      ammo,
-      cooldowns: [0, 0, 0],
-    });
+    const subSteps = Math.max(1, Math.round(dtSec / TRAINING_STEP_SEC));
+    const subDt = dtSec / subSteps;
+    const stepRatio = subDt / TRAINING_STEP_SEC;
+    const simState = this.movementState?.clone() ?? BotMovementState.fromSnapshot(this.movementSnapshotFromPlayer(me));
+    let moveX = 0;
+    let moveZ = 0;
+    let sprinting = false;
+    let shouldJump = false;
 
-    const action = this.neuralNav!.forward(obs);
+    for (let step = 0; step < subSteps; step++) {
+      const obs = buildObservation(this.world, {
+        pos: simState.pos,
+        vel: simState.velocity(),
+        yaw: this.navYaw,
+        pitch: this.navPitch,
+        targetPos: navTarget,
+        initialDistance: this.navInitialDist,
+        onGround: simState.onGround,
+        isClimbing: simState.isClimbing,
+        isSprinting: simState.isSprinting,
+        health: me.health,
+        maxHealth: me.maxHealth,
+        currentWeapon: this.selectedWeapon,
+        stagnation,
+        ammo,
+        cooldowns: [0, 0, 0],
+      });
 
-    // Update navigation yaw/pitch.
-    // No timestep scaling — the model outputs per-step deltas and we apply one step
-    // per bot tick. This gives slower but more stable turning than 3x scaling.
-    this.navYaw += action.yawDelta * NAV_MAX_YAW_DELTA;
-    this.navPitch = clamp(
-      this.navPitch + action.pitchDelta * NAV_MAX_PITCH_DELTA,
-      -Math.PI / 2 + 0.01,
-      Math.PI / 2 - 0.01,
-    );
+      const action = this.neuralNav!.forward(obs);
 
-    // Convert forward/strafe to world-space using navigation yaw
-    const sinN = Math.sin(this.navYaw);
-    const cosN = Math.cos(this.navYaw);
-    let moveX = -sinN * action.forward + cosN * action.strafe;
-    let moveZ = -cosN * action.forward + -sinN * action.strafe;
-    const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
-    if (len > 0.001) {
-      moveX /= len;
-      moveZ /= len;
+      this.navYaw = angleWrap(this.navYaw + action.yawDelta * NAV_MAX_YAW_DELTA * stepRatio);
+      this.navPitch = clamp(
+        this.navPitch + action.pitchDelta * NAV_MAX_PITCH_DELTA * stepRatio,
+        -Math.PI / 2 + 0.01,
+        Math.PI / 2 - 0.01,
+      );
+
+      const sinN = Math.sin(this.navYaw);
+      const cosN = Math.cos(this.navYaw);
+      moveX = -sinN * action.forward + cosN * action.strafe;
+      moveZ = -cosN * action.forward + -sinN * action.strafe;
+      const len = Math.sqrt(moveX * moveX + moveZ * moveZ);
+      if (len > 0.001) { moveX /= len; moveZ /= len; }
+
+      sprinting = action.sprint && action.forward > 0;
+      shouldJump = action.jump;
+      simState.step(subDt, { wishX: moveX, wishZ: moveZ, jump: action.jump, sprint: sprinting }, this.world);
     }
 
-    return {
-      moveX,
-      moveZ,
-      sprinting: action.sprint && action.forward > 0,
-      shouldJump: action.jump,
-    };
+    return { moveX, moveZ, sprinting, shouldJump };
   }
 
   private normalizeAmmo(weapon: number): number {
@@ -1544,32 +1610,39 @@ export class HeadlessBitBot {
     grounded: boolean;
     climbing: boolean;
   } {
-    // Don't move if terrain data isn't loaded — prevents falling through unloaded chunks
-    if (!this.world.isColumnLoaded(me.pos.x, me.pos.z)) {
-      this.verticalVelocity = 0;
+    const state = this.movementState;
+    if (!state) {
       return {
         nextPos: { ...me.pos },
-        velocity: { x: 0, y: 0, z: 0 },
-        sprinting: false,
-        grounded: true,
-        climbing: false,
+        velocity: { ...me.vel },
+        sprinting: this.lastSprinting,
+        grounded: this.lastGrounded,
+        climbing: this.lastClimbing,
       };
     }
 
-    // Recovery: if bot fell underground (e.g. chunks loaded late), find the
-    // actual surface and snap back up
-    const earlyFootY = me.pos.y - BOT_EYE_HEIGHT;
+    if (!this.world.isColumnLoaded(state.pos.x, state.pos.z)) {
+      return {
+        nextPos: { ...state.pos },
+        velocity: { x: 0, y: 0, z: 0 },
+        sprinting: false,
+        grounded: state.onGround,
+        climbing: state.isClimbing,
+      };
+    }
+
+    const earlyFootY = state.pos.y - BOT_EYE_HEIGHT;
     if (earlyFootY < MIN_SAFE_FOOT_Y) {
-      const surfaceFootY = this.findSurfaceFootY(me.pos.x, me.pos.z);
+      const surfaceFootY = this.findSurfaceFootY(state.pos.x, state.pos.z);
       if (surfaceFootY !== null && surfaceFootY > earlyFootY) {
-        this.verticalVelocity = 0;
+        state.setPosition({
+          x: state.pos.x,
+          y: clamp(surfaceFootY + BOT_EYE_HEIGHT, 0.5, WORLD.sizeY - 0.5),
+          z: state.pos.z,
+        });
         return {
-          nextPos: {
-            x: me.pos.x,
-            y: clamp(surfaceFootY + BOT_EYE_HEIGHT, 0.5, WORLD.sizeY - 0.5),
-            z: me.pos.z,
-          },
-          velocity: { x: 0, y: 0, z: 0 },
+          nextPos: { ...state.pos },
+          velocity: state.velocity(),
           sprinting: false,
           grounded: true,
           climbing: false,
@@ -1588,6 +1661,7 @@ export class HeadlessBitBot {
     let desiredMoveX = 0;
     let desiredMoveZ = 0;
     let sprinting = false;
+    let wantsJump = false;
     let desiredGoal: { x: number; z: number } | null = null;
     const playerTarget = target?.kind === 'player' ? target.player : null;
     const targetPos = target?.kind === 'player' ? target.player.pos : target?.entity.pos ?? null;
@@ -1663,7 +1737,10 @@ export class HeadlessBitBot {
         Math.abs(me.vel.y) < 0.5 &&
         Math.random() < 0.01
       ) {
-        this.tryStartJump(now);
+        if (now >= this.jumpCooldownUntil) {
+          wantsJump = true;
+          this.jumpCooldownUntil = now + JUMP_COOLDOWN_MS;
+        }
       }
     } else if (this.neuralNav) {
       // ── Neural navigation ──
@@ -1703,100 +1780,75 @@ export class HeadlessBitBot {
       }
     }
 
-    // Skip forced unstick when neural is active (model handles stuck situations)
-    if (!this.usingNeuralThisTick) {
-      if (now < this.forcedUnstickUntil && this.forcedUnstickDir) {
-        desiredMoveX = this.forcedUnstickDir.x;
-        desiredMoveZ = this.forcedUnstickDir.z;
-        sprinting = true;
-        desiredGoal = {
-          x: clamp(me.pos.x + this.forcedUnstickDir.x * 8, 1, WORLD.sizeX - 1),
-          z: clamp(me.pos.z + this.forcedUnstickDir.z * 8, 1, WORLD.sizeZ - 1),
-        };
-      } else if (this.forcedUnstickUntil !== 0) {
-        this.forcedUnstickUntil = 0;
-        this.forcedUnstickDir = null;
+    if (now < this.forcedUnstickUntil && this.forcedUnstickDir) {
+      desiredMoveX = this.forcedUnstickDir.x;
+      desiredMoveZ = this.forcedUnstickDir.z;
+      sprinting = true;
+      desiredGoal = {
+        x: clamp(me.pos.x + this.forcedUnstickDir.x * 8, 1, WORLD.sizeX - 1),
+        z: clamp(me.pos.z + this.forcedUnstickDir.z * 8, 1, WORLD.sizeZ - 1),
+      };
+      // Override neural direction when stuck — let the fallback push us out
+      if (this.usingNeuralThisTick) {
+        this.usingNeuralThisTick = false;
       }
+    } else if (this.forcedUnstickUntil !== 0) {
+      this.forcedUnstickUntil = 0;
+      this.forcedUnstickDir = null;
     }
 
     const move = normalize2D(desiredMoveX, desiredMoveZ);
-    const currentFootY = me.pos.y - BOT_EYE_HEIGHT;
-    const currentGroundFootY = this.groundFootYAt(me.pos.x, currentFootY, me.pos.z);
-    let grounded =
-      currentGroundFootY !== null &&
-      currentFootY <= currentGroundFootY + 0.08 &&
-      this.verticalVelocity <= 0.5;
-
-    if (grounded && currentGroundFootY !== null) {
-      this.verticalVelocity = 0;
+    const currentFootY = state.pos.y - BOT_EYE_HEIGHT;
+    if (this.pendingNeuralJump) {
+      wantsJump = true;
     }
+    this.pendingNeuralJump = false;
 
-    // Neural model jump
-    if (this.pendingNeuralJump && grounded) {
-      this.tryStartJump(now);
-      this.pendingNeuralJump = false;
-    }
-
-    const speed = grounded ? (sprinting ? SPRINT_SPEED : WALK_SPEED) : AIR_STRAFE_SPEED;
-    // Neural model already chose a good direction; skip angle probing
-    const steeredMove = this.usingNeuralThisTick || !grounded
+    const probeSpeed = sprinting ? 18 : 12;
+    const steeredMove = this.usingNeuralThisTick || !state.onGround
       ? { x: move.x, z: move.z }
-      : this.chooseTraversalDirection(me, move, currentFootY, speed, dtSec, target, seekingCover);
-    let nextX = me.pos.x;
-    let nextZ = me.pos.z;
-    let nextEyeY = grounded && currentGroundFootY !== null ? currentGroundFootY + BOT_EYE_HEIGHT : me.pos.y;
-    let climbing = false;
-    let blocked = false;
+      : this.chooseTraversalDirection(me, move, currentFootY, probeSpeed, dtSec, target, seekingCover);
 
-    if (move.len > 0.001) {
-      const attemptX = clamp(me.pos.x + steeredMove.x * speed * dtSec, 1, WORLD.sizeX - 1);
-      const attemptZ = clamp(me.pos.z + steeredMove.z * speed * dtSec, 1, WORLD.sizeZ - 1);
-      const attemptGroundFootY = this.groundFootYAt(attemptX, currentFootY, attemptZ);
-
-      if (attemptGroundFootY === null) {
-        nextX = attemptX;
-        nextZ = attemptZ;
-        grounded = false;
-      } else {
-        const rise = attemptGroundFootY - currentFootY;
-        if (rise <= MAX_STEP_UP) {
-          nextX = attemptX;
-          nextZ = attemptZ;
-          if (grounded) {
-            nextEyeY = attemptGroundFootY + BOT_EYE_HEIGHT;
-          }
-        } else if (rise <= MAX_CLIMB_UP) {
-          nextX = attemptX;
-          nextZ = attemptZ;
-          nextEyeY = attemptGroundFootY + BOT_EYE_HEIGHT;
-          climbing = true;
-          grounded = false;
-          this.verticalVelocity = Math.max(this.verticalVelocity, CLIMB_SPEED);
-        } else {
-          blocked = true;
-        }
-      }
-
-      if (!blocked && !this.positionClear(nextX, nextEyeY - BOT_EYE_HEIGHT, nextZ)) {
-        blocked = true;
-      }
+    if (
+      !wantsJump &&
+      state.onGround &&
+      move.len > 0.001 &&
+      now >= this.jumpCooldownUntil &&
+      this.shouldJumpObstacle(me, steeredMove.x, steeredMove.z, currentFootY, sprinting, now)
+    ) {
+      wantsJump = true;
+      this.jumpCooldownUntil = now + JUMP_COOLDOWN_MS;
     }
+
+    const before = { ...state.pos };
+    const step = state.step(
+      dtSec,
+      {
+        wishX: steeredMove.x,
+        wishZ: steeredMove.z,
+        jump: wantsJump,
+        sprint: sprinting,
+      },
+      this.world,
+    );
+
+    const horizontalMoved = Math.sqrt(
+      (step.pos.x - before.x) * (step.pos.x - before.x) +
+      (step.pos.z - before.z) * (step.pos.z - before.z),
+    );
+    const blocked =
+      move.len > 0.001 &&
+      step.grounded &&
+      (step.collidedX || step.collidedZ) &&
+      horizontalMoved < 0.05;
 
     if (blocked) {
-      nextX = me.pos.x;
-      nextZ = me.pos.z;
-      nextEyeY = me.pos.y;
-
       if (this.blockedSince === 0) {
         this.blockedSince = now;
       }
 
-      if (grounded && this.shouldJumpObstacle(me, steeredMove.x, steeredMove.z, currentFootY, sprinting, now)) {
-        this.tryStartJump(now);
-      }
-
       if (
-        grounded &&
+        step.grounded &&
         now - this.blockedSince >= 450 &&
         this.tryBreachObstacle(me, steeredMove.x, steeredMove.z, currentFootY, now)
       ) {
@@ -1816,51 +1868,17 @@ export class HeadlessBitBot {
       this.blockedSince = 0;
     }
 
-    if (!grounded || this.verticalVelocity > 0) {
-      const gravity = this.verticalVelocity > 0 ? JUMP_GRAVITY_ASCENDING : JUMP_GRAVITY_DESCENDING;
-      this.verticalVelocity = Math.max(TERMINAL_VELOCITY, this.verticalVelocity + gravity * dtSec);
-      let candidateEyeY = nextEyeY + this.verticalVelocity * dtSec;
-      let candidateFootY = candidateEyeY - BOT_EYE_HEIGHT;
-
-      if (this.verticalVelocity > 0 && !this.positionClear(nextX, candidateFootY, nextZ)) {
-        candidateEyeY = nextEyeY;
-        candidateFootY = candidateEyeY - BOT_EYE_HEIGHT;
-        this.verticalVelocity = 0;
-      }
-
-      const landingGroundFootY = this.groundFootYAt(nextX, candidateFootY + 1.1, nextZ);
-      if (landingGroundFootY !== null && candidateFootY <= landingGroundFootY) {
-        candidateFootY = landingGroundFootY;
-        candidateEyeY = candidateFootY + BOT_EYE_HEIGHT;
-        this.verticalVelocity = 0;
-        grounded = true;
-        climbing = false;
-      }
-
-      nextEyeY = candidateEyeY;
-    }
-
-    if (desiredGoal && distSq({ x: nextX, y: me.pos.y, z: nextZ }, { x: desiredGoal.x, y: me.pos.y, z: desiredGoal.z }) <= 1.4 * 1.4) {
+    if (desiredGoal && distSq(step.pos, { x: desiredGoal.x, y: step.pos.y, z: desiredGoal.z }) <= 1.4 * 1.4) {
       this.forcedUnstickUntil = 0;
       this.forcedUnstickDir = null;
     }
 
-    const nextPos = {
-      x: nextX,
-      y: clamp(nextEyeY, 0.5, WORLD.sizeY - 0.5),
-      z: nextZ,
-    };
-
     return {
-      nextPos,
-      velocity: {
-        x: (nextPos.x - me.pos.x) / dtSec,
-        y: (nextPos.y - me.pos.y) / dtSec,
-        z: (nextPos.z - me.pos.z) / dtSec,
-      },
-      sprinting,
-      grounded,
-      climbing,
+      nextPos: { ...step.pos },
+      velocity: step.vel,
+      sprinting: step.sprinting,
+      grounded: step.grounded,
+      climbing: step.climbing,
     };
   }
 
@@ -2061,14 +2079,14 @@ export class HeadlessBitBot {
     if (!conn || !me) return;
 
     const now = Date.now();
-    const dtSec = clamp((now - this.lastTickAt) / 1000, 0.05, 0.25);
+    const dtSec = clamp((now - this.lastTickAt) / 1000, 1 / 120, 0.25);
     this.lastTickAt = now;
     this.refreshWorldSubscription(false);
 
     if (me.health <= 0) {
       this.coverDirective = null;
       this.trackedTarget = null;
-      this.verticalVelocity = 0;
+      this.movementState = null;
       this.forcedUnstickUntil = 0;
       this.forcedUnstickDir = null;
       this.burstShotsRemaining = 0;
@@ -2078,7 +2096,6 @@ export class HeadlessBitBot {
       this.navStagnationTimer = 0;
       this.navInitialDist = 0;
       this.usingNeuralThisTick = false;
-      this.prevVelocity = { x: 0, y: 0, z: 0 };
       if (!this.pendingLoadout) {
         this.pendingLoadout = this.chooseRandomLoadout();
         void this.applyPendingLoadout();
@@ -2101,10 +2118,12 @@ export class HeadlessBitBot {
     }
 
     this.syncCurrentLoadoutFromDb(me);
+    this.syncMovementState(me);
+    const self = this.getActiveSelf(me);
 
     if (me.spawnProtected && !this.lastSpawnProtected) {
       this.spawnRushUntil = now + SPAWN_RUSH_MS;
-      this.moveDirective = this.chooseSpawnExitWaypoint(me, now);
+      this.moveDirective = this.chooseSpawnExitWaypoint(self, now);
       if (this.pendingLoadout) {
         void this.applyPendingLoadout();
       }
@@ -2120,19 +2139,19 @@ export class HeadlessBitBot {
     if (this.heardContact && now >= this.heardContact.expiresAt) {
       this.heardContact = null;
     }
-    this.updateProgressState(me, now);
+    this.updateProgressState(self, now);
 
     this.usingNeuralThisTick = false;
     this.pendingNeuralJump = false;
 
-    const target = this.getPreferredTarget(me, now);
-    this.chooseWeaponForTarget(me, target);
-    const movement = this.computeMovement(me, target, now, dtSec);
-    this.updateLook(me, target, movement.velocity, dtSec);
-    this.maybeFire(me, target, this.selectedWeapon, now);
+    const target = this.getPreferredTarget(self, now);
+    this.chooseWeaponForTarget(self, target);
+    const movement = this.computeMovement(self, target, now, dtSec);
+    const liveSelf = this.getActiveSelf(me);
+    this.updateLook(liveSelf, target, movement.velocity, dtSec);
+    this.maybeFire(liveSelf, target, this.selectedWeapon, now);
 
     // Track state for next neural observation
-    this.prevVelocity = movement.velocity;
     this.lastGrounded = movement.grounded;
     this.lastClimbing = movement.climbing;
     this.lastSprinting = movement.sprinting;
