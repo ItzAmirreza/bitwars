@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+﻿import * as THREE from 'three';
 import { VoxelWorld, BLOCK_COLORS } from './VoxelWorld';
 import { VFX } from './VFX';
 import { AudioSystem } from './AudioSystem';
@@ -26,7 +26,7 @@ import {
 // Re-export for consumers that import the interface from here
 export type { StructuralDetachParams } from './PhysicsTypes';
 
-// ── PhysicsSystem ──
+// â”€â”€ PhysicsSystem â”€â”€
 
 export class PhysicsSystem {
   private scene: THREE.Scene;
@@ -59,13 +59,11 @@ export class PhysicsSystem {
     });
     this.instancedMesh = new THREE.InstancedMesh(SHARED_GEO, mat, MAX_DEBRIS_INSTANCES);
     this.instancedMesh.count = 0;
-    this.instancedMesh.castShadow = true;
-    this.instancedMesh.receiveShadow = false;
     this.instancedMesh.frustumCulled = false;
     this.scene.add(this.instancedMesh);
   }
 
-  // ── Public API (delegates to PhysicsSpawning) ──
+  // â”€â”€ Public API (delegates to PhysicsSpawning) â”€â”€
 
   spawnFromDetachEvent(params: StructuralDetachParams): void {
     doSpawnDetach(params, this.falling, this.pool, this.audio);
@@ -84,7 +82,7 @@ export class PhysicsSystem {
     doApplyExplosionForce(cx, cy, cz, radius, force, this.falling, this.settled, this.pool, this.world);
   }
 
-  // ── Main Update Loop ──
+  // â”€â”€ Main Update Loop â”€â”€
 
   update(delta: number): void {
     const dt = Math.min(delta, 0.033); // Cap to prevent tunneling
@@ -153,7 +151,7 @@ export class PhysicsSystem {
       // Floor collision
       const hitFloor = by < 0 || this.world.getBlock(bx, by, bz) !== 0;
 
-      // Side collision — bounce off walls
+      // Side collision â€” bounce off walls
       const sideMargin = Math.max(0.12, 0.35 * fb.scale);
       const hitPosX = this.world.getBlock(Math.floor(fb.x + sideMargin), Math.floor(fb.y), Math.floor(fb.z)) !== 0;
       const hitNegX = this.world.getBlock(Math.floor(fb.x - sideMargin), Math.floor(fb.y), Math.floor(fb.z)) !== 0;
@@ -205,7 +203,7 @@ export class PhysicsSystem {
     }
   }
 
-  // ── Block-to-Block Collision ──
+  // â”€â”€ Block-to-Block Collision â”€â”€
 
   private resolveCollisions(): void {
     const hash = this.spatialHash;
@@ -267,12 +265,12 @@ export class PhysicsSystem {
     }
   }
 
-  // ── Landing ──
+  // â”€â”€ Landing â”€â”€
 
   private handleLanding(fb: FallingBlock): void {
     this.spawnImpactFragments(fb);
     const color = BLOCK_COLORS[fb.blockType] || 0x808080;
-    // Always shatter — server owns the world, no client re-placement
+    // Always shatter â€” server owns the world, no client re-placement
     this.vfx.emitBlockDebris(fb.x - 0.5, Math.max(0, fb.y - 0.5), fb.z - 0.5, color);
     this.vfx.emitImpact(fb.x - 0.5, Math.max(0, fb.y - 0.5), fb.z - 0.5);
   }
@@ -374,7 +372,7 @@ export class PhysicsSystem {
     }
   }
 
-  // ── InstancedMesh Rendering ──
+  // â”€â”€ InstancedMesh Rendering â”€â”€
 
   private updateInstancedMesh(): void {
     const count = this.falling.length + this.settled.length;
@@ -418,7 +416,7 @@ export class PhysicsSystem {
     if (this.instancedMesh.instanceColor) this.instancedMesh.instanceColor.needsUpdate = true;
   }
 
-  // ── Cleanup ──
+  // â”€â”€ Cleanup â”€â”€
 
   /** Remove all falling blocks and settled debris (used on map reset). */
   clearAll(): void {

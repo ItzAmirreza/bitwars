@@ -1,11 +1,11 @@
-/**
- * HelicopterType.ts — VehicleType implementation for the helicopter.
+﻿/**
+ * HelicopterType.ts â€” VehicleType implementation for the helicopter.
  *
  * Contains:
- *  • The ~370-line model builder (createHelicopterModel)
- *  • Per-frame animation (banking, rotor spin, blur disc, hover bob)
- *  • Breakup piece spawning on destruction
- *  • All helicopter constants from shared-config
+ *  â€¢ The ~370-line model builder (createHelicopterModel)
+ *  â€¢ Per-frame animation (banking, rotor spin, blur disc, hover bob)
+ *  â€¢ Breakup piece spawning on destruction
+ *  â€¢ All helicopter constants from shared-config
  */
 
 import * as THREE from 'three';
@@ -20,7 +20,7 @@ import type {
   VehicleTypeDestroyContext,
 } from './VehicleBase';
 
-// ── Constants ──
+// â”€â”€ Constants â”€â”€
 const VEHICLE_TYPE_HELICOPTER = VEHICLE_TYPES.Helicopter;
 const HELI_BREAKUP_GRAVITY = 22;
 
@@ -49,15 +49,15 @@ export class HelicopterType implements VehicleType {
     return HELICOPTER.pilotSeatHeight;
   }
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  MODEL BUILDER
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   createModel(): THREE.Group {
     const heli = new THREE.Group();
     heli.name = 'helicopter-root';
 
-    // ── Shared voxel-style material ──
+    // â”€â”€ Shared voxel-style material â”€â”€
     const voxMat = new THREE.MeshPhongMaterial({
       vertexColors: true,
       emissive: new THREE.Color(0x10182a),
@@ -128,8 +128,6 @@ export class HelicopterType implements VehicleType {
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(...pos);
       mesh.rotation.set(...rot);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
       parent.add(mesh);
       return mesh;
     };
@@ -157,13 +155,11 @@ export class HelicopterType implements VehicleType {
       );
       m.position.set(...pos);
       m.rotation.set(...rot);
-      m.castShadow = true;
-      m.receiveShadow = true;
       parent.add(m);
       return m;
     };
 
-    // ── Color palette ──
+    // â”€â”€ Color palette â”€â”€
     const SHELL     = 0x4a4e52;
     const SHELL_LT  = 0x585e64;
     const SHELL_DK  = 0x33383c;
@@ -174,7 +170,7 @@ export class HelicopterType implements VehicleType {
     const SKID      = 0x3a3632;
     const EXHAUST   = 0x1a1d20;
 
-    // ── FUSELAGE ──
+    // â”€â”€ FUSELAGE â”€â”€
     const fuselage = new THREE.Group();
     fuselage.name = 'fuselage';
     heli.add(fuselage);
@@ -200,13 +196,13 @@ export class HelicopterType implements VehicleType {
     mkCyl(fuselage, 0.15, 0.12, 0.6, EXHAUST, [-1.9, 3.7, -0.7], [0, 0, Math.PI / 2]);
     mkCyl(fuselage, 0.15, 0.12, 0.6, EXHAUST, [-1.9, 3.7, 0.7], [0, 0, Math.PI / 2]);
 
-    // ── ACCENT DETAILS ──
+    // â”€â”€ ACCENT DETAILS â”€â”€
     B(fuselage, [7.0, 0.15, 0.12], ACCENT, [0.3, 1.5, -1.42]);
     B(fuselage, [7.0, 0.15, 0.12], ACCENT, [0.3, 1.5, 1.42]);
     B(fuselage, [0.12, 0.8, 2.0], ACCENT, [5.0, 2.5, 0]);
     B(fuselage, [0.12, 1.0, 1.8], ACCENT, [-3.3, 2.5, 0]);
 
-    // ── TAIL BOOM ──
+    // â”€â”€ TAIL BOOM â”€â”€
     const tail = new THREE.Group();
     tail.name = 'tail-section';
     tail.position.set(-4.3, 2.5, 0);
@@ -224,7 +220,7 @@ export class HelicopterType implements VehicleType {
     B(tail, [0.4, 0.12, 0.12], ACCENT, [-4.0, 0.28, 0.95]);
     B(tail, [0.6, 0.7, 0.15], DARK, [-4.0, -0.5, 0]);
 
-    // ── TAIL ROTOR ──
+    // â”€â”€ TAIL ROTOR â”€â”€
     const tailRotor = new THREE.Group();
     tailRotor.name = 'helicopter-tail-rotor';
     tailRotor.position.set(-4.3, 1.2, 0.14);
@@ -239,7 +235,6 @@ export class HelicopterType implements VehicleType {
       const blade = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.04), tailBladeMat);
       blade.position.set(0, 0.42, 0);
       blade.name = 'tail-blade';
-      blade.castShadow = true;
       bladeGroup.add(blade);
       const tip = new THREE.Mesh(
         new THREE.BoxGeometry(0.07, 0.08, 0.05),
@@ -258,7 +253,7 @@ export class HelicopterType implements VehicleType {
     tailBlurDisc.rotation.x = Math.PI / 2;
     tailRotor.add(tailBlurDisc);
 
-    // ── LANDING SKIDS ──
+    // â”€â”€ LANDING SKIDS â”€â”€
     for (const side of [-1, 1]) {
       const z = side * 1.1;
       B(heli, [5.5, 0.15, 0.15], SKID, [0.5, 0.6, z]);
@@ -269,7 +264,7 @@ export class HelicopterType implements VehicleType {
       B(heli, [0.1, 0.1, Math.abs(z) - 0.15], SKID, [-1.2, 1.55, side * 0.55]);
     }
 
-    // ── MAIN ROTOR ──
+    // â”€â”€ MAIN ROTOR â”€â”€
     const mainRotor = new THREE.Group();
     mainRotor.name = 'helicopter-main-rotor';
     mainRotor.position.set(-0.3, 4.25, 0);
@@ -291,16 +286,12 @@ export class HelicopterType implements VehicleType {
       inner.position.set(0, 0, 1.8);
       inner.rotation.z = 0.03;
       inner.name = 'main-blade';
-      inner.castShadow = true;
-      inner.receiveShadow = true;
       bladeGroup.add(inner);
 
       const outer = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.05, 3.2), bladeMat);
       outer.position.set(0, 0, 4.6);
       outer.rotation.z = 0.05;
       outer.name = 'main-blade';
-      outer.castShadow = true;
-      outer.receiveShadow = true;
       bladeGroup.add(outer);
 
       const tip = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.07, 0.14), tipGlowMat);
@@ -318,7 +309,7 @@ export class HelicopterType implements VehicleType {
     mainBlurDisc.rotation.x = -Math.PI / 2;
     mainRotor.add(mainBlurDisc);
 
-    // ── DETAIL ──
+    // â”€â”€ DETAIL â”€â”€
     B(fuselage, [0.06, 1.6, 0.06], DARK, [1.8, 2.4, -1.42]);
     B(fuselage, [0.06, 1.6, 0.06], DARK, [1.8, 2.4, 1.42]);
     B(fuselage, [0.06, 1.6, 0.06], DARK, [0.0, 2.4, -1.42]);
@@ -339,9 +330,9 @@ export class HelicopterType implements VehicleType {
     return heli;
   }
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  PER-FRAME ANIMATION
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   updatePerFrame(
     instance: VehicleInstance,
@@ -352,7 +343,7 @@ export class HelicopterType implements VehicleType {
     const mesh = instance.mesh;
     const id = instance.entityId;
 
-    // Banking/roll animation — uses an exponential moving average for the
+    // Banking/roll animation â€” uses an exponential moving average for the
     // derived velocity to filter out the fixed-timestep quantization noise
     // that raw frame-differencing produces.
     const prevPos = mesh.userData.prevFramePos as THREE.Vector3 | undefined;
@@ -390,7 +381,7 @@ export class HelicopterType implements VehicleType {
       (mesh.userData.prevFramePos as THREE.Vector3).copy(mesh.position);
     }
 
-    // ── Idle hover animation ──
+    // â”€â”€ Idle hover animation â”€â”€
     const orientWrapper = mesh.getObjectByName('helicopter-orient-wrapper');
     if (orientWrapper) {
       const hSpeed = (mesh.userData.derivedHSpeed as number) ?? 0;
@@ -422,7 +413,7 @@ export class HelicopterType implements VehicleType {
       orientWrapper.rotation.set(swayPitch, Math.PI / 2 + swayYaw, swayRoll);
     }
 
-    // ── Client-side rotor spin ──
+    // â”€â”€ Client-side rotor spin â”€â”€
     let spinRate = 2.4;
     if (isLocal) {
       let fwd = 0;
@@ -454,7 +445,7 @@ export class HelicopterType implements VehicleType {
     const tailRotor = mesh.getObjectByName('helicopter-tail-rotor');
     if (tailRotor) tailRotor.rotation.z = newAngle * 3.4;
 
-    // ── Blur disc fading ──
+    // â”€â”€ Blur disc fading â”€â”€
     const BLUR_FADE_START = 5.0;
     const BLUR_FADE_FULL  = 10.0;
     const blurT = Math.max(0, Math.min(1, (spinRate - BLUR_FADE_START) / (BLUR_FADE_FULL - BLUR_FADE_START)));
@@ -500,14 +491,14 @@ export class HelicopterType implements VehicleType {
       });
     }
 
-    // ── Helicopter audio ──
+    // â”€â”€ Helicopter audio â”€â”€
     const heliSpeed = (mesh.userData.derivedHSpeed as number) ?? 0;
     ctx.audio.updateHelicopterSound(id, mesh.position, spinRate, heliSpeed, isLocal);
   }
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  DESTRUCTION
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   onDestroy(
     instance: VehicleInstance,
@@ -581,8 +572,6 @@ export class HelicopterType implements VehicleType {
       local.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
       mesh.position.copy(origin).add(local);
       mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
       ctx.scene.add(mesh);
 
       radial.copy(local).normalize();
@@ -631,6 +620,6 @@ export class HelicopterType implements VehicleType {
     return pieces;
   }
 
-  // ── Breakup piece gravity constant (used by VehicleManager) ──
+  // â”€â”€ Breakup piece gravity constant (used by VehicleManager) â”€â”€
   static readonly BREAKUP_GRAVITY = HELI_BREAKUP_GRAVITY;
 }

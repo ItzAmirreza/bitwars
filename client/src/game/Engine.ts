@@ -8,6 +8,7 @@ import {
   packChunkId,
   BLOCK_COLORS,
   BlockType,
+  MAX_TERRAIN_DYN_LIGHTS,
   type ChunkApplyBudget,
 } from "./VoxelWorld";
 import { FPSControls } from "./FPSControls";
@@ -74,7 +75,6 @@ export interface DynamicLightOptions {
   intensity: number;
   distance: number;
   decay?: number;
-  castShadow?: boolean;
   ttl?: number;
   direction?: THREE.Vector3 | { x: number; y: number; z: number };
   angle?: number;
@@ -1205,6 +1205,54 @@ export class Engine {
     }
   }
 
+  // Feed the closest visible combat lights (muzzle flashes, explosions,
+  // grenades) into the terrain shader. Lantern glow is already baked into
+  // the torch light channel, so lantern lights are skipped.
+  private feedTerrainDynamicLights(): void {
+    let count = 0;
+
+    for (const entry of this.dynamicLights.values()) {
+      if (count >= MAX_TERRAIN_DYN_LIGHTS) break;
+      if (entry.kind === "lantern") continue;
+      const light = entry.light;
+      if (!light.visible || !(light instanceof THREE.PointLight)) continue;
+      if (light.intensity <= 0.01) continue;
+      this.world.setTerrainDynamicLight(
+        count++,
+        light.position,
+        light.color,
+        light.intensity,
+        light.distance,
+      );
+    }
+    for (const vis of this.grenadeVisuals.values()) {
+      if (count >= MAX_TERRAIN_DYN_LIGHTS) break;
+      const light = vis.light;
+      if (!light || !light.visible || light.intensity <= 0.01) continue;
+      this.world.setTerrainDynamicLight(
+        count++,
+        light.position,
+        light.color,
+        light.intensity,
+        light.distance,
+      );
+    }
+    for (const ghost of this.predictedGrenadeGhosts) {
+      if (count >= MAX_TERRAIN_DYN_LIGHTS) break;
+      const light = ghost.light;
+      if (!light || !light.visible || light.intensity <= 0.01) continue;
+      this.world.setTerrainDynamicLight(
+        count++,
+        light.position,
+        light.color,
+        light.intensity,
+        light.distance,
+      );
+    }
+
+    this.world.setTerrainDynamicLightCount(count);
+  }
+
   private refreshAdaptiveScaling(delta: number): void {
     const nowMs = performance.now();
     if (!this.chunkStreamer.startupWorldReady || nowMs < this.adaptiveResumeAtMs) {
@@ -2195,7 +2243,6 @@ export class Engine {
         options.penumbra ?? 0.35,
         decay,
       );
-      light.castShadow = options.castShadow ?? false;
       light.position.copy(this.toVec3(options.position));
       const target = new THREE.Object3D();
       const direction = this.toVec3(
@@ -2224,7 +2271,6 @@ export class Engine {
       options.distance,
       decay,
     );
-    light.castShadow = options.castShadow ?? false;
     light.position.copy(this.toVec3(options.position));
     this.scene.add(light);
     this.dynamicLights.set(id, {
@@ -2255,7 +2301,6 @@ export class Engine {
       entry.baseDistance = patch.distance;
     }
     if (patch.decay !== undefined) light.decay = patch.decay;
-    if (patch.castShadow !== undefined) light.castShadow = patch.castShadow;
     if (patch.ttl !== undefined) entry.ttl = patch.ttl;
     if (patch.kind !== undefined) entry.kind = patch.kind;
 
@@ -4227,7 +4272,14 @@ export class Engine {
     // Sky & environment
     this.sky.update(delta, this.camera.position);
     const lightEnv = this.sky.getTerrainLightEnv();
-    this.world.setLightEnvironment(lightEnv.sunTint, lightEnv.torchTint, lightEnv.ambient);
+    this.world.setLightEnvironment(
+      lightEnv.sunTint,
+      lightEnv.torchTint,
+      lightEnv.skyAmbient,
+      lightEnv.groundAmbient,
+      lightEnv.sunDir,
+    );
+    this.feedTerrainDynamicLights();
     this.renderer.toneMappingExposure +=
       (this.sky.getExposure() - this.renderer.toneMappingExposure) *
       Math.min(1, delta * 2.2);

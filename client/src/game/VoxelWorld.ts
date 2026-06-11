@@ -12,6 +12,9 @@ export interface ChunkApplyBudget {
 
 export const CHUNK = WORLD_CONFIG.chunkSize;
 export const WORLD_X = WORLD_CONFIG.sizeX;
+
+/** Dynamic combat lights (muzzle flashes, explosions, grenades) fed to the terrain shader. */
+export const MAX_TERRAIN_DYN_LIGHTS = 8;
 export const WORLD_Y = WORLD_CONFIG.sizeY;
 export const WORLD_Z = WORLD_CONFIG.sizeZ;
 
@@ -74,7 +77,12 @@ export class VoxelWorld {
   private lightUniforms = {
     uSunTint: { value: new THREE.Color(1.05, 1.0, 0.92) },
     uTorchTint: { value: new THREE.Color(1.15, 0.74, 0.38) },
-    uAmbientFloor: { value: new THREE.Color(0.30, 0.32, 0.38) },
+    uSkyAmbient: { value: new THREE.Color(0.3, 0.32, 0.38) },
+    uGroundAmbient: { value: new THREE.Color(0.2, 0.18, 0.15) },
+    uSunDir: { value: new THREE.Vector3(0.4, 0.8, 0.3) },
+    uDynLightCount: { value: 0 },
+    uDynLights: { value: new Float32Array(MAX_TERRAIN_DYN_LIGHTS * 4) },
+    uDynLightColor: { value: new Float32Array(MAX_TERRAIN_DYN_LIGHTS * 3) },
   };
 
   private workers: Worker[] = [];
@@ -104,21 +112,28 @@ export class VoxelWorld {
       shader.uniforms.uBombRadius = { value: 10.0 };
       shader.uniforms.uSunTint = this.lightUniforms.uSunTint;
       shader.uniforms.uTorchTint = this.lightUniforms.uTorchTint;
-      shader.uniforms.uAmbientFloor = this.lightUniforms.uAmbientFloor;
+      shader.uniforms.uSkyAmbient = this.lightUniforms.uSkyAmbient;
+      shader.uniforms.uGroundAmbient = this.lightUniforms.uGroundAmbient;
+      shader.uniforms.uSunDir = this.lightUniforms.uSunDir;
+      shader.uniforms.uDynLightCount = this.lightUniforms.uDynLightCount;
+      shader.uniforms.uDynLights = this.lightUniforms.uDynLights;
+      shader.uniforms.uDynLightColor = this.lightUniforms.uDynLightColor;
 
-      // Vertex shader: pass world position + voxel light to fragment
+      // Vertex shader: pass world position, normal + voxel light to fragment
       shader.vertexShader = shader.vertexShader.replace(
         '#include <common>',
         `#include <common>
         attribute vec2 voxelLight;
         varying vec2 vVoxelLight;
-        varying vec3 vWorldPos;`,
+        varying vec3 vWorldPos;
+        varying vec3 vVoxelNormal;`,
       );
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
         vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
-        vVoxelLight = voxelLight;`,
+        vVoxelLight = voxelLight;
+        vVoxelNormal = normal;`,
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -126,22 +141,47 @@ export class VoxelWorld {
         `#include <common>
         varying vec3 vWorldPos;
         varying vec2 vVoxelLight;
+        varying vec3 vVoxelNormal;
         uniform float uBombActive;
         uniform vec3 uBombPos;
         uniform float uBombRadius;
         uniform vec3 uSunTint;
         uniform vec3 uTorchTint;
-        uniform vec3 uAmbientFloor;`,
+        uniform vec3 uSkyAmbient;
+        uniform vec3 uGroundAmbient;
+        uniform vec3 uSunDir;
+        uniform int uDynLightCount;
+        uniform vec4 uDynLights[${MAX_TERRAIN_DYN_LIGHTS}];
+        uniform vec3 uDynLightColor[${MAX_TERRAIN_DYN_LIGHTS}];`,
       );
-      // Apply baked radiance to the albedo (vertex color already carries
-      // per-face shading + AO)
+      // Radiance = hemisphere ambient + directional sun scaled by the baked
+      // sky channel + lantern channel + dynamic combat lights. The baked
+      // channels carry occlusion; the directional/dynamic terms keep the
+      // world responsive to sun position and gameplay.
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
         {
-          float sky = pow(vVoxelLight.x, 1.4);
+          vec3 vn = normalize(vVoxelNormal);
+          float skyRaw = vVoxelLight.x;
+          float sky = pow(skyRaw, 1.4);
+          float direct = smoothstep(0.55, 0.95, skyRaw);
+          float ndotl = max(dot(vn, uSunDir), 0.0);
+          float sunShape = mix(1.0, 0.45 + 0.85 * ndotl, direct);
           float torch = vVoxelLight.y * (vVoxelLight.y * 0.7 + 0.3);
-          vec3 radiance = uAmbientFloor + uSunTint * sky + uTorchTint * torch;
+          vec3 radiance = mix(uGroundAmbient, uSkyAmbient, vn.y * 0.5 + 0.5)
+            + uSunTint * (sky * sunShape)
+            + uTorchTint * torch;
+          for (int i = 0; i < ${MAX_TERRAIN_DYN_LIGHTS}; i++) {
+            if (i >= uDynLightCount) break;
+            vec4 lp = uDynLights[i];
+            vec3 ld = lp.xyz - vWorldPos;
+            float dist = length(ld);
+            float att = clamp(1.0 - dist / max(lp.w, 0.001), 0.0, 1.0);
+            if (att <= 0.0) continue;
+            float nl = max(dot(vn, ld / max(dist, 0.001)), 0.0) * 0.65 + 0.35;
+            radiance += uDynLightColor[i] * (att * att * nl);
+          }
           diffuseColor.rgb *= radiance;
         }`,
       );
@@ -163,10 +203,45 @@ export class VoxelWorld {
   }
 
   /** Drive the baked-light tint uniforms from the sky (per frame, no remesh). */
-  setLightEnvironment(sunTint: THREE.Color, torchTint: THREE.Color, ambientFloor: THREE.Color): void {
+  setLightEnvironment(
+    sunTint: THREE.Color,
+    torchTint: THREE.Color,
+    skyAmbient: THREE.Color,
+    groundAmbient: THREE.Color,
+    sunDir: THREE.Vector3,
+  ): void {
     this.lightUniforms.uSunTint.value.copy(sunTint);
     this.lightUniforms.uTorchTint.value.copy(torchTint);
-    this.lightUniforms.uAmbientFloor.value.copy(ambientFloor);
+    this.lightUniforms.uSkyAmbient.value.copy(skyAmbient);
+    this.lightUniforms.uGroundAmbient.value.copy(groundAmbient);
+    this.lightUniforms.uSunDir.value.copy(sunDir);
+  }
+
+  /** Write one dynamic combat light into the terrain shader slots. */
+  setTerrainDynamicLight(
+    index: number,
+    position: THREE.Vector3,
+    color: THREE.Color,
+    intensity: number,
+    distance: number,
+  ): void {
+    if (index < 0 || index >= MAX_TERRAIN_DYN_LIGHTS) return;
+    const lights = this.lightUniforms.uDynLights.value;
+    const colors = this.lightUniforms.uDynLightColor.value;
+    const o4 = index * 4;
+    lights[o4] = position.x;
+    lights[o4 + 1] = position.y;
+    lights[o4 + 2] = position.z;
+    lights[o4 + 3] = Math.max(2, distance);
+    const s = Math.min(2.5, intensity * 0.3);
+    const o3 = index * 3;
+    colors[o3] = color.r * s;
+    colors[o3 + 1] = color.g * s;
+    colors[o3 + 2] = color.b * s;
+  }
+
+  setTerrainDynamicLightCount(count: number): void {
+    this.lightUniforms.uDynLightCount.value = Math.min(count, MAX_TERRAIN_DYN_LIGHTS);
   }
 
   /** Chunk mesh jobs not yet applied to the scene (queued or in a worker). */

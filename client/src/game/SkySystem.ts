@@ -50,7 +50,9 @@ export class SkySystem {
   private terrainLightEnv = {
     sunTint: new THREE.Color(1, 0.96, 0.88),
     torchTint: new THREE.Color(1.25, 0.78, 0.42),
-    ambient: new THREE.Color(0.3, 0.32, 0.38),
+    skyAmbient: new THREE.Color(0.3, 0.32, 0.38),
+    groundAmbient: new THREE.Color(0.2, 0.18, 0.15),
+    sunDir: new THREE.Vector3(0.4, 0.8, 0.3),
   };
   private _tintScratch = new THREE.Color();
   private moonColor = new THREE.Color(0.62, 0.72, 0.95);
@@ -282,16 +284,23 @@ export class SkySystem {
 
     // Terrain radiance tints for the baked voxel light channels: the sky
     // channel is tinted by sun (and moon at night), lanterns stay warm, and
-    // the ambient floor keeps caves/interiors readable without scene lights
+    // the hemisphere ambient pair keeps interiors readable while giving
+    // faces a sky-vs-ground color gradient
     const sunStrength = Math.min(1.6, colors.sunIntensity) * sunAboveHorizon * 0.95;
     this.terrainLightEnv.sunTint
       .copy(colors.sun)
       .multiplyScalar(sunStrength)
       .add(this._tintScratch.copy(this.moonColor).multiplyScalar(moonVisibility * 0.34));
-    this.terrainLightEnv.ambient
+    this.terrainLightEnv.skyAmbient
       .copy(colors.hemiSky)
-      .multiplyScalar(0.2 + sunAboveHorizon * 0.17)
+      .multiplyScalar(0.2 + sunAboveHorizon * 0.16)
       .addScalar(0.045 + this.stormFlash * 0.1);
+    this.terrainLightEnv.groundAmbient
+      .copy(colors.hemiGround)
+      .multiplyScalar(0.14 + sunAboveHorizon * 0.1)
+      .addScalar(0.035 + this.stormFlash * 0.06);
+    // Directional shading follows the dominant luminary (sun by day, moon by night)
+    this.terrainLightEnv.sunDir.copy(sunAboveHorizon >= 0.12 ? sunDir : moonDir);
 
     // Fog
     this.fogColor.copy(colors.fog).lerp(colors.haze, this.stormFlash * 0.08);
@@ -371,7 +380,13 @@ export class SkySystem {
   }
 
   /** Stable references; values are refreshed every update(). */
-  getTerrainLightEnv(): { sunTint: THREE.Color; torchTint: THREE.Color; ambient: THREE.Color } {
+  getTerrainLightEnv(): {
+    sunTint: THREE.Color;
+    torchTint: THREE.Color;
+    skyAmbient: THREE.Color;
+    groundAmbient: THREE.Color;
+    sunDir: THREE.Vector3;
+  } {
     return this.terrainLightEnv;
   }
 

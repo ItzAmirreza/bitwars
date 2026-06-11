@@ -209,7 +209,6 @@ export function SettingsPanel() {
         <div style={{ marginBottom: '20px' }}>
           <div style={sectionTitleStyle}>GRAPHICS</div>
           <QualitySelect value={settings.graphicsQuality} onChange={(v) => setSettings({ graphicsQuality: v })} />
-          <Toggle label="SHADOWS" value={settings.shadowsEnabled} onChange={(v) => setSettings({ shadowsEnabled: v })} />
           <Toggle label="POST EFFECTS" value={settings.postFXEnabled} onChange={(v) => setSettings({ postFXEnabled: v })} />
         </div>
 

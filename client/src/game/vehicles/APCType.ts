@@ -1,8 +1,8 @@
-/**
- * APCType.ts — VehicleType implementation for the Armored Personnel Carrier.
+﻿/**
+ * APCType.ts â€” VehicleType implementation for the Armored Personnel Carrier.
  *
  * Heavy ground vehicle with 4 seats. Driver cannot fire weapons.
- * Strong block collision resistance — plows through terrain.
+ * Strong block collision resistance â€” plows through terrain.
  * Voxel model: angular military hull, angled front, commander hatch,
  * side windows, rear door, treads.
  */
@@ -19,7 +19,7 @@ import type {
   VehicleTypeDestroyContext,
 } from './VehicleBase';
 
-// ── Constants ──
+// â”€â”€ Constants â”€â”€
 const VEHICLE_TYPE_APC = VEHICLE_TYPES.APC;
 const APC_BREAKUP_GRAVITY = 18;
 const APC_HIT_INDICATOR_DURATION = 0.3;
@@ -49,15 +49,15 @@ export class APCType implements VehicleType {
     return APC.pilotSeatHeight;
   }
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  MODEL BUILDER
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   createModel(): THREE.Group {
     const root = new THREE.Group();
     root.name = 'apc-root';
 
-    // ── Shared voxel-style material ──
+    // â”€â”€ Shared voxel-style material â”€â”€
     const voxMat = new THREE.MeshPhongMaterial({
       vertexColors: true,
       emissive: new THREE.Color(0x0a0e08),
@@ -115,8 +115,6 @@ export class APCType implements VehicleType {
       const mesh = new THREE.Mesh(geo, voxMat);
       mesh.position.set(...pos);
       mesh.rotation.set(...rot);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
       parent.add(mesh);
       return mesh;
     };
@@ -126,7 +124,7 @@ export class APCType implements VehicleType {
       hex: number, pos: [number, number, number], rot?: [number, number, number],
     ) => shadedBox(parent, size, hex, pos, rot);
 
-    // ── Color palette (olive drab military) ──
+    // â”€â”€ Color palette (olive drab military) â”€â”€
     const HULL      = 0x4a5a3a;
     const HULL_LT   = 0x5a6a4a;
     const HULL_DK   = 0x3a4a2a;
@@ -139,9 +137,9 @@ export class APCType implements VehicleType {
     const ACCENT_R  = 0xff3322;
     const DARK      = 0x151810;
 
-    // ═══════════════════════════════════════════════
-    //  HULL (main body — long armored box)
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    //  HULL (main body â€” long armored box)
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     const hull = new THREE.Group();
     hull.name = 'hull';
     root.add(hull);
@@ -153,12 +151,12 @@ export class APCType implements VehicleType {
     // Roof
     B(hull, [3.4, 0.2, 7.0], HULL_DK, [0, 3.15, -0.1]);
 
-    // ── Front glacis plate (angled armor) ──
+    // â”€â”€ Front glacis plate (angled armor) â”€â”€
     B(hull, [3.2, 1.0, 0.3], ARMOR, [0, 2.2, 3.85], [-0.3, 0, 0]);
     // Lower front plate
     B(hull, [3.4, 0.5, 0.3], HULL_DK, [0, 1.0, 3.95]);
 
-    // ── Rear door ──
+    // â”€â”€ Rear door â”€â”€
     B(hull, [2.8, 2.0, 0.25], HULL_DK, [0, 1.9, -4.05]);
     // Door hinges
     B(hull, [0.15, 0.3, 0.15], METAL_DK, [-1.2, 2.6, -4.15]);
@@ -166,7 +164,7 @@ export class APCType implements VehicleType {
     // Door handle
     B(hull, [0.4, 0.1, 0.1], ACCENT, [0, 1.8, -4.2]);
 
-    // ── Side armor plates ──
+    // â”€â”€ Side armor plates â”€â”€
     for (const side of [-1, 1]) {
       B(hull, [0.2, 0.8, 6.5], ARMOR, [side * 1.7, 1.6, -0.4]);
       // Storage boxes on sides
@@ -174,9 +172,9 @@ export class APCType implements VehicleType {
       B(hull, [0.3, 0.5, 1.0], HULL_DK, [side * 1.9, 1.0, -1.8]);
     }
 
-    // ═══════════════════════════════════════════════
-    //  WINDOWS (4 windows — 2 per side)
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    //  WINDOWS (4 windows â€” 2 per side)
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     for (const side of [-1, 1]) {
       // Front window
       B(hull, [0.08, 0.4, 0.6], WINDOW, [side * 1.65, 2.6, 1.2]);
@@ -189,26 +187,26 @@ export class APCType implements VehicleType {
       B(hull, [0.06, 0.5, 0.08], METAL_DK, [side * 1.66, 2.6, -1.08]);
     }
 
-    // ═══════════════════════════════════════════════
-    //  DRIVER VIEWPORT (front windshield — armored slit)
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    //  DRIVER VIEWPORT (front windshield â€” armored slit)
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     B(hull, [2.0, 0.25, 0.08], WINDOW, [0, 2.85, 2.85]);
     // Windshield armor frame
     B(hull, [2.2, 0.08, 0.1], METAL_DK, [0, 3.0, 2.86]);
     B(hull, [2.2, 0.08, 0.1], METAL_DK, [0, 2.7, 2.86]);
 
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     //  COMMANDER HATCH (top)
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     B(hull, [0.7, 0.1, 0.7], HULL_DK, [0, 3.3, 1.5]);
     // Hatch ring
     B(hull, [0.8, 0.06, 0.8], METAL_DK, [0, 3.25, 1.5]);
     // Hatch handle
     B(hull, [0.3, 0.08, 0.08], DARK, [0.2, 3.36, 1.5]);
 
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     //  TRACKS / TREADS (left and right)
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     const treadGroup = new THREE.Group();
     treadGroup.name = 'treads';
     hull.add(treadGroup);
@@ -231,9 +229,9 @@ export class APCType implements VehicleType {
       }
     }
 
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     //  DETAILS & ACCENTS
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     // Antenna whip
     B(hull, [0.06, 2.5, 0.06], HULL_DK, [-1.3, 3.4, -2.5]);
@@ -252,7 +250,7 @@ export class APCType implements VehicleType {
     B(hull, [0.3, 0.15, 0.2], METAL_DK, [-1.0, 0.8, 4.1]);
     B(hull, [0.3, 0.15, 0.2], METAL_DK, [1.0, 0.8, 4.1]);
 
-    // Bull bar / ram plate (front bumper — for that ramming feel)
+    // Bull bar / ram plate (front bumper â€” for that ramming feel)
     B(hull, [3.8, 0.6, 0.3], METAL_DK, [0, 0.8, 4.2]);
     B(hull, [3.8, 0.15, 0.15], DARK, [0, 1.15, 4.25]);
 
@@ -260,7 +258,7 @@ export class APCType implements VehicleType {
     B(hull, [0.15, 0.15, 0.4], DARK, [-1.5, 1.1, -4.2]);
     B(hull, [0.15, 0.15, 0.4], DARK, [1.5, 1.1, -4.2]);
 
-    // Side markings (chevrons — simple accent stripes)
+    // Side markings (chevrons â€” simple accent stripes)
     for (const side of [-1, 1]) {
       B(hull, [0.06, 0.12, 1.2], ACCENT, [side * 1.82, 2.1, 0]);
     }
@@ -269,7 +267,7 @@ export class APCType implements VehicleType {
     B(hull, [0.2, 0.2, 0.3], HULL_DK, [0.8, 3.3, 2.0]);
     B(hull, [0.15, 0.15, 0.15], ACCENT, [0.8, 3.3, 2.2]);
 
-    // ── Hit indicator ──
+    // â”€â”€ Hit indicator â”€â”€
     const hitIndicator = new THREE.Group();
     hitIndicator.name = 'apc-hit-indicator';
     hitIndicator.position.set(0, 4.0, 0);
@@ -299,7 +297,7 @@ export class APCType implements VehicleType {
     addIndicatorBar([0.18, 0.14, 1.8], [0, 0, 0]);
     addIndicatorBar([0.24, 0.9, 0.24], [0, -0.35, 0]);
 
-    // Orient wrapper — model faces +Z, wrapper rotates so -Z forward matches server
+    // Orient wrapper â€” model faces +Z, wrapper rotates so -Z forward matches server
     const orientWrapper = new THREE.Group();
     orientWrapper.name = 'apc-orient-wrapper';
     while (root.children.length > 0) {
@@ -310,9 +308,9 @@ export class APCType implements VehicleType {
     return root;
   }
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  PER-FRAME ANIMATION
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   updatePerFrame(
     instance: VehicleInstance,
@@ -323,7 +321,7 @@ export class APCType implements VehicleType {
     const mesh = instance.mesh;
     const vehicleRow = ctx.getVehicleRow(instance.entityId);
 
-    // ── Hit indicator ──
+    // â”€â”€ Hit indicator â”€â”€
     if (vehicleRow) {
       const health = Number(vehicleRow.health ?? this.getHealthMax());
       const prevHealth = Number(mesh.userData.lastVehicleHealth ?? health);
@@ -361,7 +359,7 @@ export class APCType implements VehicleType {
       });
     }
 
-    // ── Tread animation (scroll based on speed) ──
+    // â”€â”€ Tread animation (scroll based on speed) â”€â”€
     const orientWrapper = mesh.getObjectByName('apc-orient-wrapper');
     if (orientWrapper) {
       // Subtle body sway based on speed
@@ -373,9 +371,9 @@ export class APCType implements VehicleType {
     }
   }
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  DESTRUCTION
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   onDestroy(
     instance: VehicleInstance,
@@ -450,8 +448,6 @@ export class APCType implements VehicleType {
       local.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
       mesh.position.copy(origin).add(local);
       mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
       ctx.scene.add(mesh);
 
       radial.copy(local).normalize();

@@ -8,7 +8,6 @@ export interface GameSettings {
   sensitivity: number;
   fov: number;
   masterVolume: number;
-  shadowsEnabled: boolean;
   postFXEnabled: boolean;
   sprintToggle: boolean;
   graphicsQuality: 'low' | 'medium' | 'high';
@@ -19,7 +18,6 @@ const DEFAULT_SETTINGS: GameSettings = {
   sensitivity: 0.002,
   fov: 75,
   masterVolume: 0.35,
-  shadowsEnabled: true,
   postFXEnabled: true,
   sprintToggle: false,
   graphicsQuality: 'high',

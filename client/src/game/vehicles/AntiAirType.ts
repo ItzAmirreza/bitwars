@@ -1,5 +1,5 @@
-/**
- * AntiAirType.ts — VehicleType implementation for the CRAM anti-air emplacement.
+﻿/**
+ * AntiAirType.ts â€” VehicleType implementation for the CRAM anti-air emplacement.
  *
  * Stationary ground emplacement with a rotating turret and a 6-barrel Gatling
  * CRAM (Counter Rocket, Artillery, Mortar) cannon. Sits on a concrete platform
@@ -18,7 +18,7 @@ import type {
   VehicleTypeDestroyContext,
 } from './VehicleBase';
 
-// ── Constants ──
+// â”€â”€ Constants â”€â”€
 const VEHICLE_TYPE_ANTI_AIR = VEHICLE_TYPES.AntiAir;
 const AA_BREAKUP_GRAVITY = 20;
 const AA_HIT_INDICATOR_DURATION = 0.28;
@@ -48,15 +48,15 @@ export class AntiAirType implements VehicleType {
     return ANTI_AIR.pilotSeatHeight;
   }
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  MODEL BUILDER
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   createModel(): THREE.Group {
     const root = new THREE.Group();
     root.name = 'anti-air-root';
 
-    // ── Shared voxel-style material ──
+    // â”€â”€ Shared voxel-style material â”€â”€
     const voxMat = new THREE.MeshPhongMaterial({
       vertexColors: true,
       emissive: new THREE.Color(0x0c1210),
@@ -114,8 +114,6 @@ export class AntiAirType implements VehicleType {
       const mesh = new THREE.Mesh(geo, voxMat);
       mesh.position.set(...pos);
       mesh.rotation.set(...rot);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
       parent.add(mesh);
       return mesh;
     };
@@ -125,7 +123,7 @@ export class AntiAirType implements VehicleType {
       hex: number, pos: [number, number, number], rot?: [number, number, number],
     ) => shadedBox(parent, size, hex, pos, rot);
 
-    // ── Color palette (military emplacement) ──
+    // â”€â”€ Color palette (military emplacement) â”€â”€
     const CONCRETE  = 0x6a6a62;
     const CONC_DK   = 0x505048;
     const CONC_LT   = 0x7a7a72;
@@ -142,9 +140,9 @@ export class AntiAirType implements VehicleType {
     const BARREL_TIP = 0xff8833;
     const METAL_DK  = 0x2a2e30;
 
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     //  CONCRETE BASE PLATFORM
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     const base = new THREE.Group();
     base.name = 'base';
     root.add(base);
@@ -159,9 +157,9 @@ export class AntiAirType implements VehicleType {
     B(base, [0.15, 0.15, 6.0], CONC_LT, [2.9, 0.62, 0]);
     B(base, [0.15, 0.15, 6.0], CONC_LT, [-2.9, 0.62, 0]);
 
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     //  SANDBAG WALLS (fortification around base)
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     // Front and back sandbag walls
     for (const fwd of [-1, 1]) {
@@ -184,9 +182,9 @@ export class AntiAirType implements VehicleType {
       }
     }
 
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     //  PEDESTAL (turret mount)
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Cylindrical pedestal approximation
     B(base, [1.2, 1.0, 1.2], METAL_DK, [0, 1.5, 0]);
     B(base, [1.6, 0.2, 1.6], HULL_DK, [0, 2.05, 0]);
@@ -197,14 +195,14 @@ export class AntiAirType implements VehicleType {
       }
     }
 
-    // ── Ammo crates near base ──
+    // â”€â”€ Ammo crates near base â”€â”€
     B(base, [0.8, 0.5, 0.5], HULL_DK, [2.2, 0.85, -1.5]);
     B(base, [0.8, 0.5, 0.5], HULL_DK, [2.2, 0.85, -0.8]);
     B(base, [0.5, 0.5, 0.8], HULL, [-2.0, 0.85, 1.2]);
 
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     //  TURRET (rotates on yaw, sits on pedestal)
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     const turret = new THREE.Group();
     turret.name = 'turret';
     turret.position.set(0, 2.15, 0);
@@ -222,7 +220,7 @@ export class AntiAirType implements VehicleType {
     // Commander's hatch
     B(turret, [0.5, 0.12, 0.5], HULL_DK, [-0.5, 1.55, 0]);
 
-    // ── CRAM Gatling barrel cluster (6-barrel rotary cannon) ──
+    // â”€â”€ CRAM Gatling barrel cluster (6-barrel rotary cannon) â”€â”€
     const barrelGroup = new THREE.Group();
     barrelGroup.name = 'barrel-group';
     barrelGroup.position.set(1.4, 0.8, 0);
@@ -250,9 +248,9 @@ export class AntiAirType implements VehicleType {
     B(turret, [1.2, 0.35, 0.35], HULL_DK, [0.5, 0.2, -1.35]);
     B(turret, [0.5, 0.7, 0.35], HULL_DK, [-0.1, -0.05, -1.35]);
 
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     //  RADAR DISH (on top of turret)
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     const radar = new THREE.Group();
     radar.name = 'radar';
     radar.position.set(-0.5, 1.65, 0);
@@ -265,9 +263,9 @@ export class AntiAirType implements VehicleType {
     // Radar feed horn
     B(radar, [0.12, 0.12, 0.12], ACCENT2, [0.12, 0.6, 0]);
 
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     //  DETAILS & ACCENTS
-    // ═══════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     // Warning light on base
     B(base, [0.15, 0.15, 0.15], ACCENT, [2.8, 1.5, 2.8]);
@@ -277,7 +275,7 @@ export class AntiAirType implements VehicleType {
     B(base, [5.0, 0.08, 0.08], ACCENT2, [0, 0.62, 2.7]);
     B(base, [5.0, 0.08, 0.08], ACCENT2, [0, 0.62, -2.7]);
 
-    // Orient wrapper — model faces +X, wrapper rotates so -Z forward matches server
+    // Orient wrapper â€” model faces +X, wrapper rotates so -Z forward matches server
     const orientWrapper = new THREE.Group();
     orientWrapper.name = 'anti-air-orient-wrapper';
     orientWrapper.rotation.y = Math.PI / 2;
@@ -320,9 +318,9 @@ export class AntiAirType implements VehicleType {
     return root;
   }
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  PER-FRAME ANIMATION
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   updatePerFrame(
     instance: VehicleInstance,
@@ -376,20 +374,20 @@ export class AntiAirType implements VehicleType {
       });
     }
 
-    // ── Radar dish rotation (constant spin) ──
+    // â”€â”€ Radar dish rotation (constant spin) â”€â”€
     if (radar) {
       const radarSpin = ((mesh.userData.radarSpin as number) ?? 0) + delta * 3.0;
       mesh.userData.radarSpin = radarSpin % (Math.PI * 2);
       radar.rotation.y = radarSpin;
     }
 
-    // ── Static base — no sway or movement animation ──
+    // â”€â”€ Static base â€” no sway or movement animation â”€â”€
     if (orientWrapper) {
       orientWrapper.position.set(0, 0, 0);
       orientWrapper.rotation.set(0, Math.PI / 2, 0);
     }
 
-    // ── Turret rotation — follow pilot's aim direction ──
+    // â”€â”€ Turret rotation â€” follow pilot's aim direction â”€â”€
     const pilotAim = ctx.getPilotAim(instance.entityId);
     if (turret && pilotAim) {
       // The orient wrapper rotates the model by PI/2 so +X model forward maps
@@ -427,9 +425,9 @@ export class AntiAirType implements VehicleType {
     }
   }
 
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   //  DESTRUCTION
-  // ══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   onDestroy(
     instance: VehicleInstance,
@@ -504,8 +502,6 @@ export class AntiAirType implements VehicleType {
       local.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
       mesh.position.copy(origin).add(local);
       mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
       ctx.scene.add(mesh);
 
       radial.copy(local).normalize();
