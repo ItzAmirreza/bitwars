@@ -140,6 +140,11 @@ export class VoxelWorld {
     this.initWorkers();
   }
 
+  /** Chunk mesh jobs not yet applied to the scene (queued or in a worker). */
+  getPendingMeshJobs(): number {
+    return this.pendingRequests.size;
+  }
+
   private initWorkers(): void {
     if (typeof Worker === 'undefined' || typeof navigator === 'undefined') return;
 

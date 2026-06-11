@@ -104,6 +104,7 @@ export interface EngineState {
   isReloading: boolean;
   worldReady: boolean;
   worldLoadProgress: number;
+  loadingStage: "terrain" | "meshes" | "shaders" | "frames" | "ready";
   mountedVehicleName: string | null;
   vehicleAltitude: number;
   // Vehicle weapon HUD fields
@@ -1332,6 +1333,85 @@ export class Engine {
 
   private markStartupWorldNotReady(): void {
     this.shadowWarmupStartedAtMs = 0;
+    this.warmupStage = "terrain";
+    this.warmupMeshJobsAtStart = 1;
+    this.warmupShaderElapsed = 0;
+    this.warmupFramesLeft = this.warmupFramesTotal;
+    this.warmupShaderCompileDone = false;
+  }
+
+  // ── Cold-Start Warmup ──
+  // Holds the loading overlay past terrain streaming until chunk meshes are
+  // applied, shaders are compiled, and the renderer has produced warm frames,
+  // so first-join compile/upload stalls happen behind the overlay instead of
+  // as 0-fps hitches during play.
+  private warmupStage: "terrain" | "meshes" | "shaders" | "frames" | "ready" =
+    "terrain";
+  private readonly warmupFramesTotal = 30;
+  private warmupFramesLeft = 30;
+  private warmupMeshJobsAtStart = 1;
+  private warmupShaderElapsed = 0;
+  private warmupShaderCompileDone = false;
+
+  private updateWarmup(delta: number): void {
+    switch (this.warmupStage) {
+      case "terrain": {
+        if (this.chunkStreamer.startupWorldReady) {
+          this.warmupStage = "meshes";
+          this.warmupMeshJobsAtStart = Math.max(
+            1,
+            this.world.getPendingMeshJobs(),
+          );
+        }
+        break;
+      }
+      case "meshes": {
+        if (this.world.getPendingMeshJobs() === 0) {
+          this.warmupStage = "shaders";
+          this.warmupShaderElapsed = 0;
+          void this.renderer
+            .compileAsync(this.scene, this.camera)
+            .catch(() => undefined)
+            .then(() => {
+              this.warmupShaderCompileDone = true;
+            });
+        }
+        break;
+      }
+      case "shaders": {
+        this.warmupShaderElapsed += delta;
+        // Safety valve: never hold the player hostage on a stalled driver
+        if (this.warmupShaderCompileDone || this.warmupShaderElapsed > 8) {
+          this.warmupStage = "frames";
+        }
+        break;
+      }
+      case "frames": {
+        this.warmupFramesLeft--;
+        if (this.warmupFramesLeft <= 0) {
+          this.warmupStage = "ready";
+        }
+        break;
+      }
+    }
+  }
+
+  private getWarmupProgress(startupProgress: number): number {
+    switch (this.warmupStage) {
+      case "terrain":
+        return startupProgress * 0.55;
+      case "meshes": {
+        const pending = this.world.getPendingMeshJobs();
+        const done = 1 - Math.min(1, pending / this.warmupMeshJobsAtStart);
+        return 0.55 + done * 0.2;
+      }
+      case "shaders":
+        return 0.75 + Math.min(1, this.warmupShaderElapsed / 3) * 0.17;
+      case "frames":
+        return 0.92 + (1 - this.warmupFramesLeft / this.warmupFramesTotal) * 0.08;
+      default:
+        return 1;
+    }
   }
 
   private markStartupWorldReady(): void {
@@ -3932,7 +4012,7 @@ export class Engine {
       }
     }
 
-    const startupLocked = !this.chunkStreamer.startupWorldReady;
+    const startupLocked = this.warmupStage !== "ready";
 
     const inputStartMs = performance.now();
     this.updateInputState(delta, startupLocked);
@@ -4005,6 +4085,7 @@ export class Engine {
       this.chunkStreamer.startupProgressPrev = 1;
       this.chunkStreamer.startupProgressStallTime = 0;
     }
+    this.updateWarmup(delta);
     const afterWorldStreamingMs = performance.now();
 
     // Position sync — always send while alive (gating on pointer-lock caused
@@ -4525,8 +4606,9 @@ export class Engine {
       weather: this.sky.getWeatherName(),
       heading: headingDeg,
       isReloading: false,
-      worldReady: this.chunkStreamer.startupWorldReady,
-      worldLoadProgress: startupProgress,
+      worldReady: this.warmupStage === "ready",
+      worldLoadProgress: this.getWarmupProgress(startupProgress),
+      loadingStage: this.warmupStage,
       mountedVehicleName:
         this.mountedVehicleId !== 0
           ? (this.vehicleManager.getMountedVehicleName() ?? "Vehicle")

@@ -27,6 +27,13 @@ import { useTacticalMap } from './hooks/useTacticalMap';
 
 const TUTORIAL_SEEN_KEY = 'bitwars-tutorial-seen';
 
+const LOADING_STAGES: Array<{ id: EngineState['loadingStage']; label: string }> = [
+  { id: 'terrain', label: 'STREAMING TERRAIN' },
+  { id: 'meshes', label: 'BUILDING TERRAIN MESHES' },
+  { id: 'shaders', label: 'COMPILING SHADERS' },
+  { id: 'frames', label: 'WARMING RENDERER' },
+];
+
 interface GameScreenProps {
   active: boolean;
 }
@@ -68,6 +75,7 @@ export function GameScreen({ active }: GameScreenProps) {
     isReloading: false,
     worldReady: false,
     worldLoadProgress: 0,
+    loadingStage: 'terrain',
     mountedVehicleName: null,
     vehicleAltitude: 0,
     vehicleHealth: 0,
@@ -613,14 +621,35 @@ export function GameScreen({ active }: GameScreenProps) {
               LOADING COMBAT ZONE
             </div>
             <div style={{
-              fontFamily: 'var(--font-pixel)',
-              fontSize: '7px',
-              letterSpacing: '0.15em',
-              color: '#6b7080',
-              textAlign: 'center',
+              border: '2px solid #1a1e2e',
+              background: 'rgba(12,16,24,0.9)',
+              padding: '10px 12px',
               marginBottom: '14px',
             }}>
-              STREAMING NEARBY TERRAIN
+              {LOADING_STAGES.map((stage, i) => {
+                const activeIdx = LOADING_STAGES.findIndex(
+                  (s) => s.id === state.loadingStage,
+                );
+                const done = activeIdx === -1 || i < activeIdx;
+                const current = i === activeIdx;
+                return (
+                  <div
+                    key={stage.id}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      fontFamily: 'var(--font-pixel)',
+                      fontSize: '7px',
+                      letterSpacing: '0.12em',
+                      color: done ? '#76ff03' : current ? '#ff6b35' : '#4a4e5e',
+                      padding: '3px 0',
+                    }}
+                  >
+                    <span>{stage.label}</span>
+                    <span>{done ? 'OK' : current ? '>>' : '--'}</span>
+                  </div>
+                );
+              })}
             </div>
             <div style={{
               height: '12px',
