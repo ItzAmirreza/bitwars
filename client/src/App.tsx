@@ -12,6 +12,7 @@ import { LobbyScreen } from "./screens/LobbyScreen";
 import { GameScreen } from "./screens/GameScreen";
 import { useMatchSession } from "./screens/hooks/useMatchSession";
 import { consumeAuthCallback } from "./auth";
+import { initTabSession } from "./tabSession";
 
 const UPDATE_RELOAD_AT_KEY = "bitwars-update-reload-at";
 const UPDATE_RELOAD_TARGET_KEY = "bitwars-update-reload-target";
@@ -315,7 +316,9 @@ function App() {
     if (result.error) {
       setError(result.error);
     }
-    setAuthReady(true);
+    // Resolve primary/secondary tab role before connecting so extra tabs
+    // get their own identity instead of reusing the shared token
+    void initTabSession().then(() => setAuthReady(true));
   }, [setError]);
 
   useEffect(() => {

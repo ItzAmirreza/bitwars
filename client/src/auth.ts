@@ -1,3 +1,5 @@
+import { isSecondaryTab } from "./tabSession";
+
 export type AuthProvider = "discord" | "google" | "steam";
 export type AuthMode = "guest" | "account";
 
@@ -9,6 +11,7 @@ interface AccountSession {
 
 const LEGACY_TOKEN_KEY = "bitwars_token";
 const GUEST_TOKEN_KEY = "bitwars_guest_token";
+const TAB_TOKEN_KEY = "bitwars_tab_token";
 const ACCOUNT_SESSION_KEY = "bitwars_account_session";
 const PENDING_PROVIDER_KEY = "bitwars_pending_auth_provider";
 const DEFAULT_SPACETIMEDB_URI = "wss://maincloud.spacetimedb.com";
@@ -155,18 +158,37 @@ export function getProviderLabel(provider: AuthProvider | null): string {
   }
 }
 
+function readTabToken(): string | null {
+  try {
+    return sessionStorage.getItem(scopedKey(TAB_TOKEN_KEY));
+  } catch {
+    return null;
+  }
+}
+
+// Secondary tabs (and tabs that already claimed a per-tab identity) never
+// touch the shared localStorage session, so each tab is a separate player
+function usesTabScopedSession(): boolean {
+  return isSecondaryTab() || readTabToken() !== null;
+}
+
 export function getAuthMode(): AuthMode {
   migrateLegacyGuestToken();
+  if (usesTabScopedSession()) return "guest";
   return readAccountSession() ? "account" : "guest";
 }
 
 export function getActiveProvider(): AuthProvider | null {
   migrateLegacyGuestToken();
+  if (usesTabScopedSession()) return null;
   return readAccountSession()?.provider ?? null;
 }
 
 export function getConnectionToken(): string | undefined {
   migrateLegacyGuestToken();
+  if (usesTabScopedSession()) {
+    return readTabToken() || undefined;
+  }
   const account = readAccountSession();
   if (account?.token) return account.token;
   const guest = localStorage.getItem(scopedKey(GUEST_TOKEN_KEY));
@@ -175,6 +197,14 @@ export function getConnectionToken(): string | undefined {
 
 export function saveConnectionToken(token: string): void {
   migrateLegacyGuestToken();
+  if (usesTabScopedSession()) {
+    try {
+      sessionStorage.setItem(scopedKey(TAB_TOKEN_KEY), token);
+    } catch {
+      // ignore storage failures; the tab just gets a new identity next time
+    }
+    return;
+  }
   const account = readAccountSession();
   if (account) {
     writeAccountSession({
@@ -232,6 +262,9 @@ export function beginProviderSignIn(provider: AuthProvider): string | null {
 
 export function useGuestProfile(): void {
   clearPendingProvider();
+  // Tab-scoped sessions never own the shared account session, so switching
+  // to guest in a secondary tab must not sign out the primary tab
+  if (usesTabScopedSession()) return;
   localStorage.removeItem(scopedKey(ACCOUNT_SESSION_KEY));
 }
 
