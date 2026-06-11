@@ -11,7 +11,6 @@ import DestroyBlocksPhysicsReducer from "../destroy_blocks_physics_reducer";
 import FireVehicleWeaponReducer from "../fire_vehicle_weapon_reducer";
 import FireWeaponReducer from "../fire_weapon_reducer";
 import InteractVehicleReducer from "../interact_vehicle_reducer";
-import PortalArriveReducer from "../portal_arrive_reducer";
 import ProjectileImpactReducer from "../projectile_impact_reducer";
 import ReloadVehicleWeaponReducer from "../reload_vehicle_weapon_reducer";
 import ReloadWeaponReducer from "../reload_weapon_reducer";
@@ -31,7 +30,6 @@ export type DestroyBlocksPhysicsParams = __Infer<typeof DestroyBlocksPhysicsRedu
 export type FireVehicleWeaponParams = __Infer<typeof FireVehicleWeaponReducer>;
 export type FireWeaponParams = __Infer<typeof FireWeaponReducer>;
 export type InteractVehicleParams = __Infer<typeof InteractVehicleReducer>;
-export type PortalArriveParams = __Infer<typeof PortalArriveReducer>;
 export type ProjectileImpactParams = __Infer<typeof ProjectileImpactReducer>;
 export type ReloadVehicleWeaponParams = __Infer<typeof ReloadVehicleWeaponReducer>;
 export type ReloadWeaponParams = __Infer<typeof ReloadWeaponReducer>;

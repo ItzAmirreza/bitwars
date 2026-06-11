@@ -59,7 +59,6 @@ import { NetDiagnostics } from "./NetDiagnostics";
 import { ChunkBoundaryViewer } from "./ChunkBoundaryViewer";
 import type { HarnessMode } from "./PerfHarness";
 import { buildPlayerMovementFlags } from "./playerMovementFlags";
-import { PortalSystem } from "./PortalSystem";
 import {
   createProjectileRenderable,
   disposeProjectileRenderable,
@@ -293,7 +292,6 @@ export class Engine {
   private dynamicLightSeq = 0;
   private lanterns = new LanternSystem();
   private abilityPickups!: AbilityPickupManager;
-  private portalSystem!: PortalSystem;
 
   // Vehicle manager
   private vehicleManager!: VehicleManager;
@@ -598,7 +596,6 @@ export class Engine {
 
     // ── Controls ──
     this.controls = new FPSControls(this.camera, container, WORLD_X, WORLD_Z);
-    this.portalSystem = new PortalSystem(this.scene, this.world, this.conn);
 
     // ── Remote players ──
     this.remotePlayers = new RemotePlayerManager({
@@ -4008,15 +4005,6 @@ export class Engine {
       this.chunkStreamer.startupProgressPrev = 1;
       this.chunkStreamer.startupProgressStallTime = 0;
     }
-    const portalProbe = this.getPortalProbeState();
-    this.portalSystem.update(
-      delta,
-      this.chunkStreamer.startupWorldReady,
-      portalProbe.position,
-      this.username,
-      this.health,
-      portalProbe.speed,
-    );
     const afterWorldStreamingMs = performance.now();
 
     // Position sync — always send while alive (gating on pointer-lock caused
@@ -4590,30 +4578,6 @@ export class Engine {
     return this.camera.position.clone();
   }
 
-  private getPortalProbeState(): {
-    position: THREE.Vector3 | null;
-    speed: number | null;
-  } {
-    const mountedPose =
-      this.mountedVehicleId !== 0
-        ? this.vehicleManager.getMountedVehiclePose()
-        : null;
-    if (mountedPose) {
-      return {
-        position: new THREE.Vector3(
-          mountedPose.x,
-          mountedPose.y + 1.5,
-          mountedPose.z,
-        ),
-        speed: null,
-      };
-    }
-    return {
-      position: this.camera.position.clone(),
-      speed: this.controls.horizontalSpeed,
-    };
-  }
-
   private registerIncomingShotCandidate(
     origin: THREE.Vector3,
     direction: THREE.Vector3,
@@ -4896,7 +4860,6 @@ export class Engine {
     this.weaponModel.dispose();
     this.postfx.dispose();
     this.audio.dispose();
-    this.portalSystem.destroy();
     this.world.dispose(this.scene);
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement) {

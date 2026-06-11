@@ -13,7 +13,6 @@ import {
 } from "../auth";
 import { resetConnection } from "../db";
 import { PrivacyPolicy, PixelDiscordIcon } from "./PrivacyPolicy";
-import { getPortalSuggestedUsername } from "../portal";
 
 // 5x7 pixel soldier template
 // H=head, V=visor, B=body, W=vest, G=gun, L=leg(darker body)
@@ -183,8 +182,7 @@ function ProviderIcon({
 }
 
 export function LoginScreen() {
-  const identity = useGameStore((s) => s.identity);
-  const [input, setInput] = useState(() => getPortalSuggestedUsername(identity));
+  const [input, setInput] = useState("");
   const [focused, setFocused] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
