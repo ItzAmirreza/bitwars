@@ -24,6 +24,7 @@ export interface ProjectileConfig {
   lightColor: number;      // point light color hex
   lightRange: number;      // point light range
   lifetime: number;        // max seconds before despawn
+  thruster?: boolean;      // rocket exhaust (flame + smoke) instead of glow trail
 }
 
 // ── Weapon definition: shared stats + client-only rendering data ──
@@ -92,6 +93,7 @@ const CLIENT_PROJECTILE_CONFIGS: Record<number, ProjectileConfig> = {
   2: {
     speed: 120, gravity: 2, size: 0.2, trailLength: 0.55,
     trailColor: 0xff6600, lightIntensity: 3.0, lightColor: 0xff4400, lightRange: 8, lifetime: 5,
+    thruster: true,
   },
   // Grenade Launcher (index 4)
   4: {

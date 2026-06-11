@@ -12,6 +12,7 @@ import {
   updateProjectileRenderable,
   type ProjectileRenderable,
 } from './projectileVisuals';
+import type { LightPool } from './LightPool';
 
 const MAX_PROJECTILES = 64;
 const MAX_LIGHTS = 4;
@@ -29,6 +30,7 @@ interface VehicleProjectileVisual {
   lightColor: number;
   lightRange: number;
   lifetime: number;
+  thruster?: boolean;
 }
 
 const VEHICLE_PROJECTILE_VISUALS: Record<number, VehicleProjectileVisual> = {
@@ -36,6 +38,7 @@ const VEHICLE_PROJECTILE_VISUALS: Record<number, VehicleProjectileVisual> = {
   1: {
     speed: 80, gravity: 3, size: 0.18, trailLength: 0.55,
     trailColor: 0xff6600, lightIntensity: 3.0, lightColor: 0xff4400, lightRange: 8, lifetime: 5,
+    thruster: true,
   },
   // Carpet Bomb (index 3): medium, orange trail
   3: {
@@ -46,6 +49,7 @@ const VEHICLE_PROJECTILE_VISUALS: Record<number, VehicleProjectileVisual> = {
   5: {
     speed: 90, gravity: 2, size: 0.18, trailLength: 0.55,
     trailColor: 0xff3333, lightIntensity: 3.0, lightColor: 0xff3333, lightRange: 8, lifetime: 5,
+    thruster: true,
   },
   // Air Missile (index 6): cyan trail
   6: {
@@ -90,6 +94,7 @@ interface ActiveProjectile {
   trailTimer: number;
   trailSpacing: number;
   visualSize: number;
+  thruster: boolean;
   // State
   isLocal: boolean;
   shooterId: string | null;
@@ -115,6 +120,7 @@ export class ProjectileManager {
   private camera: THREE.Camera;
   private otherPlayers: Map<string, THREE.Group>;
   private onLocalImpact: (impact: ProjectileImpact) => void;
+  private lightPool: LightPool;
   private activeLightCount = 0;
   private maxVisibleLights = MAX_LIGHTS;
   private lightDistance = 28;
@@ -129,6 +135,7 @@ export class ProjectileManager {
     camera: THREE.Camera,
     otherPlayers: Map<string, THREE.Group>,
     onLocalImpact: (impact: ProjectileImpact) => void,
+    lightPool: LightPool,
   ) {
     this.scene = scene;
     this.world = world;
@@ -138,6 +145,7 @@ export class ProjectileManager {
     this.camera = camera;
     this.otherPlayers = otherPlayers;
     this.onLocalImpact = onLocalImpact;
+    this.lightPool = lightPool;
   }
 
   setLightBudget(maxVisibleLights: number, lightDistance: number, lightIntensityScale = 1): void {
@@ -149,7 +157,7 @@ export class ProjectileManager {
   getActiveLightCount(): number {
     let count = 0;
     for (const projectile of this.projectiles) {
-      if (projectile.light?.visible) count++;
+      if (projectile.light && projectile.light.intensity > 0.01) count++;
     }
     return count;
   }
@@ -317,13 +325,17 @@ export class ProjectileManager {
     mesh.position.copy(origin);
     this.scene.add(mesh);
 
-    // Optional point light (capped)
+    // Optional point light from the shared pool (capped)
     let light: THREE.PointLight | null = null;
     if (cfg.lightIntensity > 0 && this.activeLightCount < this.maxVisibleLights) {
-      light = new THREE.PointLight(cfg.lightColor, cfg.lightIntensity, cfg.lightRange);
-      light.position.copy(origin);
-      this.scene.add(light);
-      this.activeLightCount++;
+      light = this.lightPool.acquire();
+      if (light) {
+        light.color.set(cfg.lightColor);
+        light.intensity = cfg.lightIntensity;
+        light.distance = cfg.lightRange;
+        light.position.copy(origin);
+        this.activeLightCount++;
+      }
     }
 
     // Vehicle projectiles use their own radius from VEHICLE_WEAPONS
@@ -346,6 +358,7 @@ export class ProjectileManager {
       trailTimer: 0,
       trailSpacing: cfg.trailLength,
       visualSize: cfg.size,
+      thruster: cfg.thruster === true,
       isLocal,
       shooterId,
       mesh,
@@ -481,12 +494,22 @@ export class ProjectileManager {
         updateProjectileRenderable(p.visual, p.visualSize, stretch);
       }
 
-      // Trail particles
+      // Trail particles: rocket exhaust for thruster weapons, glow otherwise
       if (p.trailSpacing > 0) {
         p.trailTimer += delta;
         if (p.trailTimer >= p.trailSpacing / p.speed) {
           p.trailTimer = 0;
-          this.vfx.emitProjectileTrail(p.pos.x, p.pos.y, p.pos.z, p.trailColor);
+          if (p.thruster) {
+            const vl = p.vel.length();
+            const inv = vl > 0.001 ? 1 / vl : 0;
+            this.vfx.emitThruster(
+              p.pos.x, p.pos.y, p.pos.z,
+              p.vel.x * inv, p.vel.y * inv, p.vel.z * inv,
+              p.trailColor,
+            );
+          } else {
+            this.vfx.emitProjectileTrail(p.pos.x, p.pos.y, p.pos.z, p.trailColor);
+          }
         }
       }
 
@@ -519,10 +542,10 @@ export class ProjectileManager {
       visible.add(litProjectiles[i]!.projectile);
     }
 
+    // Intensity gating only — pooled lights must never toggle visibility
     for (const projectile of this.projectiles) {
       if (!projectile.light) continue;
       const enabled = visible.has(projectile);
-      projectile.light.visible = enabled;
       projectile.light.intensity = enabled
         ? projectile.lightIntensity * this.lightIntensityScale
         : 0;
@@ -802,7 +825,7 @@ export class ProjectileManager {
     disposeProjectileRenderable(p.visual);
 
     if (p.light) {
-      this.scene.remove(p.light);
+      this.lightPool.release(p.light);
       this.activeLightCount--;
     }
 

@@ -1,4 +1,4 @@
-import * as THREE from "three";
+﻿import * as THREE from "three";
 import {
   VoxelWorld,
   WORLD_X,
@@ -60,6 +60,7 @@ import { NetDiagnostics } from "./NetDiagnostics";
 import { ChunkBoundaryViewer } from "./ChunkBoundaryViewer";
 import type { HarnessMode } from "./PerfHarness";
 import { buildPlayerMovementFlags } from "./playerMovementFlags";
+import { LightPool } from "./LightPool";
 import {
   createProjectileRenderable,
   disposeProjectileRenderable,
@@ -69,16 +70,12 @@ import {
 const ENTITY_KIND_VEHICLE = ENTITY_KINDS.Vehicle;
 
 export interface DynamicLightOptions {
-  type?: "point" | "spot";
   position: THREE.Vector3 | { x: number; y: number; z: number };
   color?: THREE.ColorRepresentation;
   intensity: number;
   distance: number;
   decay?: number;
   ttl?: number;
-  direction?: THREE.Vector3 | { x: number; y: number; z: number };
-  angle?: number;
-  penumbra?: number;
   kind?: "generic" | "lantern" | "helicopter";
 }
 
@@ -279,16 +276,17 @@ export class Engine {
   private dynamicLights = new Map<
     string,
     {
-      light: THREE.PointLight | THREE.SpotLight;
-      target?: THREE.Object3D;
+      light: THREE.PointLight;
       ttl: number | null;
       kind: "generic" | "lantern" | "helicopter";
       baseIntensity: number;
       baseDistance: number;
       phase: number;
+      culled: boolean;
     }
   >();
   private dynamicLightSeq = 0;
+  private lightPool!: LightPool;
   private lanterns = new LanternSystem();
   private abilityPickups!: AbilityPickupManager;
 
@@ -425,8 +423,6 @@ export class Engine {
   private currentGrenadeLightBudget = 3;
   private currentGrenadeLightDistance = 28;
   private currentGrenadeLightIntensityScale = 1;
-  private currentPickupLightBudget = 6;
-  private currentPickupLightDistance = 28;
   private currentMuzzleLightEnabled = true;
   private currentMuzzleLightIntensityScale = 1;
 
@@ -485,7 +481,7 @@ export class Engine {
     const w = container.clientWidth;
     const h = container.clientHeight;
 
-    // ── Renderer ──
+    // â”€â”€ Renderer â”€â”€
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       powerPreference: "high-performance",
@@ -499,15 +495,15 @@ export class Engine {
     this.renderer.toneMappingExposure = 1.1;
     container.appendChild(this.renderer.domElement);
 
-    // ── Camera ──
+    // â”€â”€ Camera â”€â”€
     this.camera = new THREE.PerspectiveCamera(75, w / h, 0.1, 800);
 
-    // ── Scene ──
+    // â”€â”€ Scene â”€â”€
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0x5a5856, 200, 500);
     this.chunkBoundaryViewer = new ChunkBoundaryViewer(this.scene);
 
-    // ── Lighting ──
+    // â”€â”€ Lighting â”€â”€
     this.hemiLight = new THREE.HemisphereLight(0x8a8a95, 0x2a2218, 0.8);
     this.scene.add(this.hemiLight);
 
@@ -524,7 +520,17 @@ export class Engine {
     this.scene.add(this.moon);
     this.scene.add(this.moon.target);
 
-    // ── Sky system (procedural sky, dynamic lighting, weather) ──
+    // Fixed light pool: keeps the scene light count constant so lit
+    // materials never recompile mid-game (the cause of first-shot freezes)
+    this.lightPool = new LightPool(this.scene, 14);
+
+    // Hidden projectile renderable so its material programs compile during
+    // the loading screen instead of on the first rocket fired
+    const warmupProjectile = createProjectileRenderable(0.2, 0xff8855);
+    warmupProjectile.root.position.set(0, -800, 0);
+    this.scene.add(warmupProjectile.root);
+
+    // â”€â”€ Sky system (procedural sky, dynamic lighting, weather) â”€â”€
     this.sky = new SkySystem(
       this.scene,
       this.sun,
@@ -534,10 +540,10 @@ export class Engine {
     );
     this.loadEnvironmentFromServer();
 
-    // ── Voxel world (250×48×250) ──
+    // â”€â”€ Voxel world (250Ã—48Ã—250) â”€â”€
     this.world = new VoxelWorld(WORLD_X, WORLD_Y, WORLD_Z);
 
-    // ── Chunk streamer ──
+    // â”€â”€ Chunk streamer â”€â”€
     this.chunkStreamer = new ChunkStreamer({
       conn: this.conn,
       camera: this.camera,
@@ -571,30 +577,30 @@ export class Engine {
     );
     this.world.rebuildDirtyChunks(this.scene, this.bootstrapChunkApplyBudget);
 
-    // ── Spawn at world center ──
+    // â”€â”€ Spawn at world center â”€â”€
     const spawnX = WORLD_X / 2,
       spawnZ = WORLD_Z / 2;
     const spawnY = this.getGroundHeight(spawnX, spawnZ) + 2;
     this.camera.position.set(spawnX, spawnY, spawnZ);
 
-    // ── Controls ──
+    // â”€â”€ Controls â”€â”€
     this.controls = new FPSControls(this.camera, container, WORLD_X, WORLD_Z);
 
-    // ── Remote players ──
+    // â”€â”€ Remote players â”€â”€
     this.remotePlayers = new RemotePlayerManager({
       scene: this.scene,
       camera: this.camera,
       localIdentity: this.localIdentity,
     });
 
-    // ── Ability pickups ──
-    this.abilityPickups = new AbilityPickupManager(this.scene, this.camera);
+    // â”€â”€ Ability pickups â”€â”€
+    this.abilityPickups = new AbilityPickupManager(this.scene);
 
-    // ── Weapons ──
+    // â”€â”€ Weapons â”€â”€
     this.weapons = new WeaponSystem(this.camera, this.world);
     this.weapons.setOtherPlayers(this.remotePlayers.otherPlayers);
 
-    // ── Audio ──
+    // â”€â”€ Audio â”€â”€
     this.audio = new AudioSystem();
     this.audio.setOcclusionSampler(
       (x: number, y: number, z: number) => this.world.getBlock(x, y, z) !== 0,
@@ -606,10 +612,10 @@ export class Engine {
     );
     this.audio.initRayTracer();
 
-    // ── VFX ──
+    // â”€â”€ VFX â”€â”€
     this.vfx = new VFX(this.scene, this.camera);
 
-    // ── Physics ──
+    // â”€â”€ Physics â”€â”€
     this.physics = new PhysicsSystem(
       this.scene,
       this.world,
@@ -617,7 +623,7 @@ export class Engine {
       this.audio,
     );
 
-    // ── Projectiles ──
+    // â”€â”€ Projectiles â”€â”€
     // NOTE: infantryFire is initialized after this, but the callback is only called
     // at runtime (not during construction), so the reference is valid by then.
     this.projectileManager = new ProjectileManager(
@@ -629,28 +635,29 @@ export class Engine {
       this.camera,
       this.remotePlayers.otherPlayers,
       (impact) => this.infantryFire.handleProjectileImpact(impact),
+      this.lightPool,
     );
 
-    // ── Weapon Model ──
+    // â”€â”€ Weapon Model â”€â”€
     this.weaponModel = new WeaponModel(w / h);
     this.weapons.onLocalSwitch = (weaponIndex) => {
       if (this.mountedVehicleId !== 0) return;
       this.applyLocalWeaponSwitch(weaponIndex);
     };
 
-    // ── PostFX ──
+    // â”€â”€ PostFX â”€â”€
     this.postfx = new PostFX();
 
     // Apply initial quality profile before first frame.
     this.applyGraphicsTier(true);
 
-    // ── Vehicle manager ──
+    // â”€â”€ Vehicle manager â”€â”€
     this.vehicleManager = new VehicleManager(
       this as unknown as VehicleEngineContext,
     );
     this.weapons.setVehicles(this.vehicleManager.vehicles);
 
-    // ── Fire controllers ──
+    // â”€â”€ Fire controllers â”€â”€
     this.infantryFire = new InfantryFireController(
       this as unknown as InfantryFireContext,
     );
@@ -658,10 +665,10 @@ export class Engine {
       this as unknown as VehicleFireContext,
     );
 
-    // ── Server sync ──
+    // â”€â”€ Server sync â”€â”€
     this.setupServerListeners();
 
-    // ── Input ──
+    // â”€â”€ Input â”€â”€
     container.addEventListener("mousedown", this.onMouseDown);
     container.addEventListener("mouseup", this.onMouseUp);
     container.addEventListener("contextmenu", this.onContextMenu);
@@ -730,7 +737,7 @@ export class Engine {
     }
   }
 
-  // ── SETTINGS ──
+  // â”€â”€ SETTINGS â”€â”€
 
   updateSettings(settings: GameSettings): void {
     this.controls.sensitivity = settings.sensitivity;
@@ -1040,17 +1047,6 @@ export class Engine {
     ]);
     this.currentGrenadeLightIntensityScale = [1.0, 0.82, 0.68, 0.52][tier] ?? 1.0;
 
-    this.currentPickupLightBudget = budgetAt([
-      [2, 1, 0, 0],
-      [4, 3, 2, 0],
-      [6, 5, 4, 1],
-    ]);
-    this.currentPickupLightDistance = budgetAt([
-      [16, 14, 0, 0],
-      [22, 18, 16, 0],
-      [28, 24, 20, 16],
-    ]);
-
     const lanternBudget = budgetAt([
       [2, 1, 1, 1],
       [4, 3, 2, 1],
@@ -1081,10 +1077,6 @@ export class Engine {
       this.currentProjectileLightDistance,
       this.currentProjectileLightIntensityScale,
     );
-    this.abilityPickups.setLightBudget(
-      this.currentPickupLightBudget,
-      this.currentPickupLightDistance,
-    );
     this.vfx.setMuzzleLightBudget(
       this.currentMuzzleLightEnabled,
       this.currentMuzzleLightIntensityScale,
@@ -1109,16 +1101,15 @@ export class Engine {
   getActiveSceneLightCount(): number {
     let total = 0;
     for (const entry of this.dynamicLights.values()) {
-      if (entry.light.visible && entry.light.intensity > 0.01) total++;
+      if (entry.light.intensity > 0.01) total++;
     }
     for (const vis of this.grenadeVisuals.values()) {
-      if (vis.light?.visible && vis.light.intensity > 0.01) total++;
+      if (vis.light && vis.light.intensity > 0.01) total++;
     }
     for (const ghost of this.predictedGrenadeGhosts) {
-      if (ghost.light?.visible && ghost.light.intensity > 0.01) total++;
+      if (ghost.light && ghost.light.intensity > 0.01) total++;
     }
     total += this.projectileManager.getActiveLightCount();
-    total += this.abilityPickups.getActiveLightCount();
     total += this.vfx.getActiveLightCount();
     return total;
   }
@@ -1137,9 +1128,6 @@ export class Engine {
 
       if (entry.baseIntensity > 0.01 && d2 <= maxDistanceSq) {
         candidates.push({ id, d2 });
-      } else {
-        light.visible = false;
-        if (entry.target) entry.target.visible = false;
       }
     }
 
@@ -1149,11 +1137,12 @@ export class Engine {
       visibleIds.add(candidates[i]!.id);
     }
 
+    // Intensity gating only â€” pooled lights must never toggle visibility
     for (const [id, entry] of this.dynamicLights) {
-      const visible = visibleIds.has(id) && entry.baseIntensity > 0.01;
-      entry.light.visible = visible;
-      if (entry.target) entry.target.visible = visible;
-      if (!visible) continue;
+      const active = visibleIds.has(id) && entry.baseIntensity > 0.01;
+      entry.culled = !active;
+      entry.light.intensity = active ? entry.baseIntensity : 0;
+      if (!active) continue;
       entry.light.distance = Math.max(
         4,
         entry.baseDistance * this.currentDynamicLightDistanceScale,
@@ -1190,17 +1179,16 @@ export class Engine {
       visibleLights.add(candidates[i]!.light);
     }
 
+    // Intensity gating only — pooled lights must never toggle visibility
     const grenadeBaseIntensity = WEAPONS[4].projectile.lightIntensity;
     for (const vis of this.grenadeVisuals.values()) {
       if (!vis.light) continue;
       const visible = visibleLights.has(vis.light);
-      vis.light.visible = visible;
       vis.light.intensity = visible ? grenadeBaseIntensity * scale : 0;
     }
     for (const ghost of this.predictedGrenadeGhosts) {
       if (!ghost.light) continue;
       const visible = visibleLights.has(ghost.light);
-      ghost.light.visible = visible;
       ghost.light.intensity = visible ? grenadeBaseIntensity * scale : 0;
     }
   }
@@ -1215,7 +1203,6 @@ export class Engine {
       if (count >= MAX_TERRAIN_DYN_LIGHTS) break;
       if (entry.kind === "lantern") continue;
       const light = entry.light;
-      if (!light.visible || !(light instanceof THREE.PointLight)) continue;
       if (light.intensity <= 0.01) continue;
       this.world.setTerrainDynamicLight(
         count++,
@@ -1228,7 +1215,7 @@ export class Engine {
     for (const vis of this.grenadeVisuals.values()) {
       if (count >= MAX_TERRAIN_DYN_LIGHTS) break;
       const light = vis.light;
-      if (!light || !light.visible || light.intensity <= 0.01) continue;
+      if (!light || light.intensity <= 0.01) continue;
       this.world.setTerrainDynamicLight(
         count++,
         light.position,
@@ -1240,7 +1227,7 @@ export class Engine {
     for (const ghost of this.predictedGrenadeGhosts) {
       if (count >= MAX_TERRAIN_DYN_LIGHTS) break;
       const light = ghost.light;
-      if (!light || !light.visible || light.intensity <= 0.01) continue;
+      if (!light || light.intensity <= 0.01) continue;
       this.world.setTerrainDynamicLight(
         count++,
         light.position,
@@ -1327,7 +1314,7 @@ export class Engine {
     this.warmupShaderCompileDone = false;
   }
 
-  // ── Cold-Start Warmup ──
+  // â”€â”€ Cold-Start Warmup â”€â”€
   // Holds the loading overlay past terrain streaming until chunk meshes are
   // applied, shaders are compiled, and the renderer has produced warm frames,
   // so first-join compile/upload stalls happen behind the overlay instead of
@@ -1419,7 +1406,7 @@ export class Engine {
     return this.chatOpen || this.loadoutMenuOpen || this.tacticalMapOpen;
   }
 
-  /** Toggle chat mode — disables game keyboard input */
+  /** Toggle chat mode â€” disables game keyboard input */
   setChatOpen(open: boolean): void {
     if (this.chatOpen === open) return;
 
@@ -1448,7 +1435,7 @@ export class Engine {
     }
   }
 
-  /** Toggle loadout menu mode — pauses gameplay input */
+  /** Toggle loadout menu mode â€” pauses gameplay input */
   setLoadoutMenuOpen(open: boolean): void {
     if (this.loadoutMenuOpen === open) return;
 
@@ -1477,7 +1464,7 @@ export class Engine {
     }
   }
 
-  /** Toggle full tactical map overlay — pauses gameplay input while visible. */
+  /** Toggle full tactical map overlay â€” pauses gameplay input while visible. */
   setTacticalMapOpen(open: boolean): void {
     if (this.tacticalMapOpen === open) return;
 
@@ -1596,7 +1583,7 @@ export class Engine {
     }
   }
 
-  // ── INPUT ──
+  // â”€â”€ INPUT â”€â”€
 
   private onMouseDown = (e: MouseEvent): void => {
     if (!this.active) return;
@@ -1790,7 +1777,7 @@ export class Engine {
   private emitSandboxChaos(delta: number): void {
     this.ensureSandboxRemotePlayers(this.elapsedTime);
 
-    // ── Explosions with actual block destruction + physics debris ──
+    // â”€â”€ Explosions with actual block destruction + physics debris â”€â”€
     this.sandboxExplosionPulse -= delta;
     if (this.sandboxExplosionPulse <= 0) {
       this.sandboxExplosionPulse = 0.14;
@@ -1857,12 +1844,12 @@ export class Engine {
           const col = BLOCK_COLORS[b.blockType] ?? 0x7a7a78;
           this.vfx.emitBlockDebris(b.x, b.y, b.z, col);
         }
-        // Block break audio (throttled — one per explosion)
+        // Block break audio (throttled â€” one per explosion)
         this.audio.playBlockBreak({ position: { x: cx, y: cy, z: cz } });
       }
     }
 
-    // ── Remote bot muzzle flashes (every 0.08s from random bots) ──
+    // â”€â”€ Remote bot muzzle flashes (every 0.08s from random bots) â”€â”€
     this.sandboxBotMuzzleTimer -= delta;
     if (this.sandboxBotMuzzleTimer <= 0) {
       this.sandboxBotMuzzleTimer = 0.08;
@@ -1890,7 +1877,7 @@ export class Engine {
       }
     }
 
-    // ── Diverse projectile spam: cycle RPG (2) and grenade launcher (4) ──
+    // â”€â”€ Diverse projectile spam: cycle RPG (2) and grenade launcher (4) â”€â”€
     for (let i = 0; i < 2; i++) {
       const origin = this.camera.position
         .clone()
@@ -1916,7 +1903,7 @@ export class Engine {
       );
     }
 
-    // ── Damage vignette pulse (every 3s, simulates taking damage) ──
+    // â”€â”€ Damage vignette pulse (every 3s, simulates taking damage) â”€â”€
     this.sandboxDamagePulseTimer -= delta;
     if (this.sandboxDamagePulseTimer <= 0) {
       this.sandboxDamagePulseTimer = 3.0;
@@ -1968,14 +1955,14 @@ export class Engine {
   private updatePerfBenchmarkState(delta: number): void {
     if (!this.perfBenchmarkSceneEnabled) return;
 
-    // ── Keep deterministic fire pressure active for full run duration ──
+    // â”€â”€ Keep deterministic fire pressure active for full run duration â”€â”€
     if (this.weapons.getAmmo() <= 2) {
       for (let i = 0; i < WEAPONS.length; i++) {
         this.weapons.setAmmo(i, WEAPONS[i].maxAmmo);
       }
     }
 
-    // ── Weapon cycling: rotate loadout every 5s to hit all 5 weapons ──
+    // â”€â”€ Weapon cycling: rotate loadout every 5s to hit all 5 weapons â”€â”€
     // setCurrentWeapon only works for weapons in the 3-slot loadout, so we
     // must also rotate the loadout itself to reach weapons 3 and 4.
     this.sandboxWeaponCycleTimer -= delta;
@@ -1995,7 +1982,7 @@ export class Engine {
       this.weapons.switchToSlot(0);
     }
 
-    // ── Environment phase sweep: 5 phases x 13s = 65s total ──
+    // â”€â”€ Environment phase sweep: 5 phases x 13s = 65s total â”€â”€
     const envPhase = Math.floor(this.sandboxMotionTime / 13) % 5;
     if (envPhase !== this.perfEnvironmentPhase) {
       this.perfEnvironmentPhase = envPhase;
@@ -2227,59 +2214,24 @@ export class Engine {
 
   /** Runtime light source API for gameplay objects and cinematics. Returns light id. */
   addDynamicLight(options: DynamicLightOptions): string {
+    const light = this.lightPool.acquire();
+    if (!light) return "";
+
     const id = `dyn-${++this.dynamicLightSeq}`;
-    const type = options.type ?? "point";
-    const color = options.color ?? 0xffffff;
-    const decay = options.decay ?? 2;
-    const kind = options.kind ?? "generic";
-    const phase = Math.random() * Math.PI * 2;
-
-    if (type === "spot") {
-      const light = new THREE.SpotLight(
-        color,
-        options.intensity,
-        options.distance,
-        options.angle ?? Math.PI / 6,
-        options.penumbra ?? 0.35,
-        decay,
-      );
-      light.position.copy(this.toVec3(options.position));
-      const target = new THREE.Object3D();
-      const direction = this.toVec3(
-        options.direction ?? { x: 0, y: -1, z: 0 },
-      ).normalize();
-      target.position.copy(light.position).add(direction);
-      light.target = target;
-      this.scene.add(target);
-      this.scene.add(light);
-      this.dynamicLights.set(id, {
-        light,
-        target,
-        ttl: options.ttl ?? null,
-        kind,
-        baseIntensity: options.intensity,
-        baseDistance: options.distance,
-        phase,
-      });
-      this.applyDynamicLightBudget();
-      return id;
-    }
-
-    const light = new THREE.PointLight(
-      color,
-      options.intensity,
-      options.distance,
-      decay,
-    );
+    light.color.set(options.color ?? 0xffffff);
+    light.intensity = options.intensity;
+    light.distance = options.distance;
+    light.decay = options.decay ?? 2;
     light.position.copy(this.toVec3(options.position));
-    this.scene.add(light);
+
     this.dynamicLights.set(id, {
       light,
       ttl: options.ttl ?? null,
-      kind,
+      kind: options.kind ?? "generic",
       baseIntensity: options.intensity,
       baseDistance: options.distance,
-      phase,
+      phase: Math.random() * Math.PI * 2,
+      culled: false,
     });
     this.applyDynamicLightBudget();
     return id;
@@ -2293,8 +2245,8 @@ export class Engine {
     if (patch.position) light.position.copy(this.toVec3(patch.position));
     if (patch.color !== undefined) light.color.set(patch.color);
     if (patch.intensity !== undefined) {
-      light.intensity = patch.intensity;
       entry.baseIntensity = patch.intensity;
+      if (!entry.culled) light.intensity = patch.intensity;
     }
     if (patch.distance !== undefined) {
       light.distance = patch.distance;
@@ -2303,29 +2255,13 @@ export class Engine {
     if (patch.decay !== undefined) light.decay = patch.decay;
     if (patch.ttl !== undefined) entry.ttl = patch.ttl;
     if (patch.kind !== undefined) entry.kind = patch.kind;
-
-    if (light instanceof THREE.SpotLight) {
-      if (patch.angle !== undefined) light.angle = patch.angle;
-      if (patch.penumbra !== undefined) light.penumbra = patch.penumbra;
-      if (patch.direction && entry.target) {
-        const dir = this.toVec3(patch.direction).normalize();
-        entry.target.position.copy(light.position).add(dir);
-        entry.target.updateMatrixWorld();
-      }
-    }
   }
 
   removeDynamicLight(id: string): void {
     const entry = this.dynamicLights.get(id);
     if (!entry) return;
     this.lanterns.onDynamicLightRemoved(id);
-    this.scene.remove(entry.light);
-    if (entry.target) {
-      this.scene.remove(entry.target);
-      if (entry.light instanceof THREE.SpotLight)
-        entry.light.target = entry.light;
-    }
-    entry.light.dispose();
+    this.lightPool.release(entry.light);
     this.dynamicLights.delete(id);
     this.applyDynamicLightBudget();
   }
@@ -2499,7 +2435,7 @@ export class Engine {
     this.setLoadout([slot1, slot2, slot3], this.getServerCurrentWeapon());
   }
 
-  // ── FIRE (delegated to controllers) ──
+  // â”€â”€ FIRE (delegated to controllers) â”€â”€
 
   private tryFire(): void {
     this.infantryFire.tryFire();
@@ -2517,7 +2453,7 @@ export class Engine {
     this.vehicleFire.tryVehicleFire();
   }
 
-  // ── EXPLOSION EFFECTS (delegated, kept accessible for VehicleManager context) ──
+  // â”€â”€ EXPLOSION EFFECTS (delegated, kept accessible for VehicleManager context) â”€â”€
 
   /** Apply local camera feedback from explosions based on proximity and blast strength */
   applyExplosionCameraEffects(
@@ -2541,7 +2477,7 @@ export class Engine {
     this.infantryFire.applyExplosionKnockback(cx, cy, cz, radius, damage);
   }
 
-  // ── SERVER SYNC ──
+  // â”€â”€ SERVER SYNC â”€â”€
 
   /** Load initial environment state from server */
   private loadEnvironmentFromServer(): void {
@@ -2662,7 +2598,7 @@ export class Engine {
             : new Uint8Array(chunk.data);
         const newDecoded = VoxelWorld.rleDecodeChunk(newData);
 
-        // Decode old chunk to find which blocks changed from solid→air
+        // Decode old chunk to find which blocks changed from solidâ†’air
         const oldChunk = old as any;
         const oldData =
           oldChunk.data instanceof Uint8Array
@@ -2709,7 +2645,7 @@ export class Engine {
   private setupStructuralListeners(): void {
     if (!this.conn) return;
 
-    // DetachEvent: server-authoritative structural collapse → spawn falling blocks
+    // DetachEvent: server-authoritative structural collapse â†’ spawn falling blocks
     this.conn.db.detach_event.onInsert((_ctx: unknown, event: any) => {
       const createdAtMs =
         event.createdAt && typeof event.createdAt.toMillis === "function"
@@ -2821,7 +2757,7 @@ export class Engine {
           // Server reconciliation for local player:
           // When MOUNTED: camera is driven by vehicle mesh in syncMountedCameraToVehicle.
           //   Do NOT move camera here.  player.pos is the seat position which is
-          //   always ~15u from the 3rd-person camera — comparing would be meaningless.
+          //   always ~15u from the 3rd-person camera â€” comparing would be meaningless.
           // When INFANTRY: client is authoritative.  Only teleport on respawn-level
           //   jumps (> 100u).
           const sp = player.pos;
@@ -2867,7 +2803,7 @@ export class Engine {
               this.seedMountedVehiclePoseFromServer();
               this.initializeMountedVehicleState();
             } else {
-              // Dismounting — snap camera to server player position so infantry
+              // Dismounting â€” snap camera to server player position so infantry
               // controls start from the correct location (not the 3rd-person offset).
               this.camera.position.set(sp.x, sp.y, sp.z);
               this.controls.resetVelocity();
@@ -2886,7 +2822,7 @@ export class Engine {
             this.audio.playDamage(this.localAudioSource(-0.2));
             this.vfx.shake(0.5 + dmgRatio);
           }
-          // Respawn: health went from 0 to positive — play respawn audio
+          // Respawn: health went from 0 to positive â€” play respawn audio
           if (oldHealth <= 0 && player.health > 0) {
             this.audio.playRespawn(this.localAudioSource(-0.2));
             this.recentDamageSources.length = 0;
@@ -3209,7 +3145,7 @@ export class Engine {
           radius,
         );
 
-        // Skip if we are the originator (we already played local VFX) —
+        // Skip if we are the originator (we already played local VFX) â€”
         // EXCEPT for grenades (weapon 4) which are server-authoritative and have no local VFX
         if (originId === this.localIdentity && weaponIdx !== 4) return;
 
@@ -3351,12 +3287,12 @@ export class Engine {
       worldConfigTable.onUpdate((_ctx: unknown, _old: unknown, config: any) => {
         console.log(`[BitWars] Map reset! New round #${config.roundNumber}`);
 
-        // ── World ──
+        // â”€â”€ World â”€â”€
         this.world.clearAll(this.scene);
         this.lanterns.reset(this.getLanternContext());
         this.chunkStreamer.resetAll();
 
-        // ── Vehicles: suppress VFX, remove meshes, clear breakup pieces ──
+        // â”€â”€ Vehicles: suppress VFX, remove meshes, clear breakup pieces â”€â”€
         this.vehicleManager.suppressDeleteFxUntil = performance.now() + 1500;
         for (const id of Array.from(this.vehicleManager.vehicles.keys()))
           this.vehicleManager.removeVehicleMesh(id);
@@ -3371,7 +3307,7 @@ export class Engine {
         }
         this.vehicleManager.vehicleBreakupPieces.length = 0;
 
-        // ── Dismount local player if in vehicle ──
+        // â”€â”€ Dismount local player if in vehicle â”€â”€
         if (this.mountedVehicleId !== 0) {
           this.mountedVehicleId = 0;
           this.wasMountedVehiclePilot = false;
@@ -3392,49 +3328,43 @@ export class Engine {
           this.vehicleManager.carpetBombSide = 1;
         }
 
-        // ── Camera + Controls ──
+        // â”€â”€ Camera + Controls â”€â”€
         const sx = WORLD_X * 0.5;
         const sz = WORLD_Z * 0.5;
         this.camera.position.set(sx, Math.max(this.camera.position.y, 6), sz);
         this.controls.resetMovementState();
         this.mouseDown = false;
 
-        // ── Projectiles + Grenades ──
+        // â”€â”€ Projectiles + Grenades â”€â”€
         this.projectileManager.clearAll();
         for (const ghost of this.predictedGrenadeGhosts) {
           disposeProjectileRenderable(ghost.visual);
-          if (ghost.light) {
-            this.scene.remove(ghost.light);
-            ghost.light.dispose();
-          }
+          this.lightPool.release(ghost.light);
         }
         this.predictedGrenadeGhosts.length = 0;
         for (const vis of this.grenadeVisuals.values()) {
           disposeProjectileRenderable(vis.visual);
-          if (vis.light) {
-            this.scene.remove(vis.light);
-            vis.light.dispose();
-          }
+          this.lightPool.release(vis.light);
         }
         this.grenadeVisuals.clear();
 
-        // ── Physics debris + VFX ──
+        // â”€â”€ Physics debris + VFX â”€â”€
         this.physics.clearAll();
         this.vfx.clearAll();
         this.recentDamageSources.length = 0;
         this.damageIndicators.length = 0;
 
-        // ── Weapons: clear predictions + fire cooldown ──
+        // â”€â”€ Weapons: clear predictions + fire cooldown â”€â”€
         this.weapons.clearPendingDestructions();
         this.weapons.resetFireState();
 
-        // ── PostFX: clear damage vignette ──
+        // â”€â”€ PostFX: clear damage vignette â”€â”€
         this.postfx.resetDamage();
 
-        // ── Remote players: flush interpolation buffers to prevent sliding ──
+        // â”€â”€ Remote players: flush interpolation buffers to prevent sliding â”€â”€
         this.remotePlayers.flushAllBuffers();
 
-        // ── HUD state ──
+        // â”€â”€ HUD state â”€â”€
         this.hitMarkerTimer = 0;
         this.hitMarkerType = "none";
         this.prevKills = 0;
@@ -3443,7 +3373,7 @@ export class Engine {
         this.kills = 0;
         this.deaths = 0;
 
-        // ── Rebuild from server ──
+        // â”€â”€ Rebuild from server â”€â”€
         this.chunkStreamer.rehydrateSubscribedChunks();
         this.vehicleManager.rebuildVehiclesFromServer();
         // Chunk streaming will re-request nearby chunks on next frame
@@ -3504,13 +3434,13 @@ export class Engine {
 
         let light: THREE.PointLight | null = null;
         if (cfg.lightIntensity > 0) {
-          light = new THREE.PointLight(
-            cfg.lightColor,
-            cfg.lightIntensity,
-            cfg.lightRange,
-          );
-          light.position.copy(mesh.position);
-          this.scene.add(light);
+          light = this.lightPool.acquire();
+          if (light) {
+            light.color.set(cfg.lightColor);
+            light.intensity = cfg.lightIntensity;
+            light.distance = cfg.lightRange;
+            light.position.copy(mesh.position);
+          }
         }
 
         this.grenadeVisuals.set(id, {
@@ -3541,10 +3471,7 @@ export class Engine {
         const vis = this.grenadeVisuals.get(id);
         if (!vis) return;
         disposeProjectileRenderable(vis.visual);
-        if (vis.light) {
-          this.scene.remove(vis.light);
-          vis.light.dispose();
-        }
+        this.lightPool.release(vis.light);
         this.grenadeVisuals.delete(id);
       });
 
@@ -3561,13 +3488,13 @@ export class Engine {
 
         let light: THREE.PointLight | null = null;
         if (cfg.lightIntensity > 0) {
-          light = new THREE.PointLight(
-            cfg.lightColor,
-            cfg.lightIntensity,
-            cfg.lightRange,
-          );
-          light.position.copy(mesh.position);
-          this.scene.add(light);
+          light = this.lightPool.acquire();
+          if (light) {
+            light.color.set(cfg.lightColor);
+            light.intensity = cfg.lightIntensity;
+            light.distance = cfg.lightRange;
+            light.position.copy(mesh.position);
+          }
         }
 
         this.grenadeVisuals.set(id, {
@@ -3673,10 +3600,7 @@ export class Engine {
       const oldest = this.predictedGrenadeGhosts.shift();
       if (oldest) {
         disposeProjectileRenderable(oldest.visual);
-        if (oldest.light) {
-          this.scene.remove(oldest.light);
-          oldest.light.dispose();
-        }
+        this.lightPool.release(oldest.light);
       }
     }
 
@@ -3697,13 +3621,13 @@ export class Engine {
 
     let light: THREE.PointLight | null = null;
     if (cfg.lightIntensity > 0) {
-      light = new THREE.PointLight(
-        cfg.lightColor,
-        cfg.lightIntensity,
-        cfg.lightRange,
-      );
-      light.position.copy(origin);
-      this.scene.add(light);
+      light = this.lightPool.acquire();
+      if (light) {
+        light.color.set(cfg.lightColor);
+        light.intensity = cfg.lightIntensity;
+        light.distance = cfg.lightRange;
+        light.position.copy(origin);
+      }
     }
 
     const speed = WEAPONS[4].projectile.speed;
@@ -3747,10 +3671,7 @@ export class Engine {
     if (bestIdx >= 0) {
       const ghost = this.predictedGrenadeGhosts[bestIdx];
       disposeProjectileRenderable(ghost.visual);
-      if (ghost.light) {
-        this.scene.remove(ghost.light);
-        ghost.light.dispose();
-      }
+      this.lightPool.release(ghost.light);
       this.predictedGrenadeGhosts.splice(bestIdx, 1);
     }
   }
@@ -3764,10 +3685,7 @@ export class Engine {
       ghost.age += delta;
       if (ghost.age >= ghost.ttl) {
         disposeProjectileRenderable(ghost.visual);
-        if (ghost.light) {
-          this.scene.remove(ghost.light);
-          ghost.light.dispose();
-        }
+        this.lightPool.release(ghost.light);
         this.predictedGrenadeGhosts.splice(i, 1);
         continue;
       }
@@ -3798,7 +3716,7 @@ export class Engine {
     disposeObjectMaterials(root);
   }
 
-  // ── HELPERS ──
+  // â”€â”€ HELPERS â”€â”€
 
   private getGroundHeight(x: number, z: number, footY?: number): number {
     if (footY !== undefined) {
@@ -3811,11 +3729,11 @@ export class Engine {
 
   private sendPositionUpdate(force = false): void {
     if (!this.conn) return;
-    if (this.health <= 0) return; // Dead — don't send position updates
+    if (this.health <= 0) return; // Dead â€” don't send position updates
     const now = performance.now();
     const isMounted = this.mountedVehicleId !== 0;
     // Adaptive rate:
-    //   Mounted: 100ms (~10Hz) — only aim direction matters; server already
+    //   Mounted: 100ms (~10Hz) â€” only aim direction matters; server already
     //     computes player position from vehicle entity in tick_vehicles.
     //   Active infantry: 33ms (~30Hz)
     //   Idle infantry: 100ms (~10Hz)
@@ -3899,7 +3817,7 @@ export class Engine {
     return 0n;
   }
 
-  // ── ANIMATION LOOP ──
+  // â”€â”€ ANIMATION LOOP â”€â”€
 
   private animate = (timestamp?: DOMHighResTimeStamp): void => {
     if (!this.active) {
@@ -4004,7 +3922,7 @@ export class Engine {
     }
 
     // Vehicle per-frame update FIRST so mesh positions are current before camera sync.
-    // Old order (camera → mesh update) caused one-frame lag on the camera.
+    // Old order (camera â†’ mesh update) caused one-frame lag on the camera.
     this.vehicleManager.updatePerFrame(delta);
 
     if (this.mountedVehicleId !== 0) {
@@ -4060,7 +3978,7 @@ export class Engine {
     this.updateWarmup(delta);
     const afterWorldStreamingMs = performance.now();
 
-    // Position sync — always send while alive (gating on pointer-lock caused
+    // Position sync â€” always send while alive (gating on pointer-lock caused
     // desync when lock dropped but local movement continued)
     this.sendPositionUpdate();
     const afterNetSyncMs = performance.now();
@@ -4130,7 +4048,7 @@ export class Engine {
       this.controls.inputEnabled = true;
       this.weapons.setInputEnabled(false);
     } else if (this.health <= 0) {
-      // Dead — disable all input, freeze movement
+      // Dead â€” disable all input, freeze movement
       this.controls.inputEnabled = false;
       this.weapons.setInputEnabled(false);
       this.controls.releaseAllInput();
@@ -4288,7 +4206,7 @@ export class Engine {
     // VFX
     this.vfx.update(delta);
 
-    // Weapon model — pass movement state
+    // Weapon model â€” pass movement state
     const moving =
       this.controls.moveForward ||
       this.controls.moveBackward ||
@@ -4311,7 +4229,7 @@ export class Engine {
       if (this.hitMarkerTimer <= 0) this.hitMarkerType = "none";
     }
 
-    // Process deferred damage triggers — by this point all table callbacks
+    // Process deferred damage triggers â€” by this point all table callbacks
     // from the same server transaction (including shot_event) have completed,
     // so recentDamageSources contains the attacker positions.
     if (this.pendingDamageTriggers.length > 0) {
@@ -4356,7 +4274,7 @@ export class Engine {
   }
 
   private renderFrame(delta: number): void {
-    // ── RENDER PASSES ──
+    // â”€â”€ RENDER PASSES â”€â”€
     // Apply head bob + screen shake + camera effects just for rendering, then undo
     const savedQuat = this.camera.quaternion.clone();
     const savedPos = this.camera.position.clone();
@@ -4862,7 +4780,7 @@ export class Engine {
     return buffs;
   }
 
-  // ── RESIZE ──
+  // â”€â”€ RESIZE â”€â”€
 
   private onResize = (): void => {
     const w = this.container.clientWidth,
@@ -4873,7 +4791,7 @@ export class Engine {
     this.weaponModel.resize(w / h);
   };
 
-  // ── DESTROY ──
+  // â”€â”€ DESTROY â”€â”€
 
   destroy(): void {
     this.setActive(false);
@@ -4895,19 +4813,13 @@ export class Engine {
     this.chunkBoundaryViewer.dispose();
     for (const ghost of this.predictedGrenadeGhosts) {
       disposeProjectileRenderable(ghost.visual);
-      if (ghost.light) {
-        this.scene.remove(ghost.light);
-        ghost.light.dispose();
-      }
+      this.lightPool.release(ghost.light);
     }
     this.predictedGrenadeGhosts.length = 0;
     // Clean up grenade visuals
     for (const vis of this.grenadeVisuals.values()) {
       disposeProjectileRenderable(vis.visual);
-      if (vis.light) {
-        this.scene.remove(vis.light);
-        vis.light.dispose();
-      }
+      this.lightPool.release(vis.light);
     }
     this.grenadeVisuals.clear();
     this.physics.dispose();

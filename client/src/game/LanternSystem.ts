@@ -395,7 +395,6 @@ export class LanternSystem {
 
       const id = ctx.addDynamicLight({
         kind: 'lantern',
-        type: 'point',
         position: {
           x: THREE.MathUtils.clamp(ctx.camera.position.x, 0, WORLD_X - 1),
           y: THREE.MathUtils.clamp(ctx.camera.position.y, 0, WORLD_Y - 1),
