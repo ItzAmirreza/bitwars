@@ -578,7 +578,7 @@ pub fn ability_type_speed_boost() -> u8 {
 pub fn ability_type_shield() -> u8 {
     shared_config::config().abilities.types.shield
 }
-pub fn double_damage_duration_secs() -> u64 {
+pub fn double_damage_duration_secs() -> f32 {
     shared_config::config()
         .abilities
         .double_damage_duration_secs
@@ -586,13 +586,13 @@ pub fn double_damage_duration_secs() -> u64 {
 pub fn double_damage_multiplier() -> f32 {
     shared_config::config().abilities.double_damage_multiplier
 }
-pub fn speed_boost_duration_secs() -> u64 {
+pub fn speed_boost_duration_secs() -> f32 {
     shared_config::config().abilities.speed_boost_duration_secs
 }
 pub fn speed_boost_multiplier() -> f32 {
     shared_config::config().abilities.speed_boost_multiplier
 }
-pub fn shield_duration_secs() -> u64 {
+pub fn shield_duration_secs() -> f32 {
     shared_config::config().abilities.shield_duration_secs
 }
 pub fn shield_damage_reduction() -> f32 {

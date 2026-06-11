@@ -384,11 +384,11 @@ pub struct AbilityTypes {
 #[serde(rename_all = "camelCase")]
 pub struct AbilitiesConfig {
     pub types: AbilityTypes,
-    pub double_damage_duration_secs: u64,
+    pub double_damage_duration_secs: f32,
     pub double_damage_multiplier: f32,
-    pub speed_boost_duration_secs: u64,
+    pub speed_boost_duration_secs: f32,
     pub speed_boost_multiplier: f32,
-    pub shield_duration_secs: u64,
+    pub shield_duration_secs: f32,
     pub shield_damage_reduction: f32,
     pub pickup_radius: f32,
     pub max_active_pickups: usize,

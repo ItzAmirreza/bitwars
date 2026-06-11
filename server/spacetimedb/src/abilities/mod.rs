@@ -66,8 +66,8 @@ pub fn clear_buffs(ctx: &ReducerContext, identity: Identity) {
 }
 
 /// Apply a buff, refreshing duration if already active.
-fn apply_buff(ctx: &ReducerContext, identity: Identity, ability_type: u8, duration_secs: u64) {
-    let expires_at = ctx.timestamp + Duration::from_secs(duration_secs);
+fn apply_buff(ctx: &ReducerContext, identity: Identity, ability_type: u8, duration_secs: f32) {
+    let expires_at = ctx.timestamp + Duration::from_secs_f32(duration_secs);
 
     // Refresh existing buff of same type
     for existing in ctx.db.player_buff().idx_buff_identity().filter(&identity) {
