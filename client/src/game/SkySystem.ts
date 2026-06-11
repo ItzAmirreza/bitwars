@@ -280,25 +280,27 @@ export class SkySystem {
 
     // Renderer exposure target (higher floor at night to prevent black crush)
     const weatherPenalty = clamp01(this.currentEnv.cloudDensity * 0.22);
-    this.exposure = 1.22 + nightFactor * 0.62 - weatherPenalty * 0.55 + this.stormFlash * 0.05;
+    this.exposure = 1.12 + nightFactor * 0.66 - weatherPenalty * 0.55 + this.stormFlash * 0.05;
 
     // Terrain radiance tints for the baked voxel light channels: the sky
     // channel is tinted by sun (and moon at night), lanterns stay warm, and
     // the hemisphere ambient pair keeps interiors readable while giving
     // faces a sky-vs-ground color gradient
-    const sunStrength = Math.min(1.6, colors.sunIntensity) * sunAboveHorizon * 0.95;
+    // Kept well under tone-mapper saturation so block albedo stays rich —
+    // peak radiance on sunlit faces lands near 1.2x, not blown out
+    const sunStrength = Math.min(1.6, colors.sunIntensity) * sunAboveHorizon * 0.55;
     this.terrainLightEnv.sunTint
       .copy(colors.sun)
       .multiplyScalar(sunStrength)
-      .add(this._tintScratch.copy(this.moonColor).multiplyScalar(moonVisibility * 0.34));
+      .add(this._tintScratch.copy(this.moonColor).multiplyScalar(moonVisibility * 0.3));
     this.terrainLightEnv.skyAmbient
       .copy(colors.hemiSky)
-      .multiplyScalar(0.2 + sunAboveHorizon * 0.16)
-      .addScalar(0.045 + this.stormFlash * 0.1);
+      .multiplyScalar(0.16 + sunAboveHorizon * 0.11)
+      .addScalar(0.04 + this.stormFlash * 0.1);
     this.terrainLightEnv.groundAmbient
       .copy(colors.hemiGround)
-      .multiplyScalar(0.14 + sunAboveHorizon * 0.1)
-      .addScalar(0.035 + this.stormFlash * 0.06);
+      .multiplyScalar(0.115 + sunAboveHorizon * 0.07)
+      .addScalar(0.03 + this.stormFlash * 0.06);
     // Directional shading follows the dominant luminary (sun by day, moon by night)
     this.terrainLightEnv.sunDir.copy(sunAboveHorizon >= 0.12 ? sunDir : moonDir);
 

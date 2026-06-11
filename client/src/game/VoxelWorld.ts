@@ -167,7 +167,7 @@ export class VoxelWorld {
           float sky = pow(skyRaw, 1.4);
           float direct = smoothstep(0.55, 0.95, skyRaw);
           float ndotl = max(dot(vn, uSunDir), 0.0);
-          float sunShape = mix(1.0, 0.45 + 0.85 * ndotl, direct);
+          float sunShape = mix(1.0, 0.5 + 0.68 * ndotl, direct);
           float torch = vVoxelLight.y * (vVoxelLight.y * 0.7 + 0.3);
           vec3 radiance = mix(uGroundAmbient, uSkyAmbient, vn.y * 0.5 + 0.5)
             + uSunTint * (sky * sunShape)
