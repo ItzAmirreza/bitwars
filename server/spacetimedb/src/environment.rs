@@ -8,11 +8,22 @@ use spacetimedb::{reducer, ReducerContext, ScheduleAt, Table};
 use crate::helpers::timestamp_micros;
 use crate::tables::*;
 
+// Daytime (8:00-17:00) passes slowly, the rest of the cycle fast, so roughly
+// 78% of real time is broad daylight (~90 min day / ~25 min dusk-night-dawn)
+const DAY_START_HOUR: f32 = 8.0;
+const DAY_END_HOUR: f32 = 17.0;
+const DAY_RATE_PER_TICK: f32 = 0.0167;
+const NIGHT_RATE_PER_TICK: f32 = 0.1;
+
 #[reducer]
 pub fn tick_environment(ctx: &ReducerContext, _job: EnvironmentTick) {
     if let Some(env) = ctx.db.world_environment().id().find(1) {
-        // Advance time: full 24h cycle takes ~2 hours real time
-        let time_advance = 0.0333;
+        let is_day = env.time_of_day >= DAY_START_HOUR && env.time_of_day < DAY_END_HOUR;
+        let time_advance = if is_day {
+            DAY_RATE_PER_TICK
+        } else {
+            NIGHT_RATE_PER_TICK
+        };
         let mut new_time = env.time_of_day + time_advance;
         if new_time >= 24.0 {
             new_time -= 24.0;
@@ -32,48 +43,50 @@ pub fn tick_environment(ctx: &ReducerContext, _job: EnvironmentTick) {
         if since_change > min_weather_interval {
             let roll = (seed % 100) as u8;
             if roll < 5 {
+                // Transitions favor clearing up: long-run distribution is
+                // ~46% Clear, ~29% Cloudy, ~14% Overcast, ~8% Rainy, ~3% Stormy
                 let transition_roll = ((seed / 100) % 100) as u8;
                 new_weather = match env.weather {
                     0 => {
-                        if transition_roll < 70 {
+                        if transition_roll < 40 {
                             1
                         } else {
                             0
                         }
                     }
                     1 => {
-                        if transition_roll < 30 {
+                        if transition_roll < 60 {
                             0
-                        } else if transition_roll < 70 {
+                        } else if transition_roll < 85 {
                             2
                         } else {
                             3
                         }
                     }
                     2 => {
-                        if transition_roll < 40 {
+                        if transition_roll < 60 {
                             1
-                        } else if transition_roll < 80 {
+                        } else if transition_roll < 90 {
                             3
                         } else {
                             4
                         }
                     }
                     3 => {
-                        if transition_roll < 30 {
-                            2
-                        } else if transition_roll < 60 {
+                        if transition_roll < 35 {
                             1
                         } else if transition_roll < 80 {
+                            2
+                        } else if transition_roll < 90 {
                             4
                         } else {
                             0
                         }
                     }
                     4 => {
-                        if transition_roll < 50 {
+                        if transition_roll < 60 {
                             3
-                        } else if transition_roll < 80 {
+                        } else if transition_roll < 90 {
                             2
                         } else {
                             1

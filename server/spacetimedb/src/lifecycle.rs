@@ -67,9 +67,17 @@ pub fn init(ctx: &ReducerContext) {
         scheduled_id: 0,
         scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(3)),
     });
-    // Initialize world environment
-    let initial_time = ((seed % 2400) as f32) / 100.0;
-    let initial_weather = ((seed / 2400) % NUM_WEATHER_TYPES as u64) as u8;
+    // Initialize world environment: start mid-morning (8:00-11:00) with fair
+    // skies so fresh worlds never begin at night or in rain
+    let initial_time = 8.0 + ((seed % 300) as f32) / 100.0;
+    let weather_roll = (seed / 300) % 100;
+    let initial_weather: u8 = if weather_roll < 55 {
+        0 // Clear
+    } else if weather_roll < 85 {
+        1 // Cloudy
+    } else {
+        2 // Overcast
+    };
     let preset = &weather_presets()[initial_weather as usize];
     let wind = preset.wind_speed + ((seed % 20) as f32) / 100.0;
     let cloud = preset.cloud_density + ((seed % 20) as f32) / 100.0;
