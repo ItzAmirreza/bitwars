@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+﻿import * as THREE from 'three';
 import { WORLD as WORLD_CONFIG, BLOCK_TYPES } from '../shared-config';
 import { buildChunkMeshData } from './chunkMeshing';
 import type { ChunkMeshBuildInput, ChunkMeshData, ChunkNeighborData } from './chunkMeshing';
@@ -70,7 +70,12 @@ export class VoxelWorld {
   private chunkMeshes: Map<number, THREE.Mesh> = new Map();
   private dirtyChunks: Set<number> = new Set();
   private chunkRevision: Map<number, number> = new Map();
-  private mat: THREE.MeshPhongMaterial;
+  private mat: THREE.MeshBasicMaterial;
+  private lightUniforms = {
+    uSunTint: { value: new THREE.Color(1.05, 1.0, 0.92) },
+    uTorchTint: { value: new THREE.Color(1.15, 0.74, 0.38) },
+    uAmbientFloor: { value: new THREE.Color(0.30, 0.32, 0.38) },
+  };
 
   private workers: Worker[] = [];
   private workersEnabled = false;
@@ -81,49 +86,66 @@ export class VoxelWorld {
   private pendingRequests = new Map<number, PendingMeshJob>();
   private pendingChunkJobs = new Set<number>();
   private completedJobs: CompletedMeshJob[] = [];
-  private shadowAnchorCx = Number.NEGATIVE_INFINITY;
-  private shadowAnchorCz = Number.NEGATIVE_INFINITY;
-  private shadowCastRadiusChunks = -1;
-  private shadowCastingChunks = new Set<number>();
 
   constructor(sx: number, sy: number, sz: number) {
     this.sizeX = sx;
     this.sizeY = sy;
     this.sizeZ = sz;
-    this.mat = new THREE.MeshPhongMaterial({
+    // Terrain is fully lit by the baked two-channel voxel light (sky +
+    // lantern) computed in the mesh workers, so it needs no scene lights and
+    // no shadow maps. Time of day only changes these uniforms â€” no remesh.
+    this.mat = new THREE.MeshBasicMaterial({
       vertexColors: true,
-      emissive: new THREE.Color(0x10182a),
-      emissiveIntensity: 0.34,
-      shininess: 6,
-      specular: new THREE.Color(0x111418),
     });
 
     this.mat.onBeforeCompile = (shader) => {
       shader.uniforms.uBombActive = { value: 0.0 };
       shader.uniforms.uBombPos = { value: new THREE.Vector3() };
       shader.uniforms.uBombRadius = { value: 10.0 };
+      shader.uniforms.uSunTint = this.lightUniforms.uSunTint;
+      shader.uniforms.uTorchTint = this.lightUniforms.uTorchTint;
+      shader.uniforms.uAmbientFloor = this.lightUniforms.uAmbientFloor;
 
-      // Vertex shader: pass world position to fragment
+      // Vertex shader: pass world position + voxel light to fragment
       shader.vertexShader = shader.vertexShader.replace(
         '#include <common>',
         `#include <common>
+        attribute vec2 voxelLight;
+        varying vec2 vVoxelLight;
         varying vec3 vWorldPos;`,
       );
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
-        vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
+        vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vVoxelLight = voxelLight;`,
       );
 
-      // Fragment shader: X-ray transparency near bomb
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <common>',
         `#include <common>
         varying vec3 vWorldPos;
+        varying vec2 vVoxelLight;
         uniform float uBombActive;
         uniform vec3 uBombPos;
-        uniform float uBombRadius;`,
+        uniform float uBombRadius;
+        uniform vec3 uSunTint;
+        uniform vec3 uTorchTint;
+        uniform vec3 uAmbientFloor;`,
       );
+      // Apply baked radiance to the albedo (vertex color already carries
+      // per-face shading + AO)
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        {
+          float sky = pow(vVoxelLight.x, 1.4);
+          float torch = vVoxelLight.y * (vVoxelLight.y * 0.7 + 0.3);
+          vec3 radiance = uAmbientFloor + uSunTint * sky + uTorchTint * torch;
+          diffuseColor.rgb *= radiance;
+        }`,
+      );
+      // X-ray transparency near bomb
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <dithering_fragment>',
         `#include <dithering_fragment>
@@ -138,6 +160,13 @@ export class VoxelWorld {
     };
 
     this.initWorkers();
+  }
+
+  /** Drive the baked-light tint uniforms from the sky (per frame, no remesh). */
+  setLightEnvironment(sunTint: THREE.Color, torchTint: THREE.Color, ambientFloor: THREE.Color): void {
+    this.lightUniforms.uSunTint.value.copy(sunTint);
+    this.lightUniforms.uTorchTint.value.copy(torchTint);
+    this.lightUniforms.uAmbientFloor.value.copy(ambientFloor);
   }
 
   /** Chunk mesh jobs not yet applied to the scene (queued or in a worker). */
@@ -194,6 +223,7 @@ export class VoxelWorld {
         position: result.position,
         normal: result.normal,
         color: result.color,
+        light: result.light,
       },
     });
   }
@@ -231,7 +261,6 @@ export class VoxelWorld {
     this.dirtyChunks.delete(id);
     this.chunkRevision.delete(id);
     this.pendingChunkJobs.delete(id);
-    this.shadowCastingChunks.delete(id);
 
     const mesh = this.chunkMeshes.get(id);
     if (mesh) {
@@ -261,10 +290,6 @@ export class VoxelWorld {
     this.pendingRequests.clear();
     this.completedJobs.length = 0;
     this.activeWorkerJobs = 0;
-    this.shadowCastingChunks.clear();
-    this.shadowAnchorCx = Number.NEGATIVE_INFINITY;
-    this.shadowAnchorCz = Number.NEGATIVE_INFINITY;
-    this.shadowCastRadiusChunks = -1;
   }
 
   isChunkLoaded(cx: number, cy: number, cz: number): boolean {
@@ -360,15 +385,14 @@ export class VoxelWorld {
     const cy = Math.floor(by / CHUNK);
     const cz = Math.floor(bz / CHUNK);
     this.markDirty(cx, cy, cz);
-    const lx = bx % CHUNK;
-    const ly = by % CHUNK;
-    const lz = bz % CHUNK;
-    if (lx === 0) this.markDirty(cx - 1, cy, cz);
-    if (lx === CHUNK - 1) this.markDirty(cx + 1, cy, cz);
-    if (ly === 0) this.markDirty(cx, cy - 1, cz);
-    if (ly === CHUNK - 1) this.markDirty(cx, cy + 1, cz);
-    if (lz === 0) this.markDirty(cx, cy, cz - 1);
-    if (lz === CHUNK - 1) this.markDirty(cx, cy, cz + 1);
+    // Light can spread up to 15 blocks across chunk borders (e.g. removing
+    // a roof floods sun into the neighbor), so face neighbors always re-mesh
+    this.markDirty(cx - 1, cy, cz);
+    this.markDirty(cx + 1, cy, cz);
+    this.markDirty(cx, cy - 1, cz);
+    this.markDirty(cx, cy + 1, cz);
+    this.markDirty(cx, cy, cz - 1);
+    this.markDirty(cx, cy, cz + 1);
   }
 
   private markDirty(cx: number, cy: number, cz: number): void {
@@ -507,7 +531,7 @@ export class VoxelWorld {
   private buildMeshDataLocally(cx: number, cy: number, cz: number): ChunkMeshData {
     const chunk = this.chunks.get(packChunkId(cx, cy, cz));
     if (!chunk) {
-      return { position: new Float32Array(0), normal: new Float32Array(0), color: new Float32Array(0) };
+      return { position: new Float32Array(0), normal: new Float32Array(0), color: new Float32Array(0), light: new Float32Array(0) };
     }
 
     return buildChunkMeshData({
@@ -520,12 +544,17 @@ export class VoxelWorld {
   }
 
   private collectNeighborData(cx: number, cy: number, cz: number, clone: boolean): ChunkNeighborData[] {
+    // Send the full vertical chunk column for each of the 9 neighboring
+    // columns so the mesh worker can trace sky light through the whole
+    // world height
     const neighbors: ChunkNeighborData[] = [];
+    const chunksY = Math.ceil(this.sizeY / CHUNK);
     for (let dz = -1; dz <= 1; dz++) {
-      for (let dy = -1; dy <= 1; dy++) {
+      for (let ncy = 0; ncy < chunksY; ncy++) {
+        const dy = ncy - cy;
         for (let dx = -1; dx <= 1; dx++) {
           if (dx === 0 && dy === 0 && dz === 0) continue;
-          const chunk = this.chunks.get(packChunkId(cx + dx, cy + dy, cz + dz));
+          const chunk = this.chunks.get(packChunkId(cx + dx, ncy, cz + dz));
           if (!chunk) continue;
           neighbors.push({ dx, dy, dz, data: clone ? new Uint8Array(chunk) : chunk });
         }
@@ -561,7 +590,7 @@ export class VoxelWorld {
 
   private getReusableAttribute(
     geometry: THREE.BufferGeometry,
-    name: 'position' | 'normal' | 'color',
+    name: 'position' | 'normal' | 'color' | 'voxelLight',
     requiredComponents: number,
     itemSize: number,
   ): THREE.BufferAttribute {
@@ -601,7 +630,6 @@ export class VoxelWorld {
   private applyMesh(scene: THREE.Scene, id: number, meshData: ChunkMeshData): void {
     const vertexCount = meshData.position.length / 3;
     const existing = this.chunkMeshes.get(id);
-    const shouldCastShadow = this.shouldChunkCastShadow(id);
 
     if (vertexCount === 0) {
       if (existing) {
@@ -609,7 +637,6 @@ export class VoxelWorld {
         existing.geometry.dispose();
         this.chunkMeshes.delete(id);
       }
-      this.shadowCastingChunks.delete(id);
       return;
     }
 
@@ -618,18 +645,16 @@ export class VoxelWorld {
       const positionAttr = this.getReusableAttribute(geo, 'position', meshData.position.length, 3);
       const normalAttr = this.getReusableAttribute(geo, 'normal', meshData.normal.length, 3);
       const colorAttr = this.getReusableAttribute(geo, 'color', meshData.color.length, 3);
+      const lightAttr = this.getReusableAttribute(geo, 'voxelLight', meshData.light.length, 2);
       this.writeAttributeData(positionAttr, meshData.position);
       this.writeAttributeData(normalAttr, meshData.normal);
       this.writeAttributeData(colorAttr, meshData.color);
+      this.writeAttributeData(lightAttr, meshData.light);
       geo.setDrawRange(0, vertexCount);
 
       const mesh = new THREE.Mesh(geo, this.mat);
-      mesh.castShadow = shouldCastShadow;
-      mesh.receiveShadow = true;
       scene.add(mesh);
       this.chunkMeshes.set(id, mesh);
-      if (shouldCastShadow) this.shadowCastingChunks.add(id);
-      else this.shadowCastingChunks.delete(id);
       return;
     }
 
@@ -637,83 +662,16 @@ export class VoxelWorld {
     const positionAttr = this.getReusableAttribute(geometry, 'position', meshData.position.length, 3);
     const normalAttr = this.getReusableAttribute(geometry, 'normal', meshData.normal.length, 3);
     const colorAttr = this.getReusableAttribute(geometry, 'color', meshData.color.length, 3);
+    const lightAttr = this.getReusableAttribute(geometry, 'voxelLight', meshData.light.length, 2);
 
     this.writeAttributeData(positionAttr, meshData.position);
     this.writeAttributeData(normalAttr, meshData.normal);
     this.writeAttributeData(colorAttr, meshData.color);
+    this.writeAttributeData(lightAttr, meshData.light);
     geometry.setDrawRange(0, vertexCount);
     geometry.boundingSphere = null;
     geometry.boundingBox = null;
-    existing.castShadow = shouldCastShadow;
-    if (shouldCastShadow) this.shadowCastingChunks.add(id);
-    else this.shadowCastingChunks.delete(id);
     existing.visible = true;
-  }
-
-  updateChunkShadowCasting(anchorX: number, anchorZ: number, castRadiusChunks: number): void {
-    const anchorCx = Math.floor(anchorX / CHUNK);
-    const anchorCz = Math.floor(anchorZ / CHUNK);
-    if (
-      anchorCx === this.shadowAnchorCx
-      && anchorCz === this.shadowAnchorCz
-      && castRadiusChunks === this.shadowCastRadiusChunks
-    ) {
-      return;
-    }
-
-    const nextShadowCastingChunks = this.collectShadowCastingChunkIds(anchorCx, anchorCz, castRadiusChunks);
-    for (const id of this.shadowCastingChunks) {
-      if (nextShadowCastingChunks.has(id)) continue;
-      const mesh = this.chunkMeshes.get(id);
-      if (mesh) mesh.castShadow = false;
-    }
-    for (const id of nextShadowCastingChunks) {
-      if (this.shadowCastingChunks.has(id)) continue;
-      const mesh = this.chunkMeshes.get(id);
-      if (mesh) {
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-      }
-    }
-
-    this.shadowAnchorCx = anchorCx;
-    this.shadowAnchorCz = anchorCz;
-    this.shadowCastRadiusChunks = castRadiusChunks;
-    this.shadowCastingChunks = nextShadowCastingChunks;
-  }
-
-  private shouldChunkCastShadow(id: number): boolean {
-    if (this.shadowCastRadiusChunks <= 0) return false;
-    const [cx, , cz] = unpackChunkId(id);
-    const dx = cx - this.shadowAnchorCx;
-    const dz = cz - this.shadowAnchorCz;
-    return (dx * dx + dz * dz) <= this.shadowCastRadiusChunks * this.shadowCastRadiusChunks;
-  }
-
-  private collectShadowCastingChunkIds(anchorCx: number, anchorCz: number, castRadiusChunks: number): Set<number> {
-    const ids = new Set<number>();
-    if (castRadiusChunks <= 0) return ids;
-
-    const maxCx = Math.ceil(this.sizeX / CHUNK);
-    const maxCy = Math.ceil(this.sizeY / CHUNK);
-    const maxCz = Math.ceil(this.sizeZ / CHUNK);
-    const castRadiusSq = castRadiusChunks * castRadiusChunks;
-
-    for (let dz = -castRadiusChunks; dz <= castRadiusChunks; dz++) {
-      for (let dx = -castRadiusChunks; dx <= castRadiusChunks; dx++) {
-        if (dx * dx + dz * dz > castRadiusSq) continue;
-        const cx = anchorCx + dx;
-        const cz = anchorCz + dz;
-        if (cx < 0 || cx >= maxCx || cz < 0 || cz >= maxCz) continue;
-
-        for (let cy = 0; cy < maxCy; cy++) {
-          const id = packChunkId(cx, cy, cz);
-          if (this.chunkMeshes.has(id)) ids.add(id);
-        }
-      }
-    }
-
-    return ids;
   }
 
   dispose(scene: THREE.Scene): void {

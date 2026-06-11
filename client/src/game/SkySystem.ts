@@ -45,6 +45,14 @@ export class SkySystem {
   private exposure = 1.1;
   private sunVisibility = 1;
   private moonVisibility = 0;
+
+  // Baked terrain radiance tints (consumed by VoxelWorld's light uniforms)
+  private terrainLightEnv = {
+    sunTint: new THREE.Color(1, 0.96, 0.88),
+    torchTint: new THREE.Color(1.25, 0.78, 0.42),
+    ambient: new THREE.Color(0.3, 0.32, 0.38),
+  };
+  private _tintScratch = new THREE.Color();
   private moonColor = new THREE.Color(0.62, 0.72, 0.95);
   private fogColor = new THREE.Color(0x8899aa);
 
@@ -236,9 +244,6 @@ export class SkySystem {
       );
       this.sunLight.target.position.copy(cameraPosition);
       this.sunLight.target.updateMatrixWorld();
-
-      // Snap shadow camera to texel grid to prevent swimming/flickering
-      this.stabilizeShadows();
     } else {
       this.sunLight.position.set(sunDir.x * 80, Math.max(sunDir.y * 80, 5), sunDir.z * 80);
       this.sunLight.target.position.set(0, 0, 0);
@@ -273,7 +278,20 @@ export class SkySystem {
 
     // Renderer exposure target (higher floor at night to prevent black crush)
     const weatherPenalty = clamp01(this.currentEnv.cloudDensity * 0.22);
-    this.exposure = 1.15 + nightFactor * 0.72 - weatherPenalty * 0.75 + this.stormFlash * 0.05;
+    this.exposure = 1.22 + nightFactor * 0.62 - weatherPenalty * 0.55 + this.stormFlash * 0.05;
+
+    // Terrain radiance tints for the baked voxel light channels: the sky
+    // channel is tinted by sun (and moon at night), lanterns stay warm, and
+    // the ambient floor keeps caves/interiors readable without scene lights
+    const sunStrength = Math.min(1.6, colors.sunIntensity) * sunAboveHorizon * 0.95;
+    this.terrainLightEnv.sunTint
+      .copy(colors.sun)
+      .multiplyScalar(sunStrength)
+      .add(this._tintScratch.copy(this.moonColor).multiplyScalar(moonVisibility * 0.34));
+    this.terrainLightEnv.ambient
+      .copy(colors.hemiSky)
+      .multiplyScalar(0.2 + sunAboveHorizon * 0.17)
+      .addScalar(0.045 + this.stormFlash * 0.1);
 
     // Fog
     this.fogColor.copy(colors.fog).lerp(colors.haze, this.stormFlash * 0.08);
@@ -352,51 +370,9 @@ export class SkySystem {
     return this.exposure;
   }
 
-  // Reusable vectors for shadow stabilization (avoid per-frame allocations)
-  private _shadowRight = new THREE.Vector3();
-  private _shadowUp = new THREE.Vector3();
-  private _shadowWorldUp = new THREE.Vector3();
-  private _shadowLightDir = new THREE.Vector3();
-
-  /**
-   * Snap shadow camera position to texel boundaries so the shadow map
-   * stays grid-aligned as the camera moves. Prevents shadow swimming/flickering.
-   */
-  private stabilizeShadows(): void {
-    const shadowCam = this.sunLight.shadow.camera;
-    const mapWidth = Math.max(1, this.sunLight.shadow.mapSize.x);
-    const mapHeight = Math.max(1, this.sunLight.shadow.mapSize.y);
-    const frustumWidth = shadowCam.right - shadowCam.left;
-    const frustumHeight = shadowCam.top - shadowCam.bottom;
-    const texelWidth = frustumWidth / mapWidth;
-    const texelHeight = frustumHeight / mapHeight;
-
-    const target = this.sunLight.target.position;
-    const lightDir = this._shadowLightDir.subVectors(target, this.sunLight.position);
-    if (lightDir.lengthSq() <= 1e-8) return;
-    lightDir.normalize();
-
-    // Build the snap axes from the real light direction, not the idealized sun vector.
-    const worldUp = Math.abs(lightDir.y) > 0.99
-      ? this._shadowWorldUp.set(1, 0, 0)
-      : this._shadowWorldUp.set(0, 1, 0);
-    const right = this._shadowRight.crossVectors(worldUp, lightDir).normalize();
-    const up = this._shadowUp.crossVectors(lightDir, right).normalize();
-
-    // Project target onto shadow plane axes
-    const projR = target.dot(right);
-    const projU = target.dot(up);
-
-    // Snap to nearest texel along each shadow-map axis.
-    const snapR = Math.round(projR / texelWidth) * texelWidth - projR;
-    const snapU = Math.round(projU / texelHeight) * texelHeight - projU;
-
-    // Shift both light and target by the snap offset
-    this.sunLight.position.addScaledVector(right, snapR);
-    this.sunLight.position.addScaledVector(up, snapU);
-    target.addScaledVector(right, snapR);
-    target.addScaledVector(up, snapU);
-    this.sunLight.target.updateMatrixWorld();
+  /** Stable references; values are refreshed every update(). */
+  getTerrainLightEnv(): { sunTint: THREE.Color; torchTint: THREE.Color; ambient: THREE.Color } {
+    return this.terrainLightEnv;
   }
 
   /** Lerp in 24h circular space */

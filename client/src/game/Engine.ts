@@ -147,7 +147,6 @@ type EnginePerfPhaseKey =
   | 'worldStreaming'
   | 'netSync'
   | 'chunkRebuild'
-  | 'shadowUpdate'
   | 'render'
   | 'hud';
 
@@ -216,7 +215,6 @@ const PERF_PHASE_LABELS: Record<EnginePerfPhaseKey, string> = {
   worldStreaming: 'World stream',
   netSync: 'Net sync',
   chunkRebuild: 'Chunk rebuild',
-  shadowUpdate: 'Shadow update',
   render: 'Render',
   hud: 'HUD',
 };
@@ -400,7 +398,6 @@ export class Engine {
 
   // Adaptive graphics scaling
   private graphicsQuality: GameSettings["graphicsQuality"] = "high";
-  private userShadowsEnabled = true;
   private userPostFxEnabled = true;
   private adaptiveTier = 0;
   private adaptiveFrameMsEma = 16.7;
@@ -409,10 +406,6 @@ export class Engine {
   private adaptiveReliefTime = 0;
   private adaptiveResumeAtMs = 0;
   private appliedPixelRatio = -1;
-  private appliedShadowMapSize = 0;
-  private shadowsActive = true;
-  private currentShadowCastRadiusChunks = 7;
-  private shadowWarmupStartedAtMs = 0;
   private currentRebuildBudgetMoving = CHUNK_REBUILD_BUDGET_MOVING;
   private currentRebuildBudgetIdle = CHUNK_REBUILD_BUDGET_IDLE;
   private currentMeshApplyBudgetMsMoving = 1.25;
@@ -499,8 +492,8 @@ export class Engine {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // Terrain shadows are baked into the voxel light channels; shadow maps off
+    this.renderer.shadowMap.enabled = false;
     this.renderer.setClearColor(0x5a5856);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
@@ -523,22 +516,11 @@ export class Engine {
 
     this.sun = new THREE.DirectionalLight(0xffe0b0, 2.5);
     this.sun.position.set(50, 80, 30);
-    this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.near = 1;
-    this.sun.shadow.camera.far = 300;
-    this.sun.shadow.camera.left = -80;
-    this.sun.shadow.camera.right = 80;
-    this.sun.shadow.camera.top = 80;
-    this.sun.shadow.camera.bottom = -80;
-    this.sun.shadow.bias = 0;
-    this.sun.shadow.normalBias = 0.02;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
 
     this.moon = new THREE.DirectionalLight(0x9bb4ff, 0.35);
     this.moon.position.set(-40, 60, -25);
-    this.moon.castShadow = false;
     this.scene.add(this.moon);
     this.scene.add(this.moon.target);
 
@@ -758,7 +740,6 @@ export class Engine {
     this.audio.setMasterVolume(settings.masterVolume);
     this.controls.setSprintToggle(settings.sprintToggle);
     this.graphicsQuality = settings.graphicsQuality;
-    this.userShadowsEnabled = settings.shadowsEnabled;
     this.userPostFxEnabled = settings.postFXEnabled;
 
     // Reset adaptive scaler when user changes settings, then let it ramp again.
@@ -862,8 +843,6 @@ export class Engine {
       case 'chunkRebuild':
         if (loadedDelta > 0 || dirtyDelta > 0) return 'chunk mesh rebuild / apply spike';
         return 'chunk meshing cost';
-      case 'shadowUpdate':
-        return 'shadow map refresh';
       case 'worldStreaming':
         if (loadedDelta > 0 || counters.pendingChunkRequests > 0) return 'streaming new chunks';
         return 'world streaming work';
@@ -875,7 +854,6 @@ export class Engine {
           return 'post FX render cost';
         }
         if (counters.triangles >= 900_000 || counters.drawCalls >= 450) return 'triangle / draw call pressure';
-        if (this.shadowsActive) return 'render pass with shadows';
         return 'render pass cost';
       case 'gameplay':
         if (counters.activeVfxParticles >= 220) return 'VFX burst';
@@ -949,13 +927,6 @@ export class Engine {
     }
   }
 
-  private roundShadowMapSize(size: number): number {
-    if (size >= 1536) return 2048;
-    if (size >= 768) return 1024;
-    if (size >= 384) return 512;
-    return 256;
-  }
-
   private applyGraphicsTier(force = false): void {
     const baseDpr =
       this.graphicsQuality === "low"
@@ -963,18 +934,6 @@ export class Engine {
         : this.graphicsQuality === "medium"
           ? 1.5
           : 2;
-    const baseShadowMap =
-      this.graphicsQuality === "low"
-        ? 512
-        : this.graphicsQuality === "medium"
-          ? 1024
-          : 2048;
-    const baseCastRadius =
-      this.graphicsQuality === "low"
-        ? 4
-        : this.graphicsQuality === "medium"
-          ? 6
-          : 8;
 
     const dprScale = [1.0, 0.9, 0.78, 0.66][this.adaptiveTier] ?? 1.0;
     const budgetScale = [1.0, 0.85, 0.7, 0.55][this.adaptiveTier] ?? 1.0;
@@ -983,13 +942,8 @@ export class Engine {
       0.6,
       Math.min(window.devicePixelRatio, baseDpr * dprScale),
     );
-    const shadowMapSize = this.roundShadowMapSize(baseShadowMap);
-    const shadowsActive = this.userShadowsEnabled;
     const postFxActive = this.userPostFxEnabled && this.adaptiveTier < 2;
 
-    this.currentShadowCastRadiusChunks = shadowsActive
-      ? baseCastRadius
-      : 0;
     this.currentRebuildBudgetMoving = Math.max(
       4,
       Math.round(CHUNK_REBUILD_BUDGET_MOVING * budgetScale),
@@ -1037,20 +991,6 @@ export class Engine {
       this.onResize();
     }
 
-    if (force || this.appliedShadowMapSize !== shadowMapSize) {
-      this.sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
-      this.sun.shadow.map?.dispose();
-      this.appliedShadowMapSize = shadowMapSize;
-    }
-
-    if (force || this.shadowsActive !== shadowsActive) {
-      this.shadowsActive = shadowsActive;
-      this.renderer.shadowMap.enabled = shadowsActive;
-      this.sun.castShadow = shadowsActive;
-      this.renderer.shadowMap.needsUpdate = true;
-    }
-
-    this.moon.castShadow = false;
     this.configureRenderLightBudget(postFxActive);
   }
 
@@ -1332,7 +1272,6 @@ export class Engine {
   }
 
   private markStartupWorldNotReady(): void {
-    this.shadowWarmupStartedAtMs = 0;
     this.warmupStage = "terrain";
     this.warmupMeshJobsAtStart = 1;
     this.warmupShaderElapsed = 0;
@@ -1416,23 +1355,11 @@ export class Engine {
 
   private markStartupWorldReady(): void {
     const nowMs = performance.now();
-    this.shadowWarmupStartedAtMs = nowMs;
     this.adaptiveResumeAtMs = nowMs + 5000;
     this.adaptiveFrameMsEma = 16.7;
     this.adaptiveSampleTimer = 0;
     this.adaptivePressureTime = 0;
     this.adaptiveReliefTime = 0;
-  }
-
-  private getEffectiveShadowCastRadiusChunks(): number {
-    if (!this.shadowsActive || !this.chunkStreamer.startupWorldReady) return 0;
-    const targetRadius = this.currentShadowCastRadiusChunks;
-    if (targetRadius <= 0) return 0;
-    if (this.shadowWarmupStartedAtMs <= 0) return Math.min(2, targetRadius);
-
-    const elapsedMs = performance.now() - this.shadowWarmupStartedAtMs;
-    const warmupRadius = 2 + Math.floor(elapsedMs / 350);
-    return Math.min(targetRadius, warmupRadius);
   }
 
   /** Toggle fly mode (admin) */
@@ -4112,15 +4039,8 @@ export class Engine {
     });
     const afterChunkRebuildMs = performance.now();
 
-    this.world.updateChunkShadowCasting(
-      this.camera.position.x,
-      this.camera.position.z,
-      this.getEffectiveShadowCastRadiusChunks(),
-    );
-    const afterShadowUpdateMs = performance.now();
-
     // Measure CPU time = everything before the render pass (game logic, scene graph, chunk rebuilds)
-    const preRenderMs = afterShadowUpdateMs;
+    const preRenderMs = afterChunkRebuildMs;
     this.__perfLastState.cpuFrameMs = preRenderMs - frameStartMs;
 
     this.renderFrame(delta);
@@ -4145,7 +4065,6 @@ export class Engine {
         { key: 'worldStreaming', label: PERF_PHASE_LABELS.worldStreaming, ms: afterWorldStreamingMs - afterVehiclesMs },
         { key: 'netSync', label: PERF_PHASE_LABELS.netSync, ms: afterNetSyncMs - afterWorldStreamingMs },
         { key: 'chunkRebuild', label: PERF_PHASE_LABELS.chunkRebuild, ms: afterChunkRebuildMs - afterNetSyncMs },
-        { key: 'shadowUpdate', label: PERF_PHASE_LABELS.shadowUpdate, ms: afterShadowUpdateMs - afterChunkRebuildMs },
         { key: 'render', label: PERF_PHASE_LABELS.render, ms: afterRenderMs - preRenderMs },
         { key: 'hud', label: PERF_PHASE_LABELS.hud, ms: frameEndMs - afterRenderMs },
       ],
@@ -4307,6 +4226,8 @@ export class Engine {
 
     // Sky & environment
     this.sky.update(delta, this.camera.position);
+    const lightEnv = this.sky.getTerrainLightEnv();
+    this.world.setLightEnvironment(lightEnv.sunTint, lightEnv.torchTint, lightEnv.ambient);
     this.renderer.toneMappingExposure +=
       (this.sky.getExposure() - this.renderer.toneMappingExposure) *
       Math.min(1, delta * 2.2);
