@@ -81,6 +81,31 @@ pub fn is_profile_online(ctx: &ReducerContext, profile_id: u64) -> bool {
         .any(|player| player.profile_id == profile_id && player.online)
 }
 
+/// Frees a display name held by an offline profile so a new player can claim
+/// it. The stale profile keeps its stats under "<name>.<profile_id>" and its
+/// offline player rows return to name selection on their next connect.
+pub fn release_display_name(ctx: &ReducerContext, profile: &PlayerProfile) {
+    let root: String = profile.display_name.chars().take(13).collect();
+    let fallback = format!("{}.{}", root, profile.profile_id);
+    ctx.db.player_profile().profile_id().update(PlayerProfile {
+        display_name: fallback,
+        ..profile.clone()
+    });
+
+    let stale_players: Vec<Player> = ctx
+        .db
+        .player()
+        .iter()
+        .filter(|player| player.profile_id == profile.profile_id)
+        .collect();
+    for stale_player in stale_players {
+        ctx.db.player().identity().update(Player {
+            username: String::new(),
+            ..stale_player
+        });
+    }
+}
+
 pub fn relink_identity_to_profile(ctx: &ReducerContext, identity: Identity, profile_id: u64) {
     let stale_players: Vec<Player> = ctx
         .db

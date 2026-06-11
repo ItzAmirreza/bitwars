@@ -27,7 +27,13 @@ pub fn set_username(
     let profile = ensure_player_profile(ctx, sender);
     if let Some(conflicting_profile) = find_profile_by_display_name(ctx, &username) {
         if conflicting_profile.profile_id != profile.profile_id {
-            return Err("Username already taken".to_string());
+            // Names are only reserved while their owner is online. Guest
+            // identities are ephemeral (cleared storage, new tab session),
+            // so an offline profile must not hold a name hostage forever.
+            if is_profile_online(ctx, conflicting_profile.profile_id) {
+                return Err("Username already taken".to_string());
+            }
+            release_display_name(ctx, &conflicting_profile);
         }
     }
 
