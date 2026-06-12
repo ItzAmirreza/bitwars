@@ -1353,6 +1353,38 @@ export class Engine {
   private warmupShaderElapsed = 0;
   private warmupShaderCompileDone = false;
 
+  // Prewarm the shader program variants for every dynamic point-light count.
+  //
+  // three.js compiles a distinct program per scene light count, and that
+  // compile happens synchronously the first time a new count is rendered.
+  // Combat adds several point lights in one frame (muzzle flash + projectile
+  // + explosion), so the first RPG shot or grenade used to stall ~0.5s while
+  // the terrain and weapon materials recompiled. Walking the count up here,
+  // behind the loading overlay, caches every variant so play stays smooth.
+  // Temp lights sit at intensity 0 below the world — they never affect the
+  // render, and they're removed before the game becomes interactive.
+  private prewarmLightCountVariants(): void {
+    const temps: THREE.PointLight[] = [];
+    try {
+      this.renderer.compile(this.scene, this.camera);
+      const MAX_PREWARM_POINT_LIGHTS = 24;
+      for (let i = 0; i < MAX_PREWARM_POINT_LIGHTS; i++) {
+        const light = new THREE.PointLight(0xffffff, 0, 8, 2);
+        light.position.set(0, -2000, 0);
+        this.scene.add(light);
+        temps.push(light);
+        this.renderer.compile(this.scene, this.camera);
+      }
+    } catch {
+      // Best-effort: never block startup on a driver hiccup.
+    } finally {
+      for (const light of temps) {
+        this.scene.remove(light);
+        light.dispose();
+      }
+    }
+  }
+
   private updateWarmup(delta: number): void {
     switch (this.warmupStage) {
       case "terrain": {
@@ -1373,6 +1405,7 @@ export class Engine {
             .compileAsync(this.scene, this.camera)
             .catch(() => undefined)
             .then(() => {
+              this.prewarmLightCountVariants();
               this.warmupShaderCompileDone = true;
             });
         }
