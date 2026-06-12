@@ -226,6 +226,8 @@ export class RemotePlayerManager {
     position: [number, number, number],
   ): THREE.Mesh {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     mesh.position.set(...position);
     parent.add(mesh);
     return mesh;
@@ -359,6 +361,8 @@ export class RemotePlayerManager {
       pos: [number, number, number],
     ): void => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       mesh.position.set(...pos);
       gun.add(mesh);
     };

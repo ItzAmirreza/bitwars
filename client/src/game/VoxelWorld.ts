@@ -83,6 +83,11 @@ export class VoxelWorld {
     uDynLightCount: { value: 0 },
     uDynLights: { value: new Float32Array(MAX_TERRAIN_DYN_LIGHTS * 4) },
     uDynLightColor: { value: new Float32Array(MAX_TERRAIN_DYN_LIGHTS * 3) },
+    uShadowMap: { value: null as THREE.Texture | null },
+    uShadowMatrix: { value: new THREE.Matrix4() },
+    uShadowStrength: { value: 0 },
+    uShadowMapSize: { value: 2048 },
+    uShadowNormalOffset: { value: 0.15 },
   };
 
   private workers: Worker[] = [];
@@ -99,9 +104,10 @@ export class VoxelWorld {
     this.sizeX = sx;
     this.sizeY = sy;
     this.sizeZ = sz;
-    // Terrain is fully lit by the baked two-channel voxel light (sky +
-    // lantern) computed in the mesh workers, so it needs no scene lights and
-    // no shadow maps. Time of day only changes these uniforms â€” no remesh.
+    // Terrain is lit by the baked two-channel voxel light (sky + lantern)
+    // computed in the mesh workers, plus a sun cast-shadow sampled manually
+    // from the SunShadows depth pass. Time of day only changes uniforms — no
+    // remesh, and the material never depends on scene light counts.
     this.mat = new THREE.MeshBasicMaterial({
       vertexColors: true,
     });
@@ -118,27 +124,38 @@ export class VoxelWorld {
       shader.uniforms.uDynLightCount = this.lightUniforms.uDynLightCount;
       shader.uniforms.uDynLights = this.lightUniforms.uDynLights;
       shader.uniforms.uDynLightColor = this.lightUniforms.uDynLightColor;
+      shader.uniforms.uShadowMap = this.lightUniforms.uShadowMap;
+      shader.uniforms.uShadowMatrix = this.lightUniforms.uShadowMatrix;
+      shader.uniforms.uShadowStrength = this.lightUniforms.uShadowStrength;
+      shader.uniforms.uShadowMapSize = this.lightUniforms.uShadowMapSize;
+      shader.uniforms.uShadowNormalOffset = this.lightUniforms.uShadowNormalOffset;
 
-      // Vertex shader: pass world position, normal + voxel light to fragment
+      // Vertex shader: pass world position, normal, voxel light + the sun
+      // shadow-map coordinate (offset along the normal to prevent acne)
       shader.vertexShader = shader.vertexShader.replace(
         '#include <common>',
         `#include <common>
         attribute vec2 voxelLight;
+        uniform mat4 uShadowMatrix;
+        uniform float uShadowNormalOffset;
         varying vec2 vVoxelLight;
         varying vec3 vWorldPos;
-        varying vec3 vVoxelNormal;`,
+        varying vec3 vVoxelNormal;
+        varying vec4 vShadowCoord;`,
       );
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
         vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
         vVoxelLight = voxelLight;
-        vVoxelNormal = normal;`,
+        vVoxelNormal = normal;
+        vShadowCoord = uShadowMatrix * vec4(vWorldPos + normal * uShadowNormalOffset, 1.0);`,
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <common>',
         `#include <common>
+        #include <packing>
         varying vec3 vWorldPos;
         varying vec2 vVoxelLight;
         varying vec3 vVoxelNormal;
@@ -152,7 +169,32 @@ export class VoxelWorld {
         uniform vec3 uSunDir;
         uniform int uDynLightCount;
         uniform vec4 uDynLights[${MAX_TERRAIN_DYN_LIGHTS}];
-        uniform vec3 uDynLightColor[${MAX_TERRAIN_DYN_LIGHTS}];`,
+        uniform vec3 uDynLightColor[${MAX_TERRAIN_DYN_LIGHTS}];
+        uniform sampler2D uShadowMap;
+        uniform float uShadowStrength;
+        uniform float uShadowMapSize;
+        varying vec4 vShadowCoord;
+        // Sun cast shadow: 9-tap PCF against the depth pass that the sun
+        // light renders every frame. Returns 1.0 when fully lit. Fades to
+        // lit near the frustum edge so the boundary never pops, and bails
+        // on a uniform branch when shadows are off/overcast.
+        float bwSunShadow() {
+          if (uShadowStrength <= 0.001) return 1.0;
+          vec3 sc = vShadowCoord.xyz / vShadowCoord.w;
+          if (sc.x < 0.0 || sc.x > 1.0 || sc.y < 0.0 || sc.y > 1.0 || sc.z > 1.0) return 1.0;
+          float compare = sc.z - 0.0008;
+          float texel = 1.25 / uShadowMapSize;
+          float sum = 0.0;
+          for (int x = -1; x <= 1; x++) {
+            for (int y = -1; y <= 1; y++) {
+              vec2 uv = sc.xy + vec2(float(x), float(y)) * texel;
+              sum += step(compare, unpackRGBAToDepth(texture2D(uShadowMap, uv)));
+            }
+          }
+          vec2 edge = abs(sc.xy - 0.5) * 2.0;
+          float fade = 1.0 - smoothstep(0.82, 1.0, max(edge.x, edge.y));
+          return 1.0 - (1.0 - sum / 9.0) * fade * uShadowStrength;
+        }`,
       );
       // Radiance = hemisphere ambient + directional sun scaled by the baked
       // sky channel + lantern channel + dynamic combat lights. The baked
@@ -170,7 +212,7 @@ export class VoxelWorld {
           float sunShape = mix(1.0, 0.5 + 0.68 * ndotl, direct);
           float torch = vVoxelLight.y * (vVoxelLight.y * 0.7 + 0.3);
           vec3 radiance = mix(uGroundAmbient, uSkyAmbient, vn.y * 0.5 + 0.5)
-            + uSunTint * (sky * sunShape)
+            + uSunTint * (sky * sunShape * bwSunShadow())
             + uTorchTint * torch;
           for (int i = 0; i < ${MAX_TERRAIN_DYN_LIGHTS}; i++) {
             if (i >= uDynLightCount) break;
@@ -242,6 +284,24 @@ export class VoxelWorld {
 
   setTerrainDynamicLightCount(count: number): void {
     this.lightUniforms.uDynLightCount.value = Math.min(count, MAX_TERRAIN_DYN_LIGHTS);
+  }
+
+  /**
+   * Feed the sun's shadow depth pass into the terrain shader (per frame).
+   * `matrix` is held by reference — the renderer rewrites it each shadow pass.
+   */
+  setSunShadow(
+    map: THREE.Texture | null,
+    matrix: THREE.Matrix4,
+    strength: number,
+    texelWorldSize: number,
+    mapSize: number,
+  ): void {
+    this.lightUniforms.uShadowMap.value = map;
+    this.lightUniforms.uShadowMatrix.value = matrix;
+    this.lightUniforms.uShadowStrength.value = map ? strength : 0;
+    this.lightUniforms.uShadowMapSize.value = mapSize;
+    this.lightUniforms.uShadowNormalOffset.value = texelWorldSize * 1.5;
   }
 
   /** Chunk mesh jobs not yet applied to the scene (queued or in a worker). */
@@ -728,6 +788,7 @@ export class VoxelWorld {
       geo.setDrawRange(0, vertexCount);
 
       const mesh = new THREE.Mesh(geo, this.mat);
+      mesh.castShadow = true;
       scene.add(mesh);
       this.chunkMeshes.set(id, mesh);
       return;

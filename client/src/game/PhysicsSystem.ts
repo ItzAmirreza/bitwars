@@ -60,6 +60,8 @@ export class PhysicsSystem {
     this.instancedMesh = new THREE.InstancedMesh(SHARED_GEO, mat, MAX_DEBRIS_INSTANCES);
     this.instancedMesh.count = 0;
     this.instancedMesh.frustumCulled = false;
+    this.instancedMesh.castShadow = true;
+    this.instancedMesh.receiveShadow = true;
     this.scene.add(this.instancedMesh);
   }
 

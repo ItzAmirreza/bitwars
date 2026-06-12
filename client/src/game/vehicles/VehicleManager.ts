@@ -494,6 +494,8 @@ export default class VehicleManager {
     mesh.userData.currentOpacity = 1.0;
     mesh.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material) {
+        child.castShadow = true;
+        child.receiveShadow = true;
         const mat = child.material as THREE.Material;
         if (!mat.userData) mat.userData = {};
         mat.userData.baseOpacity = mat.opacity;

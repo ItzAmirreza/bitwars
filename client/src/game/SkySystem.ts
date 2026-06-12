@@ -53,6 +53,7 @@ export class SkySystem {
     skyAmbient: new THREE.Color(0.3, 0.32, 0.38),
     groundAmbient: new THREE.Color(0.2, 0.18, 0.15),
     sunDir: new THREE.Vector3(0.4, 0.8, 0.3),
+    shadowStrength: 0,
   };
   private _tintScratch = new THREE.Color();
   private moonColor = new THREE.Color(0.62, 0.72, 0.95);
@@ -303,6 +304,11 @@ export class SkySystem {
       .addScalar(0.03 + this.stormFlash * 0.06);
     // Directional shading follows the dominant luminary (sun by day, moon by night)
     this.terrainLightEnv.sunDir.copy(sunAboveHorizon >= 0.12 ? sunDir : moonDir);
+    // Cast-shadow strength: crisp under a clear sun, softer moonlit shadows
+    // at night, fading out as cloud cover diffuses the light
+    const cloudDiffuse = clamp01(this.currentEnv.cloudDensity * 0.85);
+    this.terrainLightEnv.shadowStrength =
+      Math.max(sunAboveHorizon, moonVisibility * 0.6) * (1 - cloudDiffuse * 0.92);
 
     // Fog
     this.fogColor.copy(colors.fog).lerp(colors.haze, this.stormFlash * 0.08);
@@ -388,6 +394,7 @@ export class SkySystem {
     skyAmbient: THREE.Color;
     groundAmbient: THREE.Color;
     sunDir: THREE.Vector3;
+    shadowStrength: number;
   } {
     return this.terrainLightEnv;
   }

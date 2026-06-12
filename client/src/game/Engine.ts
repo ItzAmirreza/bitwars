@@ -61,6 +61,7 @@ import { ChunkBoundaryViewer } from "./ChunkBoundaryViewer";
 import type { HarnessMode } from "./PerfHarness";
 import { buildPlayerMovementFlags } from "./playerMovementFlags";
 import { LightPool } from "./LightPool";
+import { SunShadows } from "./SunShadows";
 import {
   createProjectileRenderable,
   disposeProjectileRenderable,
@@ -267,6 +268,7 @@ export class Engine {
 
   // Lighting & Sky
   private sun: THREE.DirectionalLight;
+  private sunShadows: SunShadows;
   private moon: THREE.DirectionalLight;
   private hemiLight: THREE.HemisphereLight;
   private ambientLight: THREE.AmbientLight;
@@ -488,8 +490,11 @@ export class Engine {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
-    // Terrain shadows are baked into the voxel light channels; shadow maps off
-    this.renderer.shadowMap.enabled = false;
+    // One fixed shadow caster (the sun, see SunShadows) renders a depth pass
+    // for cinematic cast shadows; it exists from startup so light/shadow
+    // program state never changes mid-game (no recompile hitches)
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setClearColor(0x5a5856);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
@@ -514,6 +519,8 @@ export class Engine {
     this.sun.position.set(50, 80, 30);
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
+    this.sunShadows = new SunShadows(this.sun);
+    this.sunShadows.setQuality(this.graphicsQuality);
 
     this.moon = new THREE.DirectionalLight(0x9bb4ff, 0.35);
     this.moon.position.set(-40, 60, -25);
@@ -529,6 +536,18 @@ export class Engine {
     const warmupProjectile = createProjectileRenderable(0.2, 0xff8855);
     warmupProjectile.root.position.set(0, -800, 0);
     this.scene.add(warmupProjectile.root);
+
+    // Hidden shadow-receiving lit box so the Lambert+shadowmap program
+    // variant (remote players, vehicles) compiles during the loading screen
+    // instead of when the first player walks into view
+    const warmupLitBox = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.5, 0.5),
+      new THREE.MeshLambertMaterial({ color: 0x888888 }),
+    );
+    warmupLitBox.castShadow = true;
+    warmupLitBox.receiveShadow = true;
+    warmupLitBox.position.set(0, -800, 0);
+    this.scene.add(warmupLitBox);
 
     // â”€â”€ Sky system (procedural sky, dynamic lighting, weather) â”€â”€
     this.sky = new SkySystem(
@@ -997,6 +1016,10 @@ export class Engine {
       this.appliedPixelRatio = wantedDpr;
       this.onResize();
     }
+
+    // User quality only — never the adaptive tier, since toggling the shadow
+    // caster recompiles lit materials (fine in a menu, not mid-firefight)
+    this.sunShadows.setQuality(this.graphicsQuality);
 
     this.configureRenderLightBudget(postFxActive);
   }
@@ -4198,6 +4221,14 @@ export class Engine {
       lightEnv.sunDir,
     );
     this.feedTerrainDynamicLights();
+    this.sunShadows.update(this.camera.position, lightEnv.sunDir);
+    this.world.setSunShadow(
+      this.sunShadows.getMapTexture(),
+      this.sunShadows.getMatrix(),
+      this.sunShadows.enabled ? lightEnv.shadowStrength : 0,
+      this.sunShadows.getTexelWorldSize(),
+      this.sunShadows.getMapSize(),
+    );
     this.renderer.toneMappingExposure +=
       (this.sky.getExposure() - this.renderer.toneMappingExposure) *
       Math.min(1, delta * 2.2);
