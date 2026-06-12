@@ -500,7 +500,9 @@ export class Engine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(w, h);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    // Soft PCF hides the per-frame edge aliasing that makes sweeping shadows
+    // look noisy as the sun moves.
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.setClearColor(0x5a5856);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
@@ -531,8 +533,11 @@ export class Engine {
     this.sun.shadow.camera.right = 80;
     this.sun.shadow.camera.top = 80;
     this.sun.shadow.camera.bottom = -80;
-    this.sun.shadow.bias = 0;
-    this.sun.shadow.normalBias = 0.02;
+    // A near-zero normal bias let voxel faces self-shadow into a crawling
+    // acne pattern that shifted with the sun. Offsetting samples along the
+    // surface normal (~⅓ of a block) kills it without visible peter-panning.
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.35;
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
 

@@ -19,6 +19,12 @@ import {
 export type { EnvironmentState } from './SkyColors';
 export { WEATHER_CLEAR, WEATHER_CLOUDY, WEATHER_OVERCAST, WEATHER_RAINY, WEATHER_STORMY, WEATHER_NAMES } from './SkyColors';
 
+// The shadow light only re-aims once the real sun has moved past this angular
+// step. Smaller = smoother sweep but more residual crawl; larger = rock-steady
+// but the occasional step becomes visible on long shadows. 0.2° is the sweet
+// spot for a slow day/night cycle.
+const SHADOW_RESNAP_COS = Math.cos((0.2 * Math.PI) / 180);
+
 export class SkySystem {
   private skyMesh: THREE.Mesh;
   private skyMaterial: THREE.ShaderMaterial;
@@ -60,6 +66,11 @@ export class SkySystem {
   // Reusable vectors
   private sunDir = new THREE.Vector3();
   private moonDir = new THREE.Vector3();
+
+  // Quantized direction actually used to aim the shadow-casting sun light.
+  // Held steady between angular steps so shadows don't crawl as time passes.
+  private _shadowSunDir = new THREE.Vector3();
+  private _shadowSunReady = false;
 
   constructor(
     scene: THREE.Scene,
@@ -227,12 +238,22 @@ export class SkySystem {
     this.sunLight.color.copy(colors.sun);
     this.sunLight.intensity = colors.sunIntensity * sunAboveHorizon + this.stormFlash * 0.08;
 
+    // Hold the shadow light's aim steady and only re-snap it once the sun has
+    // stepped past SHADOW_RESNAP_COS. The visual sun (sky shader) keeps moving
+    // continuously; only the shadow projection is quantized, so edges stay put
+    // between imperceptible steps instead of crawling every frame.
+    if (!this._shadowSunReady || this._shadowSunDir.dot(sunDir) < SHADOW_RESNAP_COS) {
+      this._shadowSunDir.copy(sunDir);
+      this._shadowSunReady = true;
+    }
+    const shadowDir = this._shadowSunDir;
+
     if (cameraPosition) {
-      // Light shines FROM sun direction toward camera — shadows match visual sun
+      // Light shines FROM the (quantized) sun direction toward the camera
       this.sunLight.position.set(
-        cameraPosition.x + sunDir.x * 80,
-        cameraPosition.y + Math.max(sunDir.y * 80, 5),
-        cameraPosition.z + sunDir.z * 80,
+        cameraPosition.x + shadowDir.x * 80,
+        cameraPosition.y + Math.max(shadowDir.y * 80, 5),
+        cameraPosition.z + shadowDir.z * 80,
       );
       this.sunLight.target.position.copy(cameraPosition);
       this.sunLight.target.updateMatrixWorld();
