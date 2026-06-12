@@ -34,15 +34,12 @@ export interface ChunkMeshData {
   position: Float32Array;
   normal: Float32Array;
   color: Float32Array;
-  /** Two channels per vertex: sky light, lantern light (0..1). */
-  light: Float32Array;
 }
 
 interface FaceRunBuffers {
   key: Uint32Array;
   ao: Uint8Array;
-  sunPack: Uint16Array;
-  torchPack: Uint16Array;
+  blockType: Uint8Array;
   cr: Float32Array;
   cg: Float32Array;
   cb: Float32Array;
@@ -70,150 +67,27 @@ const BLOCK_COLORS: Record<number, number> = {
   15: 0x1a1a2e,  // Bedrock
 };
 
-// ── Voxel light volume ──
-// Two-channel flood-fill lighting computed over the 3x3 chunk-column
-// neighborhood (full world height): sky light from a top-down column scan +
-// BFS spread, lantern light from BFS around emitters. Sampled per vertex
-// like AO, so sunlight occlusion and lantern glow are baked into the mesh
-// and cost nothing at render time.
+// ── Lantern boost offsets ──
 
-const LIGHT_MAX = 15;
-const WORLD_Y = WORLD_CONFIG.sizeY;
-const VOL_XZ = CHUNK * 3;
-const VOL_SIZE = VOL_XZ * VOL_XZ * WORLD_Y;
-const VOL_SLICE = VOL_XZ * VOL_XZ;
-
-// Module-level scratch reused across jobs (one builder runs per worker)
-const volBlocks = new Uint8Array(VOL_SIZE);
-const volSun = new Uint8Array(VOL_SIZE);
-const volTorch = new Uint8Array(VOL_SIZE);
-const bfsQueue = new Int32Array(VOL_SIZE * 4);
-
-function volIndex(vx: number, vy: number, vz: number): number {
-  return vx + vz * VOL_XZ + vy * VOL_SLICE;
-}
-
-function propagateLight(channel: Uint8Array, queueLen: number): void {
-  let head = 0;
-  let tail = queueLen;
-  while (head < tail) {
-    const idx = bfsQueue[head++]!;
-    const level = channel[idx]!;
-    if (level <= 1) continue;
-    const next = level - 1;
-    const vy = Math.floor(idx / VOL_SLICE);
-    const rem = idx - vy * VOL_SLICE;
-    const vz = Math.floor(rem / VOL_XZ);
-    const vx = rem - vz * VOL_XZ;
-
-    for (let n = 0; n < 6; n++) {
-      const nx = vx + (n === 0 ? 1 : n === 1 ? -1 : 0);
-      const ny = vy + (n === 2 ? 1 : n === 3 ? -1 : 0);
-      const nz = vz + (n === 4 ? 1 : n === 5 ? -1 : 0);
-      if (nx < 0 || nx >= VOL_XZ || nz < 0 || nz >= VOL_XZ || ny < 0 || ny >= WORLD_Y) continue;
-      const ni = volIndex(nx, ny, nz);
-      if (volBlocks[ni] !== 0) continue;
-      if (channel[ni]! >= next) continue;
-      channel[ni] = next;
-      if (tail < bfsQueue.length) bfsQueue[tail++] = ni;
-    }
-  }
-}
-
-function computeLightVolume(
-  gb: (x: number, y: number, z: number) => number,
-  x0: number,
-  z0: number,
-): void {
-  const baseX = x0 - CHUNK;
-  const baseZ = z0 - CHUNK;
-
-  for (let vy = 0; vy < WORLD_Y; vy++) {
-    for (let vz = 0; vz < VOL_XZ; vz++) {
-      for (let vx = 0; vx < VOL_XZ; vx++) {
-        volBlocks[volIndex(vx, vy, vz)] = gb(baseX + vx, vy, baseZ + vz);
-      }
-    }
-  }
-
-  volSun.fill(0);
-  volTorch.fill(0);
-
-  // Sky light: full strength straight down until the first opaque block
-  let sunQueueLen = 0;
-  for (let vz = 0; vz < VOL_XZ; vz++) {
-    for (let vx = 0; vx < VOL_XZ; vx++) {
-      for (let vy = WORLD_Y - 1; vy >= 0; vy--) {
-        const idx = volIndex(vx, vy, vz);
-        if (volBlocks[idx] !== 0) break;
-        volSun[idx] = LIGHT_MAX;
-        if (sunQueueLen < bfsQueue.length) bfsQueue[sunQueueLen++] = idx;
-      }
-    }
-  }
-  propagateLight(volSun, sunQueueLen);
-
-  // Lantern light: BFS out from every emitter
-  let torchQueueLen = 0;
-  for (let i = 0; i < VOL_SIZE; i++) {
-    if (volBlocks[i] === BlockType.Lantern) {
-      volTorch[i] = LIGHT_MAX;
-      if (torchQueueLen < bfsQueue.length) bfsQueue[torchQueueLen++] = i;
-    }
-  }
-  // Emitters are opaque, so seed their air neighbors directly
-  propagateLightFromOpaqueSeeds(torchQueueLen);
-  }
-
-function propagateLightFromOpaqueSeeds(seedLen: number): void {
-  let tail = seedLen;
-  for (let s = 0; s < seedLen; s++) {
-    const idx = bfsQueue[s]!;
-    const vy = Math.floor(idx / VOL_SLICE);
-    const rem = idx - vy * VOL_SLICE;
-    const vz = Math.floor(rem / VOL_XZ);
-    const vx = rem - vz * VOL_XZ;
-    for (let n = 0; n < 6; n++) {
-      const nx = vx + (n === 0 ? 1 : n === 1 ? -1 : 0);
-      const ny = vy + (n === 2 ? 1 : n === 3 ? -1 : 0);
-      const nz = vz + (n === 4 ? 1 : n === 5 ? -1 : 0);
-      if (nx < 0 || nx >= VOL_XZ || nz < 0 || nz >= VOL_XZ || ny < 0 || ny >= WORLD_Y) continue;
-      const ni = volIndex(nx, ny, nz);
-      if (volBlocks[ni] !== 0) continue;
-      if (volTorch[ni]! >= LIGHT_MAX - 1) continue;
-      volTorch[ni] = LIGHT_MAX - 1;
-      if (tail < bfsQueue.length) bfsQueue[tail++] = ni;
-    }
-  }
-  // Continue standard propagation from the seeded air cells
-  let head = seedLen;
-  while (head < tail) {
-    const idx = bfsQueue[head++]!;
-    const level = volTorch[idx]!;
-    if (level <= 1) continue;
-    const next = level - 1;
-    const vy = Math.floor(idx / VOL_SLICE);
-    const rem = idx - vy * VOL_SLICE;
-    const vz = Math.floor(rem / VOL_XZ);
-    const vx = rem - vz * VOL_XZ;
-    for (let n = 0; n < 6; n++) {
-      const nx = vx + (n === 0 ? 1 : n === 1 ? -1 : 0);
-      const ny = vy + (n === 2 ? 1 : n === 3 ? -1 : 0);
-      const nz = vz + (n === 4 ? 1 : n === 5 ? -1 : 0);
-      if (nx < 0 || nx >= VOL_XZ || nz < 0 || nz >= VOL_XZ || ny < 0 || ny >= WORLD_Y) continue;
-      const ni = volIndex(nx, ny, nz);
-      if (volBlocks[ni] !== 0) continue;
-      if (volTorch[ni]! >= next) continue;
-      volTorch[ni] = next;
-      if (tail < bfsQueue.length) bfsQueue[tail++] = ni;
-    }
-  }
-}
+const LANTERN_NEAR_BOOST_OFFSETS: Array<[number, number, number]> = [
+  [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
+  [1, 1, 0], [1, -1, 0], [-1, 1, 0], [-1, -1, 0],
+  [1, 0, 1], [1, 0, -1], [-1, 0, 1], [-1, 0, -1],
+  [0, 1, 1], [0, 1, -1], [0, -1, 1], [0, -1, -1],
+];
 
 // ── Face geometry data ──
 
 const FACE_SHADING = [0.85, 0.85, 1.0, 0.7, 0.9, 0.9];
 const FACE_NORMALS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+const FACE_UNIT_CORNERS = [
+  [[0, 0, 0], [0, 1, 0], [0, 1, 1], [0, 0, 1]],  // +X
+  [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]],  // -X
+  [[0, 0, 0], [0, 0, 1], [1, 0, 1], [1, 0, 0]],  // +Y
+  [[1, 0, 0], [1, 0, 1], [0, 0, 1], [0, 0, 0]],  // -Y
+  [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]],  // +Z
+  [[0, 1, 0], [1, 1, 0], [1, 0, 0], [0, 0, 0]],  // -Z
+];
 
 // ── Per-vertex Ambient Occlusion ──
 
@@ -271,80 +145,45 @@ function computeFaceAO(
   return ao;
 }
 
+// ── Lantern helpers ──
+
+function lanternLocalBoost(face: number, vx: number, vy: number, vz: number): number {
+  if (face === 2) return 1.28;
+  if (face === 3) return 1.02;
+  const centerDist = Math.abs(vx - 0.5) + Math.abs(vy - 0.5) + Math.abs(vz - 0.5);
+  return centerDist < 1.2 ? 1.22 : 1.14;
+}
+
+function lanternNeighborBoost(
+  gb: (x: number, y: number, z: number) => number,
+  bx: number, by: number, bz: number,
+): number {
+  let score = 0;
+  for (let i = 0; i < LANTERN_NEAR_BOOST_OFFSETS.length; i++) {
+    const o = LANTERN_NEAR_BOOST_OFFSETS[i]!;
+    if (gb(bx + o[0], by + o[1], bz + o[2]) === BlockType.Lantern) score++;
+    if (score >= 2) break;
+  }
+  if (score === 0) return 1;
+  if (score === 1) return 1.14;
+  return 1.24;
+}
+
 function packAo(ao: [number, number, number, number]): number {
   return (ao[0] & 3) | ((ao[1] & 3) << 2) | ((ao[2] & 3) << 4) | ((ao[3] & 3) << 6);
-}
-
-// ── Per-vertex light sampling ──
-// Samples the same 4-cell neighborhood as AO on the air side of each face
-// and averages each channel over the open cells (smooth lighting).
-
-function sampleCornerLight(
-  channel: Uint8Array,
-  baseX: number,
-  baseZ: number,
-  cells: Array<[number, number, number]>,
-): number {
-  let sum = 0;
-  let count = 0;
-  for (let i = 0; i < 4; i++) {
-    const [wx, wy, wz] = cells[i]!;
-    if (wy >= WORLD_Y) {
-      // Above the world: open sky
-      sum += channel === volSun ? LIGHT_MAX : 0;
-      count++;
-      continue;
-    }
-    const vx = wx - baseX;
-    const vz = wz - baseZ;
-    if (vx < 0 || vx >= VOL_XZ || vz < 0 || vz >= VOL_XZ || wy < 0) continue;
-    const idx = volIndex(vx, wy, vz);
-    if (volBlocks[idx] !== 0) continue;
-    sum += channel[idx]!;
-    count++;
-  }
-  return count > 0 ? sum / count : 0;
-}
-
-function computeFaceLight(
-  baseX: number,
-  baseZ: number,
-  bx: number, by: number, bz: number, face: number,
-): [number, number] {
-  const n = FACE_NORMALS[face]!;
-  const t = AO_TANGENTS[face]!;
-  const signs = AO_SIGNS[face]!;
-  const ax = bx + n[0]!, ay = by + n[1]!, az = bz + n[2]!;
-  let sunPack = 0;
-  let torchPack = 0;
-  for (let c = 0; c < 4; c++) {
-    const s1 = signs[c]![0]!, s2 = signs[c]![1]!;
-    const cells: Array<[number, number, number]> = [
-      [ax, ay, az],
-      [ax + s1 * t[0]!, ay + s1 * t[1]!, az + s1 * t[2]!],
-      [ax + s2 * t[3]!, ay + s2 * t[4]!, az + s2 * t[5]!],
-      [ax + s1 * t[0]! + s2 * t[3]!, ay + s1 * t[1]! + s2 * t[4]!, az + s1 * t[2]! + s2 * t[5]!],
-    ];
-    const sun = Math.round(sampleCornerLight(volSun, baseX, baseZ, cells));
-    const torch = Math.round(sampleCornerLight(volTorch, baseX, baseZ, cells));
-    sunPack |= (sun & 0xf) << (c * 4);
-    torchPack |= (torch & 0xf) << (c * 4);
-  }
-  return [sunPack, torchPack];
 }
 
 // ── Face builder (greedy quads) ──
 
 function addQuad(
-  pos: number[], nrm: number[], col: number[], lig: number[],
+  pos: number[], nrm: number[], col: number[],
   cr: number, cg: number, cb: number,
   x: number, y: number, z: number,
   uSpan: number,
   vSpan: number,
   face: number,
   aoPacked: number,
-  sunPacked: number,
-  torchPacked: number,
+  blockType: number,
 ): void {
   const n = FACE_NORMALS[face]!;
   const s = FACE_SHADING[face]!;
@@ -408,17 +247,16 @@ function addQuad(
       break;
   }
 
+  const unitCorners = FACE_UNIT_CORNERS[face]!;
   for (let i = 0; i < 6; i++) {
     const ci = idx[i]!;
     const v = corners[ci]!;
-    const m = aoMul[ci]!;
+    const uv = unitCorners[ci]!;
+    const lanternBoost = blockType === BlockType.Lantern ? lanternLocalBoost(face, uv[0]!, uv[1]!, uv[2]!) : 1;
+    const m = Math.min(1.85, aoMul[ci]! * lanternBoost);
     pos.push(v[0], v[1], v[2]);
     nrm.push(n[0]!, n[1]!, n[2]!);
     col.push(cr * m, cg * m, cb * m);
-    lig.push(
-      ((sunPacked >> (ci * 4)) & 0xf) / LIGHT_MAX,
-      ((torchPacked >> (ci * 4)) & 0xf) / LIGHT_MAX,
-    );
   }
 }
 
@@ -448,11 +286,10 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
   const faceMaskSize = CHUNK * CHUNK;
   const EMPTY_KEY = 0xffffffff;
 
-  // Build neighbor lookup. dy spans the full world height (vertical chunk
-  // columns are always sent) so sky light can be traced top to bottom.
+  // Build neighbor lookup
   const neighborMap = new Map<number, Uint8Array>();
   for (const n of neighbors) {
-    const key = ((n.dx + 1) * 25) + ((n.dy + 2) * 5) + (n.dz + 1);
+    const key = ((n.dx + 1) * 9) + ((n.dy + 1) * 3) + (n.dz + 1);
     neighborMap.set(key, n.data);
   }
 
@@ -470,9 +307,9 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
     const ncx = Math.floor(gx / CHUNK) - cx;
     const ncy = Math.floor(gy / CHUNK) - cy;
     const ncz = Math.floor(gz / CHUNK) - cz;
-    if (Math.abs(ncx) > 1 || Math.abs(ncy) > 2 || Math.abs(ncz) > 1) return 0;
+    if (Math.abs(ncx) > 1 || Math.abs(ncy) > 1 || Math.abs(ncz) > 1) return 0;
 
-    const key = ((ncx + 1) * 25) + ((ncy + 2) * 5) + (ncz + 1);
+    const key = ((ncx + 1) * 9) + ((ncy + 1) * 3) + (ncz + 1);
     const nData = neighborMap.get(key);
     if (!nData) return 0;
 
@@ -482,14 +319,9 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
     return nData[nlx + nly * CHUNK + nlz * CHUNK * CHUNK]!;
   };
 
-  computeLightVolume(gb, x0, z0);
-  const lightBaseX = x0 - CHUNK;
-  const lightBaseZ = z0 - CHUNK;
-
   const pos: number[] = [];
   const nrm: number[] = [];
   const col: number[] = [];
-  const lig: number[] = [];
 
   const colorReady = new Uint8Array(voxelCount);
   const colorR = new Float32Array(voxelCount);
@@ -500,8 +332,7 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
   const mask: FaceRunBuffers = {
     key: new Uint32Array(faceMaskSize),
     ao: new Uint8Array(faceMaskSize),
-    sunPack: new Uint16Array(faceMaskSize),
-    torchPack: new Uint16Array(faceMaskSize),
+    blockType: new Uint8Array(faceMaskSize),
     cr: new Float32Array(faceMaskSize),
     cg: new Float32Array(faceMaskSize),
     cb: new Float32Array(faceMaskSize),
@@ -522,6 +353,13 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
         cr = Math.min(1, cr * 1.45 + 0.2);
         cg = Math.min(1, cg * 1.45 + 0.12);
         cb = cb * 1.45;
+      } else {
+        const nearBoost = lanternNeighborBoost(gb, wx, wy, wz);
+        if (nearBoost > 1) {
+          cr = Math.min(1, cr * nearBoost + 0.02 * (nearBoost - 1) * 10);
+          cg = Math.min(1, cg * nearBoost + 0.015 * (nearBoost - 1) * 10);
+          cb = cb * nearBoost;
+        }
       }
 
       // Keep the original fine-grained variation profile for visual richness.
@@ -556,7 +394,7 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
     fixed: number,
     fixedIs: 'x' | 'y' | 'z',
   ): void => {
-    const { key, ao, sunPack, torchPack, cr, cg, cb } = mask;
+    const { key, ao, blockType, cr, cg, cb } = mask;
 
     for (let v = 0; v < CHUNK; v++) {
       for (let u = 0; u < CHUNK; u++) {
@@ -565,13 +403,11 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
         if (cellKey === EMPTY_KEY) continue;
 
         const cellAo = ao[idx]!;
-        const cellSun = sunPack[idx]!;
-        const cellTorch = torchPack[idx]!;
 
         let width = 1;
         while (u + width < CHUNK && width < MAX_GREEDY_SPAN) {
           const n = idx + width;
-          if (key[n] !== cellKey || ao[n] !== cellAo || sunPack[n] !== cellSun || torchPack[n] !== cellTorch) break;
+          if (key[n] !== cellKey || ao[n] !== cellAo) break;
           width++;
         }
 
@@ -581,14 +417,14 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
           const row = (v + height) * CHUNK + u;
           for (let k = 0; k < width; k++) {
             const n = row + k;
-            if (key[n] !== cellKey || ao[n] !== cellAo || sunPack[n] !== cellSun || torchPack[n] !== cellTorch) break rowLoop;
+            if (key[n] !== cellKey || ao[n] !== cellAo) break rowLoop;
           }
           height++;
         }
 
         if (fixedIs === 'x') {
           addQuad(
-            pos, nrm, col, lig,
+            pos, nrm, col,
             cr[idx]!, cg[idx]!, cb[idx]!,
             x0 + fixed,
             y0 + u,
@@ -597,12 +433,11 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
             height,
             face,
             cellAo,
-            cellSun,
-            cellTorch,
+            blockType[idx]!,
           );
         } else if (fixedIs === 'y') {
           addQuad(
-            pos, nrm, col, lig,
+            pos, nrm, col,
             cr[idx]!, cg[idx]!, cb[idx]!,
             x0 + u,
             y0 + fixed,
@@ -611,12 +446,11 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
             height,
             face,
             cellAo,
-            cellSun,
-            cellTorch,
+            blockType[idx]!,
           );
         } else {
           addQuad(
-            pos, nrm, col, lig,
+            pos, nrm, col,
             cr[idx]!, cg[idx]!, cb[idx]!,
             x0 + u,
             y0 + v,
@@ -625,8 +459,7 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
             height,
             face,
             cellAo,
-            cellSun,
-            cellTorch,
+            blockType[idx]!,
           );
         }
 
@@ -657,9 +490,7 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
         const [cr, cg, cb, k] = getVoxelColor(localIndex, b, wx, wy, wz);
         mask.key[m] = k;
         mask.ao[m] = packAo(computeFaceAO(gb, wx, wy, wz, 0));
-        const [sp, tp] = computeFaceLight(lightBaseX, lightBaseZ, wx, wy, wz, 0);
-        mask.sunPack[m] = sp;
-        mask.torchPack[m] = tp;
+        mask.blockType[m] = b;
         mask.cr[m] = cr;
         mask.cg[m] = cg;
         mask.cb[m] = cb;
@@ -682,9 +513,7 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
         const [cr, cg, cb, k] = getVoxelColor(localIndex, b, wx, wy, wz);
         mask.key[m] = k;
         mask.ao[m] = packAo(computeFaceAO(gb, wx, wy, wz, 1));
-        const [sp, tp] = computeFaceLight(lightBaseX, lightBaseZ, wx, wy, wz, 1);
-        mask.sunPack[m] = sp;
-        mask.torchPack[m] = tp;
+        mask.blockType[m] = b;
         mask.cr[m] = cr;
         mask.cg[m] = cg;
         mask.cb[m] = cb;
@@ -710,9 +539,7 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
         const [cr, cg, cb, k] = getVoxelColor(localIndex, b, wx, wy, wz);
         mask.key[m] = k;
         mask.ao[m] = packAo(computeFaceAO(gb, wx, wy, wz, 2));
-        const [sp, tp] = computeFaceLight(lightBaseX, lightBaseZ, wx, wy, wz, 2);
-        mask.sunPack[m] = sp;
-        mask.torchPack[m] = tp;
+        mask.blockType[m] = b;
         mask.cr[m] = cr;
         mask.cg[m] = cg;
         mask.cb[m] = cb;
@@ -735,9 +562,7 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
         const [cr, cg, cb, k] = getVoxelColor(localIndex, b, wx, wy, wz);
         mask.key[m] = k;
         mask.ao[m] = packAo(computeFaceAO(gb, wx, wy, wz, 3));
-        const [sp, tp] = computeFaceLight(lightBaseX, lightBaseZ, wx, wy, wz, 3);
-        mask.sunPack[m] = sp;
-        mask.torchPack[m] = tp;
+        mask.blockType[m] = b;
         mask.cr[m] = cr;
         mask.cg[m] = cg;
         mask.cb[m] = cb;
@@ -763,9 +588,7 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
         const [cr, cg, cb, k] = getVoxelColor(localIndex, b, wx, wy, wz);
         mask.key[m] = k;
         mask.ao[m] = packAo(computeFaceAO(gb, wx, wy, wz, 4));
-        const [sp, tp] = computeFaceLight(lightBaseX, lightBaseZ, wx, wy, wz, 4);
-        mask.sunPack[m] = sp;
-        mask.torchPack[m] = tp;
+        mask.blockType[m] = b;
         mask.cr[m] = cr;
         mask.cg[m] = cg;
         mask.cb[m] = cb;
@@ -788,9 +611,7 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
         const [cr, cg, cb, k] = getVoxelColor(localIndex, b, wx, wy, wz);
         mask.key[m] = k;
         mask.ao[m] = packAo(computeFaceAO(gb, wx, wy, wz, 5));
-        const [sp, tp] = computeFaceLight(lightBaseX, lightBaseZ, wx, wy, wz, 5);
-        mask.sunPack[m] = sp;
-        mask.torchPack[m] = tp;
+        mask.blockType[m] = b;
         mask.cr[m] = cr;
         mask.cg[m] = cg;
         mask.cb[m] = cb;
@@ -803,6 +624,5 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
     position: new Float32Array(pos),
     normal: new Float32Array(nrm),
     color: new Float32Array(col),
-    light: new Float32Array(lig),
   };
 }

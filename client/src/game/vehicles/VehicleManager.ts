@@ -494,8 +494,6 @@ export default class VehicleManager {
     mesh.userData.currentOpacity = 1.0;
     mesh.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material) {
-        child.castShadow = true;
-        child.receiveShadow = true;
         const mat = child.material as THREE.Material;
         if (!mat.userData) mat.userData = {};
         mat.userData.baseOpacity = mat.opacity;
@@ -1026,6 +1024,7 @@ export default class VehicleManager {
 
     const portId = this.engine.addDynamicLight({
       kind: 'helicopter',
+      type: 'point',
       position: mesh.position.clone(),
       color: 0xff3d3d,
       intensity: 0.85,
@@ -1034,6 +1033,7 @@ export default class VehicleManager {
     });
     const starboardId = this.engine.addDynamicLight({
       kind: 'helicopter',
+      type: 'point',
       position: mesh.position.clone(),
       color: 0x4cff83,
       intensity: 0.85,
@@ -1042,6 +1042,7 @@ export default class VehicleManager {
     });
     const bellyId = this.engine.addDynamicLight({
       kind: 'helicopter',
+      type: 'point',
       position: mesh.position.clone(),
       color: 0xaee7ff,
       intensity: 1.1,

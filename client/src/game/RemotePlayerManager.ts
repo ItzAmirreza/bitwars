@@ -1,4 +1,4 @@
-﻿import * as THREE from 'three';
+import * as THREE from 'three';
 import { InterpolationBuffer } from './InterpolationBuffer';
 import { WEAPONS } from './Weapons';
 import { getCharacterPreset, normalizeCharacterPreset } from '../characterPresets';
@@ -226,9 +226,9 @@ export class RemotePlayerManager {
     position: [number, number, number],
   ): THREE.Mesh {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+    mesh.position.set(...position);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    mesh.position.set(...position);
     parent.add(mesh);
     return mesh;
   }
@@ -361,9 +361,9 @@ export class RemotePlayerManager {
       pos: [number, number, number],
     ): void => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+      mesh.position.set(...pos);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      mesh.position.set(...pos);
       gun.add(mesh);
     };
 

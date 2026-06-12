@@ -10,13 +10,11 @@ self.onmessage = (event: MessageEvent<ChunkMeshWorkerRequest>) => {
     position: result.position,
     normal: result.normal,
     color: result.color,
-    light: result.light,
   };
 
   (self as unknown as Worker).postMessage(response, [
     result.position.buffer,
     result.normal.buffer,
     result.color.buffer,
-    result.light.buffer,
   ] as Transferable[]);
 };

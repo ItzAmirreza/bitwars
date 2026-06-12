@@ -1,11 +1,11 @@
-﻿/**
- * FighterJetType.ts â€” VehicleType implementation for the fighter jet.
+/**
+ * FighterJetType.ts — VehicleType implementation for the fighter jet.
  *
  * Contains:
- *  â€¢ Procedural voxel-style model builder (fuselage, delta wings, tail, cockpit, exhaust)
- *  â€¢ Per-frame animation (banking, pitch, afterburner glow)
- *  â€¢ Breakup piece spawning on destruction
- *  â€¢ All fighter jet constants from shared-config
+ *  • Procedural voxel-style model builder (fuselage, delta wings, tail, cockpit, exhaust)
+ *  • Per-frame animation (banking, pitch, afterburner glow)
+ *  • Breakup piece spawning on destruction
+ *  • All fighter jet constants from shared-config
  */
 
 import * as THREE from 'three';
@@ -20,7 +20,7 @@ import type {
   VehicleTypeDestroyContext,
 } from './VehicleBase';
 
-// â”€â”€ Constants â”€â”€
+// ── Constants ──
 const VEHICLE_TYPE_FIGHTER_JET = VEHICLE_TYPES.FighterJet;
 const JET_BREAKUP_GRAVITY = 24;
 
@@ -49,15 +49,15 @@ export class FighterJetType implements VehicleType {
     return FIGHTER_JET.pilotSeatHeight;
   }
 
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ══════════════════════════════════════════════════════════════
   //  MODEL BUILDER
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ══════════════════════════════════════════════════════════════
 
   createModel(): THREE.Group {
     const jet = new THREE.Group();
     jet.name = 'fighter-jet-root';
 
-    // â”€â”€ Shared voxel-style material â”€â”€
+    // ── Shared voxel-style material ──
     const voxMat = new THREE.MeshPhongMaterial({
       vertexColors: true,
       emissive: new THREE.Color(0x0a0f1a),
@@ -126,6 +126,8 @@ export class FighterJetType implements VehicleType {
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(...pos);
       mesh.rotation.set(...rot);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       parent.add(mesh);
       return mesh;
     };
@@ -140,7 +142,7 @@ export class FighterJetType implements VehicleType {
       hex: number, pos: [number, number, number], rot?: [number, number, number],
     ) => shadedBox(parent, size, hex, pos, rot, glassMat);
 
-    // â”€â”€ Color palette (dark military grey) â”€â”€
+    // ── Color palette (dark military grey) ──
     const SHELL     = 0x3a3e42;
     const SHELL_LT  = 0x484e54;
     const SHELL_DK  = 0x2a2e32;
@@ -151,7 +153,7 @@ export class FighterJetType implements VehicleType {
     const EXHAUST   = 0x151820;
     const EXHAUST_GLOW = 0xff6622;
 
-    // â”€â”€ FUSELAGE (nose â†’ tail along +X) â”€â”€
+    // ── FUSELAGE (nose → tail along +X) ──
     const fuselage = new THREE.Group();
     fuselage.name = 'fuselage';
     jet.add(fuselage);
@@ -178,7 +180,7 @@ export class FighterJetType implements VehicleType {
     B(fuselage, [1.0, 0.6, 0.15], DARK,     [-0.4, 1.8, -1.38]);
     B(fuselage, [1.0, 0.6, 0.15], DARK,     [-0.4, 1.8, 1.38]);
 
-    // â”€â”€ DELTA WINGS â”€â”€
+    // ── DELTA WINGS ──
     const wingGroup = new THREE.Group();
     wingGroup.name = 'wings';
     jet.add(wingGroup);
@@ -194,7 +196,7 @@ export class FighterJetType implements VehicleType {
         [-3.5, 1.65, z * 5.5]);
     }
 
-    // â”€â”€ TAIL â”€â”€
+    // ── TAIL ──
     const tailSection = new THREE.Group();
     tailSection.name = 'tail-section';
     tailSection.position.set(-5.8, 1.9, 0);
@@ -208,7 +210,7 @@ export class FighterJetType implements VehicleType {
       B(tailSection, [0.12, 0.14, 0.12], ACCENT,   [0.5, 0.15, side * 1.9]);
     }
 
-    // â”€â”€ ENGINE EXHAUST â”€â”€
+    // ── ENGINE EXHAUST ──
     const exhaustGroup = new THREE.Group();
     exhaustGroup.name = 'jet-exhaust';
     exhaustGroup.position.set(-6.8, 1.9, 0);
@@ -244,7 +246,7 @@ export class FighterJetType implements VehicleType {
     B(fuselage, [0.1, 0.1, 0.1],   ACCENT, [5.62, 1.75, 0]);
     B(fuselage, [0.06, 0.06, 0.06], ACCENT, [3.2, 3.05, 0]);
 
-    // â”€â”€ LANDING GEAR â”€â”€
+    // ── LANDING GEAR ──
     const GEAR_COL   = 0x2a2e32;
     const WHEEL_COL  = 0x1a1c1e;
     const STRUT_COL  = 0x555a60;
@@ -273,7 +275,7 @@ export class FighterJetType implements VehicleType {
     B(rightGear, [0.08, 0.25, 0.08], GEAR_COL,  [-0.8, 0.05, 1.6]);
     jet.add(rightGear);
 
-    // Orient wrapper â€” model faces +X, wrapper rotates so +Z forward matches server
+    // Orient wrapper — model faces +X, wrapper rotates so +Z forward matches server
     const orientWrapper = new THREE.Group();
     orientWrapper.name = 'fighter-jet-orient-wrapper';
     orientWrapper.rotation.y = Math.PI / 2;
@@ -285,9 +287,9 @@ export class FighterJetType implements VehicleType {
     return jet;
   }
 
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ══════════════════════════════════════════════════════════════
   //  PER-FRAME ANIMATION
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ══════════════════════════════════════════════════════════════
 
   updatePerFrame(
     instance: VehicleInstance,
@@ -298,7 +300,7 @@ export class FighterJetType implements VehicleType {
     const mesh = instance.mesh;
     const id = instance.entityId;
 
-    // Banking/roll animation (stronger than helicopter) â€” uses smoothed
+    // Banking/roll animation (stronger than helicopter) — uses smoothed
     // derived velocity to avoid fixed-timestep quantization jitter.
     const prevPos = mesh.userData.prevFramePos as THREE.Vector3 | undefined;
     let hSpeed = 0;
@@ -339,7 +341,7 @@ export class FighterJetType implements VehicleType {
       (mesh.userData.prevFramePos as THREE.Vector3).copy(mesh.position);
     }
 
-    // â”€â”€ Landing gear retraction â”€â”€
+    // ── Landing gear retraction ──
     // Gear extends when slow + low altitude, retracts when fast or high
     const altitude = mesh.position.y;
     const gearShouldBeDown = hSpeed < 15 && altitude < 20;
@@ -370,7 +372,7 @@ export class FighterJetType implements VehicleType {
       }
     }
 
-    // â”€â”€ Compute throttle intensity (0â€“1) â”€â”€
+    // ── Compute throttle intensity (0–1) ──
     let throttle = 0;
     if (isLocal) {
       if (ctx.controls.moveForward) throttle = 1.0;
@@ -386,7 +388,7 @@ export class FighterJetType implements VehicleType {
       }
     }
 
-    // â”€â”€ Orient wrapper subtle idle sway (much less than heli) â”€â”€
+    // ── Orient wrapper subtle idle sway (much less than heli) ──
     if (orientWrapper) {
       const idleBlend = Math.max(0, 1 - hSpeed / 25);
       const phase = id * 1.7;
@@ -400,7 +402,7 @@ export class FighterJetType implements VehicleType {
       orientWrapper.rotation.set(0, Math.PI / 2 + swayYaw, swayRoll);
     }
 
-    // â”€â”€ Afterburner glow â”€â”€
+    // ── Afterburner glow ──
     const exhaustGroup = mesh.getObjectByName('jet-exhaust');
     if (exhaustGroup) {
       const innerGlow = exhaustGroup.getObjectByName('afterburner-inner') as THREE.Mesh | null;
@@ -430,13 +432,13 @@ export class FighterJetType implements VehicleType {
       }
     }
 
-    // â”€â”€ Jet engine audio â”€â”€
+    // ── Jet engine audio ──
     ctx.audio.updateJetEngineSound(id, mesh.position, hSpeed, isLocal);
   }
 
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ══════════════════════════════════════════════════════════════
   //  DESTRUCTION
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ══════════════════════════════════════════════════════════════
 
   onDestroy(
     instance: VehicleInstance,
@@ -510,6 +512,8 @@ export class FighterJetType implements VehicleType {
       local.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
       mesh.position.copy(origin).add(local);
       mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       ctx.scene.add(mesh);
 
       radial.copy(local).normalize();
@@ -558,6 +562,6 @@ export class FighterJetType implements VehicleType {
     return pieces;
   }
 
-  // â”€â”€ Breakup piece gravity constant â”€â”€
+  // ── Breakup piece gravity constant ──
   static readonly BREAKUP_GRAVITY = JET_BREAKUP_GRAVITY;
 }

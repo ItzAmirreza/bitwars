@@ -10,7 +10,6 @@ export interface ChunkMeshWorkerResponse {
   position: Float32Array;
   normal: Float32Array;
   color: Float32Array;
-  light: Float32Array;
 }
 
 export interface PendingMeshJob {
