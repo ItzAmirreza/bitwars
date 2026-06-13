@@ -212,7 +212,7 @@ pub fn update_position(
     // Admins skip grounding check — they may be flying (/fly) and would
     // otherwise stay permanently spawn-protected, which blocks firing.
     let spawn_protected =
-        player.spawn_protected && !is_admin(&player.username) && !is_grounded(ctx, &clamped_pos);
+        player.spawn_protected && !is_admin(ctx, sender) && !is_grounded(ctx, &clamped_pos);
 
     let updated = Player {
         pos: clamped_pos,

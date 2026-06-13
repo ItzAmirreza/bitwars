@@ -98,6 +98,19 @@ The bindings are committed to the repo — include the regenerated files in your
 
 To populate your local world with bots, run `bun run bots:local` from `client/` (it targets `ws://127.0.0.1:3000` / `bitwars-local`). See the `bots/` directory for details.
 
+### Optional: admin commands in local dev
+
+Admin chat commands (`/weather`, `/time`, `/spawn`, `/god`, …) are **off by default** — production has no in-game admin. To enable them locally, build the server with the `dev` feature (which makes every player an admin) and publish that build:
+
+```bash
+cd server/spacetimedb
+cargo build --features dev --target wasm32-unknown-unknown --release
+cd ..
+spacetime publish bitwars-local --server local -b spacetimedb/target/wasm32-unknown-unknown/release/server.wasm --module-path ./spacetimedb
+```
+
+Never build with `--features dev` for anything that touches production — production must always be built without it.
+
 ## Before you write code
 
 Read these first — they will save you a rejected PR:

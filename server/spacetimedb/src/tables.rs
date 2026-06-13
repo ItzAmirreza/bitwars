@@ -26,6 +26,19 @@ pub struct ServerInfo {
     pub build_hash: String,
 }
 
+/// Admin allow-list, keyed by SpacetimeDB Identity. PRIVATE (not `public`) so
+/// clients cannot read or enumerate who the admins are. Admin authority is
+/// gated by Identity only — never by display name. Populated by the
+/// `SEED_ADMIN_IDENTITIES` allow-list seeded at init, or the admin-only
+/// `grant_admin`/`revoke_admin` reducers. In `dev` builds every player is an
+/// admin and this table is unused.
+#[table(accessor = admin_identity)]
+pub struct AdminIdentity {
+    #[primary_key]
+    pub identity: Identity,
+    pub granted_at: Timestamp,
+}
+
 // ── Core Entities ──
 
 /// Every connected player.

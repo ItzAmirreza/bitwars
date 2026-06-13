@@ -31,7 +31,7 @@ pub fn send_chat(ctx: &ReducerContext, text: String) -> Result<(), String> {
         .ok_or("Not registered")?;
 
     if text == "/" || text.eq_ignore_ascii_case("/help") {
-        if is_admin(&player.username) {
+        if is_admin(ctx, sender) {
             insert_admin_help(ctx);
             return Ok(());
         }
@@ -40,7 +40,7 @@ pub fn send_chat(ctx: &ReducerContext, text: String) -> Result<(), String> {
     }
 
     if text.starts_with('/') {
-        if !is_admin(&player.username) {
+        if !is_admin(ctx, sender) {
             return Err("Unknown command".to_string());
         }
         return process_admin_command(ctx, sender, &text);

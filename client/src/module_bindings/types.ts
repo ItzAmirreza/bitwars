@@ -39,6 +39,12 @@ export const AbilityTick = __t.object("AbilityTick", {
 });
 export type AbilityTick = __Infer<typeof AbilityTick>;
 
+export const AdminIdentity = __t.object("AdminIdentity", {
+  identity: __t.identity(),
+  grantedAt: __t.timestamp(),
+});
+export type AdminIdentity = __Infer<typeof AdminIdentity>;
+
 export const AdminTeleportEvent = __t.object("AdminTeleportEvent", {
   id: __t.u64(),
   player: __t.identity(),

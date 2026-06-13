@@ -31,6 +31,7 @@ pub fn init(ctx: &ReducerContext) {
         round_start: ctx.timestamp,
     });
     set_waiting_match_state(ctx);
+    crate::admin::seed_admins(ctx);
 
     // Pregenerate entire world
     let mut chunk_count = 0u32;

@@ -36,3 +36,6 @@ Thumbs.db
 
 # Claude Code
 .claude/
+
+# Bot auth tokens (written to .context/bot-tokens/ by the bot runner)
+.context/

@@ -19,14 +19,18 @@ function parseArgs(argv: string[]): CliConfig {
   const config: CliConfig = {
     count: Number.isFinite(envCount) && envCount > 0 ? Math.floor(envCount) : 10,
     prefix: process.env.BOT_PREFIX ?? 'BOT',
+    // Default to a LOCAL instance so running the bots with no args/env never
+    // floods production. Targeting maincloud is an explicit opt-in via
+    // --uri/--module or the SPACETIMEDB_URI/SPACETIMEDB_MODULE env vars (the
+    // production bot fleet sets these in Dockerfile.bots).
     uri:
       process.env.SPACETIMEDB_URI ??
       process.env.VITE_SPACETIMEDB_URI ??
-      'wss://maincloud.spacetimedb.com',
+      'ws://127.0.0.1:3000',
     moduleName:
       process.env.SPACETIMEDB_MODULE ??
       process.env.VITE_MODULE_NAME ??
-      'bitwars',
+      'bitwars-local',
     tickMs: Number.isFinite(envTickMs) && envTickMs > 0 ? Math.floor(envTickMs) : 33,
     usernameFile:
       process.env.BOT_USERNAME_FILE ??

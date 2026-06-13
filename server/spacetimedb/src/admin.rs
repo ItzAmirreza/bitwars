@@ -1,18 +1,57 @@
 // ── Admin Commands ──
 // Chat-based admin commands processed from /send_chat.
 
-use spacetimedb::{Identity, ReducerContext, Table};
+use spacetimedb::{log, reducer, Identity, ReducerContext, Table};
 
 use crate::constants::*;
 use crate::helpers::*;
 use crate::tables::*;
 use crate::types::*;
 
-const ADMIN_USERNAME: &str = "amir";
 const ADMIN_HELP_TEXT: &str = "Admin commands:\n/tp <player> or /tp <x> <y> <z>\n/tphere <player>\n/kill <player>\n/heal [player]\n/god\n/fly\n/ammo\n/spawn <heli|jet|aa>\n/weather <0-4>\n/time <0-24>\n/announce <message>\n/killall\n/respawnall";
 
-pub fn is_admin(username: &str) -> bool {
-    username.to_lowercase() == ADMIN_USERNAME
+/// Optional: hardcode admin Identity hex strings here and each is granted
+/// admin on every (re)publish via `seed_admins` in init. Leave empty (the
+/// default) and production has no in-game admin at all — admins are added only
+/// here or via the admin-only `grant_admin` reducer.
+const SEED_ADMIN_IDENTITIES: &[&str] = &[];
+
+/// Admin authority.
+///
+/// - In **dev** builds (the `dev` cargo feature) EVERY player is an admin, for
+///   convenient local testing.
+/// - In **production** builds the `dev` feature is OFF (and is never enabled by
+///   the production publish), so admin is gated solely by the private
+///   `admin_identity` table — which is EMPTY by default. So no one is an admin
+///   in production unless an identity is explicitly seeded out-of-band.
+///
+/// Admin is NEVER gated by display name.
+pub fn is_admin(ctx: &ReducerContext, identity: Identity) -> bool {
+    if cfg!(feature = "dev") {
+        return true;
+    }
+    ctx.db.admin_identity().identity().find(identity).is_some()
+}
+
+/// Grant admin to every identity in the compile-time allow-list (no-op when
+/// empty). Called from `init` so a freshly published database already has its
+/// admin(s) with no claim race.
+pub fn seed_admins(ctx: &ReducerContext) {
+    for hex in SEED_ADMIN_IDENTITIES {
+        match Identity::from_hex(hex) {
+            Ok(identity) => {
+                if ctx.db.admin_identity().identity().find(identity).is_none() {
+                    ctx.db.admin_identity().insert(AdminIdentity {
+                        identity,
+                        granted_at: ctx.timestamp,
+                    });
+                }
+            }
+            Err(_) => {
+                log::warn!("SEED_ADMIN_IDENTITIES contains an invalid identity hex; skipped")
+            }
+        }
+    }
 }
 
 fn find_player_by_name(ctx: &ReducerContext, name: &str) -> Option<Player> {
@@ -409,4 +448,33 @@ pub fn process_admin_command(
             Ok(())
         }
     }
+}
+
+/// Grant admin to another identity. Only an existing admin may call this.
+#[reducer]
+pub fn grant_admin(ctx: &ReducerContext, target: Identity) -> Result<(), String> {
+    if !is_admin(ctx, ctx.sender()) {
+        return Err("Not authorized".to_string());
+    }
+    if ctx.db.admin_identity().identity().find(target).is_none() {
+        ctx.db.admin_identity().insert(AdminIdentity {
+            identity: target,
+            granted_at: ctx.timestamp,
+        });
+    }
+    Ok(())
+}
+
+/// Revoke another identity's admin. Only an existing admin may call this, and
+/// the last remaining admin cannot be removed (prevents lockout).
+#[reducer]
+pub fn revoke_admin(ctx: &ReducerContext, target: Identity) -> Result<(), String> {
+    if !is_admin(ctx, ctx.sender()) {
+        return Err("Not authorized".to_string());
+    }
+    if ctx.db.admin_identity().iter().count() <= 1 {
+        return Err("Cannot remove the last admin".to_string());
+    }
+    ctx.db.admin_identity().identity().delete(target);
+    Ok(())
 }

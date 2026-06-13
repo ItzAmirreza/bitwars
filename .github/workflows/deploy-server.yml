@@ -1,12 +1,10 @@
 name: Deploy Server
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'server/**'
-      - 'shared/game-constants.json'
-
+  # Production publish is MANUAL ONLY. Auto-publishing on every push to master
+  # was a production-wipe hazard: this job runs `spacetime publish ...
+  # --clear-database`, so merging a contributor's server PR would have reset
+  # the live database. Trigger it deliberately from the Actions tab instead.
   workflow_dispatch:
 
 permissions:

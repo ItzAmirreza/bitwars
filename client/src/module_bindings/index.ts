@@ -38,12 +38,14 @@ import CollectAbilityReducer from "./collect_ability_reducer";
 import DestroyBlocksPhysicsReducer from "./destroy_blocks_physics_reducer";
 import FireVehicleWeaponReducer from "./fire_vehicle_weapon_reducer";
 import FireWeaponReducer from "./fire_weapon_reducer";
+import GrantAdminReducer from "./grant_admin_reducer";
 import InteractVehicleReducer from "./interact_vehicle_reducer";
 import ProjectileImpactReducer from "./projectile_impact_reducer";
 import ReloadVehicleWeaponReducer from "./reload_vehicle_weapon_reducer";
 import ReloadWeaponReducer from "./reload_weapon_reducer";
 import RequestChunksReducer from "./request_chunks_reducer";
 import RespawnReducer from "./respawn_reducer";
+import RevokeAdminReducer from "./revoke_admin_reducer";
 import SendChatReducer from "./send_chat_reducer";
 import SetLoadoutReducer from "./set_loadout_reducer";
 import SetUsernameReducer from "./set_username_reducer";
@@ -388,12 +390,14 @@ const reducersSchema = __reducers(
   __reducerSchema("destroy_blocks_physics", DestroyBlocksPhysicsReducer),
   __reducerSchema("fire_vehicle_weapon", FireVehicleWeaponReducer),
   __reducerSchema("fire_weapon", FireWeaponReducer),
+  __reducerSchema("grant_admin", GrantAdminReducer),
   __reducerSchema("interact_vehicle", InteractVehicleReducer),
   __reducerSchema("projectile_impact", ProjectileImpactReducer),
   __reducerSchema("reload_vehicle_weapon", ReloadVehicleWeaponReducer),
   __reducerSchema("reload_weapon", ReloadWeaponReducer),
   __reducerSchema("request_chunks", RequestChunksReducer),
   __reducerSchema("respawn", RespawnReducer),
+  __reducerSchema("revoke_admin", RevokeAdminReducer),
   __reducerSchema("send_chat", SendChatReducer),
   __reducerSchema("set_loadout", SetLoadoutReducer),
   __reducerSchema("set_username", SetUsernameReducer),
