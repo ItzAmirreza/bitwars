@@ -1984,7 +1984,13 @@ export class HeadlessBitBot {
       desiredPitch = clamp(Math.atan2(ty, horiz), -1.0, 1.0);
     } else if (this.usingNeuralThisTick) {
       desiredYaw = this.navYaw;
-      desiredPitch = clamp(this.navPitch, -1.0, 1.0);
+      // The nav model rails its internal pitch to "stare at the ground" because
+      // that maximizes raycast coverage of nearby terrain — great for navigation,
+      // but it makes the avatar look robotic. The model still uses its full
+      // navPitch for observations (see computeNeuralAction); here we only clamp
+      // the *displayed* pitch to a natural near-level range. The bot isn't aiming
+      // while navigating, so this is purely cosmetic and doesn't affect pathing.
+      desiredPitch = clamp(this.navPitch, -0.28, 0.2);
     } else if (Math.abs(movement.x) > 0.01 || Math.abs(movement.z) > 0.01) {
       desiredYaw = Math.atan2(-movement.x, -movement.z);
       desiredPitch = 0;
