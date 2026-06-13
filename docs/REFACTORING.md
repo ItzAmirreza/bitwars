@@ -99,6 +99,7 @@ Other measured debts that don't show up as line counts:
 - **Block color palette defined 4 times**: `client/src/game/VoxelWorld.ts:38`, `client/src/game/chunkMeshing.ts:52`, `training/src/preview/ChunkMesher.ts:6`, `training/src/preview/MapView3D.tsx:25` → P1.4.
 - **15 unit tests total** (server 5, training 10, client 0), no test runner in any package.json, **zero CI checks on PRs** → P0.1, P1.5.
 - **No formatter config anywhere** (no `.editorconfig`, no Prettier config, no `rustfmt.toml`) → P0.4.
+- **ESLint backlog**: `bun run lint` reports a backlog of findings (mostly `@typescript-eslint/no-explicit-any`, concentrated in `Engine.ts`, plus unused-var noise on `_`-prefixed names). CI runs lint **non-blocking** for now. First step: add `argsIgnorePattern`/`varsIgnorePattern: '^_'` to the eslint config to clear the underscore noise, then chip away at the `any`s file-by-file; once clean, make the CI lint step blocking again (`.github/workflows/ci.yml`).
 
 ---
 
