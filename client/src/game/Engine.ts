@@ -2453,26 +2453,9 @@ export class Engine {
       direction: { x: direction.x, y: direction.y, z: direction.z },
     };
 
-    if (weaponIdx === 0) this.audio.playRifle(spatial);
-    else if (weaponIdx === 1) this.audio.playShotgun(spatial);
-    else if (weaponIdx === 2) this.audio.playRPGLaunch(spatial);
-    else if (weaponIdx === 3) this.audio.playMachineGun(spatial);
-    else if (weaponIdx === 4) this.audio.playGrenadeLaunch(spatial);
-    else if (weaponIdx === 5) this.audio.playSniper(spatial);
-    // Vehicle weapons (100+ namespace)
-    else if (weaponIdx === 100)
-      this.audio.playVehicleMinigun(spatial); // Minigun
-    else if (weaponIdx === 101)
-      this.audio.playVehicleRocket(spatial); // Rockets
-    else if (weaponIdx === 102)
-      this.audio.playKineticPenetratorFire(spatial); // Kinetic Penetrator
-    else if (weaponIdx === 103)
-      this.audio.playCarpetBombDrop(spatial); // Carpet Bomb
-    else if (weaponIdx === 104)
-      this.audio.playVehicleMinigun(spatial); // Autocannon
-    else if (weaponIdx === 105)
-      this.audio.playVehicleRocket(spatial); // SAM Missile
-    else if (weaponIdx === 106) this.audio.playVehicleRocket(spatial); // Air Missile
+    // Infantry weapons use indices 0–5; vehicle weapons use the 100+ namespace
+    // (100 + slot). The weapon-audio registry maps both to their fire sounds.
+    this.audio.playWeaponFire(weaponIdx, spatial);
   }
 
   private localAudioSource(heightOffset = 0): {

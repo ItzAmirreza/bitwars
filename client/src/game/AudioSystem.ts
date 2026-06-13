@@ -10,7 +10,7 @@
 import { AudioCore } from './audio/AudioCore';
 import type { SpatialSoundOptions, OcclusionSampler, Vec3Like } from './audio/AudioCore';
 import type { RayTraceResult } from './audio/AudioRayState';
-import * as WeaponAudio from './audio/WeaponAudio';
+import * as WeaponAudio from './audio/weapons';
 import * as CombatAudio from './audio/CombatAudio';
 import * as MovementAudio from './audio/MovementAudio';
 import * as UIAudio from './audio/UIAudio';
@@ -167,6 +167,11 @@ export class AudioSystem {
   }
 
   // ── Weapons ──
+
+  /** Play the procedural fire sound for a weapon index via the registry. */
+  playWeaponFire(weaponIndex: number, spatial?: SpatialSoundOptions): void {
+    WeaponAudio.playWeaponFire(this.core, weaponIndex, spatial);
+  }
 
   playRifle(spatial?: SpatialSoundOptions): void {
     WeaponAudio.playRifle(this.core, spatial);
