@@ -25,6 +25,24 @@
     "Bedrock": 15
   },
 
+  "blockColors": {
+    "Concrete": "#7a7a78",
+    "DarkConcrete": "#5a5a58",
+    "Asphalt": "#2a2a2e",
+    "Rebar": "#8b4513",
+    "Brick": "#6b3a2a",
+    "Metal": "#4a4e52",
+    "Rubble": "#6a6258",
+    "Dirt": "#5a4e3a",
+    "Sand": "#9a8e72",
+    "Grass": "#4a7a3a",
+    "Wood": "#6b4423",
+    "Stone": "#6a6a6a",
+    "Snow": "#d8d8e0",
+    "Lantern": "#ffcf78",
+    "Bedrock": "#1a1a2e"
+  },
+
   "entityKinds": {
     "Player": 1,
     "Vehicle": 2

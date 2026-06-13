@@ -4,6 +4,9 @@ import { buildChunkMeshData } from './chunkMeshing';
 import type { ChunkMeshBuildInput, ChunkMeshData, ChunkNeighborData } from './chunkMeshing';
 import type { ChunkMeshWorkerRequest, ChunkMeshWorkerResponse, PendingMeshJob, CompletedMeshJob } from './chunkMeshingWorkerTypes';
 
+// Block colors are sourced from shared/game-constants.json (single source of truth).
+export { BLOCK_COLORS } from '../shared-config';
+
 export interface ChunkApplyBudget {
   maxChunks: number;
   maxBuildChunks?: number;
@@ -34,24 +37,6 @@ export const BlockType = BLOCK_TYPES as {
   readonly Bedrock: 15;
 };
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
-
-export const BLOCK_COLORS: Record<number, number> = {
-  [BlockType.Concrete]: 0x7a7a78,
-  [BlockType.DarkConcrete]: 0x5a5a58,
-  [BlockType.Asphalt]: 0x2a2a2e,
-  [BlockType.Rebar]: 0x8b4513,
-  [BlockType.Brick]: 0x6b3a2a,
-  [BlockType.Metal]: 0x4a4e52,
-  [BlockType.Rubble]: 0x6a6258,
-  [BlockType.Dirt]: 0x5a4e3a,
-  [BlockType.Sand]: 0x9a8e72,
-  [BlockType.Grass]: 0x4a7a3a,
-  [BlockType.Wood]: 0x6b4423,
-  [BlockType.Stone]: 0x6a6a6a,
-  [BlockType.Snow]: 0xd8d8e0,
-  [BlockType.Lantern]: 0xffcf78,
-  [BlockType.Bedrock]: 0x1a1a2e,
-};
 
 export function packChunkId(cx: number, cy: number, cz: number): number {
   return (cx & 0xFF) | ((cy & 0xFF) << 8) | ((cz & 0xFF) << 16);

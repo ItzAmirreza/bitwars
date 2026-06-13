@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { LiveBotState } from './PreviewPage';
+import gameConstants from '../../../shared/game-constants.json';
 
 const WEAPON_NAMES = ['Rifle', 'Shotgun', 'RPG'];
 const ACTION_LABELS = ['Fwd', 'Strafe', 'Yaw', 'Pitch', 'Jump', 'Sprint', 'Fire', 'Weapon'];
@@ -22,23 +23,15 @@ const BOT_COLORS = [
   '#448844', '#884444', '#444488', '#888844',
 ];
 
-const BLOCK_COLORS: Record<number, [number, number, number]> = {
-  1: [135, 135, 135],
-  2: [102, 102, 102],
-  3: [69, 69, 69],
-  4: [153, 84, 51],
-  5: [171, 102, 69],
-  6: [120, 153, 171],
-  7: [120, 102, 84],
-  8: [135, 102, 69],
-  9: [204, 186, 135],
-  10: [84, 135, 51],
-  11: [153, 120, 69],
-  12: [153, 153, 153],
-  13: [222, 222, 237],
-  14: [255, 204, 69],
-  15: [51, 51, 51],
-};
+// Block colors are sourced from shared/game-constants.json (single source of truth),
+// converted from hex strings into 0–255 RGB triples keyed by block-type index.
+const BLOCK_COLORS: Record<number, [number, number, number]> = Object.fromEntries(
+  Object.entries(gameConstants.blockColors).map(([name, hex]) => {
+    const n = parseInt(hex.slice(1), 16);
+    const idx = (gameConstants.blockTypes as Record<string, number>)[name];
+    return [idx, [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff]];
+  }),
+);
 
 type Props = {
   bots: LiveBotState[];

@@ -7,7 +7,8 @@ export const WEATHER_OVERCAST = 2;
 export const WEATHER_RAINY = 3;
 export const WEATHER_STORMY = 4;
 
-export const WEATHER_NAMES = ['Clear', 'Cloudy', 'Overcast', 'Rainy', 'Stormy'] as const;
+// Weather names are sourced from shared/game-constants.json (single source of truth).
+export { WEATHER_NAMES } from '../shared-config';
 
 // ── Environment state from server ──
 export interface EnvironmentState {

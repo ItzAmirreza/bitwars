@@ -3,7 +3,7 @@
  * Used by both main thread (fallback) and web workers.
  */
 
-import { WORLD as WORLD_CONFIG, BLOCK_TYPES } from '../shared-config';
+import { WORLD as WORLD_CONFIG, BLOCK_TYPES, BLOCK_COLORS } from '../shared-config';
 
 const CHUNK = WORLD_CONFIG.chunkSize;
 
@@ -47,25 +47,7 @@ interface FaceRunBuffers {
 
 const MAX_GREEDY_SPAN = 2;
 
-// ── Block colors ──
-
-const BLOCK_COLORS: Record<number, number> = {
-  1: 0x7a7a78,   // Concrete
-  2: 0x5a5a58,   // DarkConcrete
-  3: 0x2a2a2e,   // Asphalt
-  4: 0x8b4513,   // Rebar
-  5: 0x6b3a2a,   // Brick
-  6: 0x4a4e52,   // Metal
-  7: 0x6a6258,   // Rubble
-  8: 0x5a4e3a,   // Dirt
-  9: 0x9a8e72,   // Sand
-  10: 0x4a7a3a,  // Grass
-  11: 0x6b4423,  // Wood
-  12: 0x6a6a6a,  // Stone
-  13: 0xd8d8e0,  // Snow
-  14: 0xffcf78,  // Lantern
-  15: 0x1a1a2e,  // Bedrock
-};
+// Block colors are sourced from shared/game-constants.json via shared-config.
 
 // ── Lantern boost offsets ──
 
