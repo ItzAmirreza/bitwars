@@ -13,6 +13,7 @@ import { KillFeed } from './hud/KillFeed';
 import { TopHudBar } from './hud/TopHudBar';
 import { BottomHud } from './hud/BottomHud';
 import { Crosshair } from './hud/Crosshair';
+import { CombatText } from './hud/CombatText';
 import { ChatOverlay } from './hud/ChatOverlay';
 import { DeathScreen } from './hud/DeathScreen';
 import { BuffIndicators } from './hud/BuffIndicators';
@@ -69,6 +70,8 @@ export function GameScreen({ active }: GameScreenProps) {
     deaths: 0,
     hitMarker: false,
     hitMarkerType: 'none',
+    crosshairSpread: 0,
+    combatTexts: [],
     timeOfDay: '12:00',
     weather: 'Clear',
     heading: 0,
@@ -802,15 +805,21 @@ export function GameScreen({ active }: GameScreenProps) {
 
       {/* ═══ CROSSHAIR + HIT MARKER ═══ */}
       {state.locked && !hudOverlayOpen && !matchSession.weaponsDisabled && (
-        <Crosshair
-          hitMarker={state.hitMarker}
-          hitMarkerType={state.hitMarkerType}
-          mountedVehicleName={state.mountedVehicleName}
-          vehicleWeapon={state.vehicleWeapon}
-          vehicleWeaponColor={state.vehicleWeaponSlots[state.vehicleWeapon]?.color}
-          damageIndicators={state.damageIndicators}
-          sniperScoped={state.sniperScoped}
-        />
+        <>
+          <Crosshair
+            hitMarker={state.hitMarker}
+            hitMarkerType={state.hitMarkerType}
+            mountedVehicleName={state.mountedVehicleName}
+            vehicleWeapon={state.vehicleWeapon}
+            vehicleWeaponColor={state.vehicleWeaponSlots[state.vehicleWeapon]?.color}
+            damageIndicators={state.damageIndicators}
+            crosshairSpread={state.crosshairSpread}
+            sniperScoped={state.sniperScoped}
+          />
+          {state.mountedVehicleName === null && (
+            <CombatText texts={state.combatTexts} />
+          )}
+        </>
       )}
 
       {/* ═══ AA CRAM TARGET TRACKING HUD ═══ */}

@@ -7,25 +7,31 @@ export interface CrosshairProps {
   vehicleWeapon: number;
   vehicleWeaponColor?: string;
   damageIndicators: DamageIndicatorState[];
+  crosshairSpread?: number;
   sniperScoped?: boolean;
 }
 
 function HitMarkerX({ type }: { type: string }) {
+  // 'kill' = server-confirmed kill: bigger, thicker, bright red.
+  const isKill = type === 'kill';
   const isPlayer = type === 'player';
-  const color = isPlayer ? '#ff2d78' : 'rgba(255,255,255,0.95)';
-  const size = isPlayer ? '18px' : '14px';
-  const offset = isPlayer ? '-9px' : '-7px';
+  const color = isKill ? '#ff2030' : isPlayer ? '#ff2d78' : 'rgba(255,255,255,0.95)';
+  const sizePx = isKill ? 26 : isPlayer ? 18 : 14;
+  const thick = isKill ? 3 : 2;
+  const size = `${sizePx}px`;
+  const offset = `${-sizePx / 2}px`;
+  const glow = isKill ? 'drop-shadow(0 0 5px rgba(255,32,48,0.9))' : 'none';
   return (
-    <div style={{ animation: 'hitmarker-flash 0.2s ease-out' }}>
+    <div style={{ animation: 'hitmarker-flash 0.2s ease-out', filter: glow }}>
       <div style={{
-        width: size, height: '2px', background: color,
+        width: size, height: `${thick}px`, background: color,
         transform: 'rotate(45deg)',
-        position: 'absolute', top: '50%', left: '50%', marginLeft: offset, marginTop: '-1px',
+        position: 'absolute', top: '50%', left: '50%', marginLeft: offset, marginTop: `${-thick / 2}px`,
       }} />
       <div style={{
-        width: size, height: '2px', background: color,
+        width: size, height: `${thick}px`, background: color,
         transform: 'rotate(-45deg)',
-        position: 'absolute', top: '50%', left: '50%', marginLeft: offset, marginTop: '-1px',
+        position: 'absolute', top: '50%', left: '50%', marginLeft: offset, marginTop: `${-thick / 2}px`,
       }} />
     </div>
   );
@@ -91,8 +97,11 @@ export function Crosshair({
   vehicleWeapon,
   vehicleWeaponColor,
   damageIndicators,
+  crosshairSpread = 0,
   sniperScoped,
 }: CrosshairProps) {
+  // Dynamic accuracy bloom: bars push outward from center while firing/moving.
+  const gap = Math.max(0, Math.min(1, crosshairSpread)) * 9;
   const isAirMissile = mountedVehicleName === 'Fighter Jet' && vehicleWeapon === 2;
   const missileColor = '#00e5ff';
 
@@ -101,7 +110,7 @@ export function Crosshair({
       <>
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
           {damageIndicators.map((indicator) => {
-            const scale = 0.9 + indicator.intensity * 0.18;
+            const scale = 0.85 + indicator.intensity * 0.34;
             return (
               <div
                 key={indicator.id}
@@ -110,7 +119,7 @@ export function Crosshair({
                   width: '152px', height: '152px',
                   transform: `translate(-50%, -50%) rotate(${indicator.angle}deg) scale(${scale})`,
                   transformOrigin: 'center', opacity: indicator.opacity,
-                  filter: `drop-shadow(0 0 ${8 + indicator.intensity * 10}px rgba(255,45,120,0.35))`,
+                  filter: `drop-shadow(0 0 ${10 + indicator.intensity * 14}px rgba(255,45,120,0.5))`,
                 }}
               >
                 <svg width="56" height="36" viewBox="0 0 56 36" fill="none"
@@ -144,7 +153,7 @@ export function Crosshair({
               transform: `translate(-50%, -50%) rotate(${indicator.angle}deg) scale(${scale})`,
               transformOrigin: 'center',
               opacity: indicator.opacity,
-              filter: `drop-shadow(0 0 ${8 + indicator.intensity * 10}px rgba(255,45,120,0.35))`,
+              filter: `drop-shadow(0 0 ${10 + indicator.intensity * 14}px rgba(255,45,120,0.5))`,
             }}
           >
             <svg
@@ -237,27 +246,31 @@ export function Crosshair({
           {hitMarker && <HitMarkerX type={hitMarkerType} />}
         </div>
       ) : (
-        /* Infantry crosshair - chunky pixel style */
+        /* Infantry crosshair - chunky pixel style (bars bloom outward with spread) */
         <div className="relative" style={{ width: '32px', height: '32px' }}>
           {/* Top */}
-          <div className="absolute left-1/2 -translate-x-1/2" style={{
+          <div className="absolute left-1/2" style={{
             top: '2px', width: '2px', height: '8px',
             background: 'rgba(255,255,255,0.8)',
+            transform: `translate(-50%, ${-gap}px)`,
           }} />
           {/* Bottom */}
-          <div className="absolute left-1/2 -translate-x-1/2" style={{
+          <div className="absolute left-1/2" style={{
             bottom: '2px', width: '2px', height: '8px',
             background: 'rgba(255,255,255,0.8)',
+            transform: `translate(-50%, ${gap}px)`,
           }} />
           {/* Left */}
-          <div className="absolute top-1/2 -translate-y-1/2" style={{
+          <div className="absolute top-1/2" style={{
             left: '2px', width: '8px', height: '2px',
             background: 'rgba(255,255,255,0.8)',
+            transform: `translate(${-gap}px, -50%)`,
           }} />
           {/* Right */}
-          <div className="absolute top-1/2 -translate-y-1/2" style={{
+          <div className="absolute top-1/2" style={{
             right: '2px', width: '8px', height: '2px',
             background: 'rgba(255,255,255,0.8)',
+            transform: `translate(${gap}px, -50%)`,
           }} />
           {/* Center pixel */}
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" style={{

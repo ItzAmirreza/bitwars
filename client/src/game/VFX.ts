@@ -268,6 +268,29 @@ export class VFX {
     }
   }
 
+  // ── Player hit spark (blood/impact burst) ──
+  // Bright red+white cube burst at a world-space point. Local shooter feedback
+  // for confirmed body hits — gives the shot impact weight in the world, not just
+  // the centered hit-marker X. Coords are world-space (no block-center offset).
+  emitHitSpark(x: number, y: number, z: number): void {
+    for (let i = 0; i < 9 && this.particles.length < MAX_PARTICLES; i++) {
+      const white = Math.random() < 0.35;
+      this.particles.push({
+        x, y, z,
+        vx: (Math.random() - 0.5) * 6,
+        vy: Math.random() * 4 + 1,
+        vz: (Math.random() - 0.5) * 6,
+        r: 1,
+        g: white ? 0.92 : 0.12,
+        b: white ? 0.92 : 0.12,
+        life: 0,
+        maxLife: 0.18 + Math.random() * 0.22,
+        size: 4 + Math.random() * 5,
+        gravity: true,
+      });
+    }
+  }
+
   // ── Projectile trail ──
   emitProjectileTrail(x: number, y: number, z: number, colorHex: number): void {
     const col = new THREE.Color(colorHex);
@@ -524,10 +547,12 @@ export class VFX {
 
     // ── Screen shake (compute offsets, don't touch camera) ──
     if (this.shakeAmount > 0.001) {
-      this.shakeOffsetX = (Math.random() - 0.5) * this.shakeAmount * 0.04;
-      this.shakeOffsetY = (Math.random() - 0.5) * this.shakeAmount * 0.04;
+      // Beefier amplitude + slightly slower decay so impacts carry weight
+      // without becoming nauseating.
+      this.shakeOffsetX = (Math.random() - 0.5) * this.shakeAmount * 0.06;
+      this.shakeOffsetY = (Math.random() - 0.5) * this.shakeAmount * 0.06;
 
-      this.shakeAmount *= Math.max(0, 1 - delta * 14);
+      this.shakeAmount *= Math.max(0, 1 - delta * 12);
       if (this.shakeAmount < 0.001) this.shakeAmount = 0;
     } else {
       this.shakeOffsetX = 0;
