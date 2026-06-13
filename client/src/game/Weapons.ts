@@ -122,6 +122,12 @@ export class WeaponSystem {
     this.otherPlayers = players;
   }
 
+  /** World position of a remote player by identity (for hit-spark VFX). */
+  getPlayerPosition(id: string): THREE.Vector3 | null {
+    const g = this.otherPlayers.get(id);
+    return g ? g.position.clone() : null;
+  }
+
   setVehicles(vehicles: Map<number, THREE.Group>): void {
     this.vehicles = vehicles;
   }
@@ -235,12 +241,9 @@ export class WeaponSystem {
     }
     const origin = this.camera.position.clone();
 
-    // Recoil (camera) — use YXZ euler to match FPSControls and avoid yaw drift
-    const recoilEuler = new THREE.Euler(0, 0, 0, 'YXZ');
-    recoilEuler.setFromQuaternion(this.camera.quaternion);
-    recoilEuler.x += (Math.random() - 0.5) * this.weapon.recoil;
-    recoilEuler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, recoilEuler.x));
-    this.camera.quaternion.setFromEuler(recoilEuler);
+    // Camera recoil is applied by the fire pipeline via FPSControls.addRecoil()
+    // (decoupled from aim so it auto-recovers). The direction above already
+    // reflects any accumulated recoil because the camera quaternion includes it.
 
     // Projectile weapon: skip raycast, return early with spawn data
     if (isFinite(this.weapon.projectile.speed)) {

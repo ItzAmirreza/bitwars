@@ -51,6 +51,17 @@ export class FPSControls {
   sprintFovOffset = 0;
   strafeInput = 0; // smoothed -1 to +1
 
+  // Weapon recoil — additive camera offset (radians) on top of aim, auto-recovers.
+  // Decoupled from `euler` (aim) so the view kicks then returns without corrupting
+  // where the player is pointing. Driven via addRecoil() from the fire pipeline.
+  private recoilPitch = 0;
+  private recoilYaw = 0;
+  private recoilRecovery = 12; // per-second exponential recovery rate
+  // Crosshair spread bloom (0..1) — grows on fire/movement, communicates accuracy.
+  private fireBloom = 0;
+  private bloomRecovery = 6;
+  private readonly aimQuatEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+
   // Tuning
   speed = 12;
   sprintSpeed = 18;
@@ -141,7 +152,12 @@ export class FPSControls {
       if (this.inputEnabled) this.lock();
     });
     document.addEventListener('pointerlockchange', () => {
-      this.locked = document.pointerLockElement === domElement;
+      const nowLocked = document.pointerLockElement === domElement;
+      // On (re)acquiring pointer lock, re-derive aim from the live camera so any
+      // external camera move (spawn/teleport/dismount) while unlocked is absorbed
+      // into `euler` rather than fought by the per-frame recoil composition.
+      if (nowLocked && !this.locked) this.syncAimFromCamera();
+      this.locked = nowLocked;
     });
     document.addEventListener('mousemove', this.onMouseMove);
     document.addEventListener('keydown', this.onKeyDown);
@@ -204,6 +220,9 @@ export class FPSControls {
     this.strafeInput = 0;
     this.rawStrafeInput = 0;
     this.sprintToggleActive = false;
+    this.recoilPitch = 0;
+    this.recoilYaw = 0;
+    this.fireBloom = 0;
   }
 
   /** Get current velocity vector for network sync */
@@ -263,13 +282,62 @@ export class FPSControls {
   private onMouseMove = (event: MouseEvent): void => {
     if (this.perfSandboxExclusive) return;
     if (!this.locked) return;
-    this.euler.setFromQuaternion(this.camera.quaternion);
+    // `euler` is the authoritative aim (NOT re-read from the camera, which now
+    // also carries the recoil offset). Mouse input mutates aim directly; recoil
+    // is layered on top in applyCameraRotation().
     const sens = this.sensitivity * this.sensitivityScale;
     this.euler.y -= event.movementX * sens;
     this.euler.x -= event.movementY * sens;
     this.euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.euler.x));
-    this.camera.quaternion.setFromEuler(this.euler);
+    this.applyCameraRotation();
   };
+
+  /**
+   * Apply a weapon recoil impulse. `pitch`/`yaw` are instant additive camera
+   * offsets (radians); positive pitch kicks the view up. `recovery` is the
+   * exponential return rate. `bloom` grows the crosshair spread (capped at
+   * `bloomMax`), recovering at `bloomRecovery`.
+   */
+  addRecoil(
+    pitch: number,
+    yaw: number,
+    recovery: number,
+    bloom: number,
+    bloomMax: number,
+    bloomRecovery: number,
+  ): void {
+    this.recoilPitch += pitch;
+    this.recoilYaw += yaw;
+    this.recoilRecovery = recovery;
+    this.fireBloom = Math.min(this.fireBloom + bloom, bloomMax);
+    this.bloomRecovery = bloomRecovery;
+  }
+
+  /** Re-derive aim from the current camera orientation and clear recoil/bloom. */
+  syncAimFromCamera(): void {
+    this.euler.setFromQuaternion(this.camera.quaternion);
+    this.euler.z = 0;
+    this.recoilPitch = 0;
+    this.recoilYaw = 0;
+    this.fireBloom = 0;
+  }
+
+  /** Compose camera orientation = aim (euler) + recoil offset, pitch-clamped. */
+  private applyCameraRotation(): void {
+    const x = Math.max(
+      -Math.PI / 2,
+      Math.min(Math.PI / 2, this.euler.x + this.recoilPitch),
+    );
+    this.aimQuatEuler.set(x, this.euler.y + this.recoilYaw, 0, 'YXZ');
+    this.camera.quaternion.setFromEuler(this.aimQuatEuler);
+  }
+
+  /** Normalized crosshair spread (0..1): fire bloom + movement/airborne penalty. */
+  get crosshairSpread(): number {
+    let move = this.onGround ? Math.min(0.45, this.horizontalSpeed / 45) : 0.5;
+    if (this.isCrouching && this.onGround) move *= 0.4;
+    return Math.max(0, Math.min(1, this.fireBloom + move));
+  }
 
   private executeJump(): void {
     this.velocity.y = this.jumpForce;
@@ -705,6 +773,24 @@ export class FPSControls {
     const targetFovOffset = this.isSprinting ? 6 : this.isSliding ? 8 : 0;
     const fovLerpSpeed = 1 - Math.pow(0.0001, delta);
     this.sprintFovOffset += (targetFovOffset - this.sprintFovOffset) * fovLerpSpeed;
+
+    // Weapon recoil recovery — additive offset eases back to zero.
+    if (this.recoilPitch !== 0 || this.recoilYaw !== 0) {
+      const k = Math.exp(-this.recoilRecovery * delta);
+      this.recoilPitch *= k;
+      this.recoilYaw *= k;
+      if (Math.abs(this.recoilPitch) < 1e-5) this.recoilPitch = 0;
+      if (Math.abs(this.recoilYaw) < 1e-5) this.recoilYaw = 0;
+    }
+    // Crosshair fire-bloom recovery.
+    if (this.fireBloom > 0) {
+      this.fireBloom *= Math.exp(-this.bloomRecovery * delta);
+      if (this.fireBloom < 1e-4) this.fireBloom = 0;
+    }
+
+    // Compose camera = aim + recoil each frame (skip in perf sandbox, which
+    // drives the camera itself via orientSandboxLookToward).
+    if (!this.perfSandboxExclusive) this.applyCameraRotation();
   }
 
   dispose(): void {

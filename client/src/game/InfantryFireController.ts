@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { BLOCK_COLORS } from './VoxelWorld';
 import { WeaponSystem, WEAPONS } from './Weapons';
 import type { FireResult } from './Weapons';
+import { getRecoilProfile } from './WeaponRegistry';
 import type { AudioSystem } from './AudioSystem';
 import type { VFX } from './VFX';
 import type { WeaponModel } from './WeaponModel';
@@ -31,6 +32,7 @@ export interface InfantryFireContext {
   projectileManager: ProjectileManager;
   controls: FPSControls;
   world: VoxelWorld;
+  spawnDamageNumber(amount: number): void;
   spawnPredictedGrenade(origin: THREE.Vector3, direction: THREE.Vector3): boolean;
   localAudioSource(heightOffset?: number): {
     position: { x: number; y: number; z: number };
@@ -87,6 +89,16 @@ export class InfantryFireController {
     ctx.vfx.emitMuzzleFlash();
     ctx.vfx.shake(isSniper ? 0.7 : isGrenade ? 0.55 : isRPG ? 0.5 : isShotgun ? 0.8 : isMachineGun ? 0.25 : 0.3);
     ctx.weaponModel.triggerRecoil(WEAPONS[result.weaponIndex].recoil);
+    // Camera recoil — kicks the view up (auto-recovers) + blooms the crosshair.
+    const rp = getRecoilProfile(result.weaponIndex);
+    ctx.controls.addRecoil(
+      rp.vertical,
+      (Math.random() - 0.5) * 2 * rp.horizontal,
+      rp.recovery,
+      rp.bloom,
+      rp.bloomMax,
+      rp.bloomRecovery,
+    );
 
     if (result.isProjectile) {
       // ── PROJECTILE PATH ──
@@ -166,11 +178,15 @@ export class InfantryFireController {
       }
     }
 
-    // Player hit marker
+    // Player hit marker + world-space impact spark + predicted damage number
     if (result.hitPlayerIds.length > 0) {
       ctx.hitMarkerTimer = 0.2;
       ctx.hitMarkerType = 'player';
       ctx.audio.playHitMarker();
+      const pos = ctx.weapons.getPlayerPosition(result.hitPlayerIds[0]);
+      if (pos) ctx.vfx.emitHitSpark(pos.x, pos.y + 1.2, pos.z);
+      // hitPlayerIds may contain duplicates (one per shotgun pellet that hit).
+      ctx.spawnDamageNumber(WEAPONS[result.weaponIndex].damage * result.hitPlayerIds.length);
     }
 
     // Server sync: unified fire_weapon reducer with hit players and blocks
@@ -227,6 +243,8 @@ export class InfantryFireController {
       ctx.hitMarkerTimer = 0.2;
       ctx.hitMarkerType = 'player';
       ctx.audio.playHitMarker();
+      ctx.vfx.emitHitSpark(impact.hitPos.x, impact.hitPos.y + 0.5, impact.hitPos.z);
+      ctx.spawnDamageNumber(w.damage);
     } else if (impact.destroyedBlocks.length > 0) {
       ctx.hitMarkerTimer = 0.2;
       ctx.hitMarkerType = 'block';

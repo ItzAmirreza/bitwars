@@ -95,7 +95,9 @@ export interface EngineState {
   kills: number;
   deaths: number;
   hitMarker: boolean;
-  hitMarkerType: "block" | "player" | "none";
+  hitMarkerType: "block" | "player" | "kill" | "none";
+  crosshairSpread: number; // 0..1 dynamic accuracy bloom
+  combatTexts: CombatTextState[];
   timeOfDay: string;
   weather: string;
   heading: number;
@@ -135,6 +137,16 @@ export interface DamageIndicatorState {
   angle: number;
   opacity: number;
   intensity: number;
+}
+
+export interface CombatTextState {
+  id: number;
+  amount: number;
+  // Screen-space offset from crosshair center, in px (drifts up as it ages).
+  x: number;
+  y: number;
+  opacity: number;
+  scale: number;
 }
 
 type EnginePerfPhaseKey =
@@ -360,7 +372,16 @@ export class Engine {
   private kills = 0;
   private deaths = 0;
   private hitMarkerTimer = 0;
-  private hitMarkerType: "block" | "player" | "none" = "none";
+  private hitMarkerType: "block" | "player" | "kill" | "none" = "none";
+  private combatTexts: Array<{
+    id: number;
+    amount: number;
+    age: number;
+    lifetime: number;
+    offsetX: number;
+    offsetY: number;
+  }> = [];
+  private nextCombatTextId = 1;
   private recentDamageSources: Array<{
     position: THREE.Vector3;
     timestamp: number;
@@ -2918,6 +2939,9 @@ export class Engine {
               // controls start from the correct location (not the 3rd-person offset).
               this.camera.position.set(sp.x, sp.y, sp.z);
               this.controls.resetVelocity();
+              // Re-derive infantry aim from the current camera orientation (the
+              // vehicle left it pointing somewhere) so recoil composition is correct.
+              this.controls.syncAimFromCamera();
               this.vehicleManager.jetThrottle = 0;
             }
           }
@@ -4357,6 +4381,12 @@ export class Engine {
       if (this.hitMarkerTimer <= 0) this.hitMarkerType = "none";
     }
 
+    // Floating damage numbers
+    if (this.combatTexts.length > 0) {
+      for (const t of this.combatTexts) t.age += delta;
+      this.combatTexts = this.combatTexts.filter((t) => t.age < t.lifetime);
+    }
+
     // Process deferred damage triggers — by this point all table callbacks
     // from the same server transaction (including shot_event) have completed,
     // so recentDamageSources contains the attacker positions.
@@ -4372,16 +4402,20 @@ export class Engine {
         .map((indicator) => ({
           ...indicator,
           age: indicator.age + delta,
-          intensity: Math.max(0.45, indicator.intensity - delta * 0.2),
+          intensity: Math.max(0.55, indicator.intensity - delta * 0.12),
         }))
         .filter((indicator) => indicator.age < indicator.lifetime);
     }
 
     this.pruneRecentDamageSources();
 
-    // Kill/Death sound detection
+    // Kill/Death sound detection. A server-confirmed kill (PlayerStats.kills
+    // incremented) drives a punchy kill-confirm hit marker — trustworthy, not
+    // predicted. Overrides any active block/player marker.
     if (this.kills > this.prevKills) {
       this.audio.playKillConfirm();
+      this.hitMarkerTimer = 0.35;
+      this.hitMarkerType = "kill";
     }
     this.prevKills = this.kills;
     if (this.deaths > this.prevDeaths) {
@@ -4621,6 +4655,8 @@ export class Engine {
       deaths: this.deaths,
       hitMarker: this.hitMarkerTimer > 0,
       hitMarkerType: this.hitMarkerType,
+      crosshairSpread: this.controls.crosshairSpread,
+      combatTexts: this.buildCombatTextState(),
       timeOfDay: this.sky.getTimeString(),
       weather: this.sky.getWeatherName(),
       heading: headingDeg,
@@ -4784,7 +4820,7 @@ export class Engine {
     const [source] = this.recentDamageSources.splice(bestIndex, 1);
     if (!source) return;
 
-    const intensity = THREE.MathUtils.clamp(0.45 + damageAmount / 45, 0.45, 1);
+    const intensity = THREE.MathUtils.clamp(0.62 + damageAmount / 40, 0.62, 1);
     this.addDamageIndicator(source.position, intensity);
   }
 
@@ -4808,7 +4844,7 @@ export class Engine {
     if (existing) {
       existing.sourcePosition.copy(sourcePosition);
       existing.age = 0;
-      existing.lifetime = Math.max(existing.lifetime, 1.15);
+      existing.lifetime = Math.max(existing.lifetime, 1.4);
       existing.intensity = Math.max(existing.intensity, intensity);
       return;
     }
@@ -4817,7 +4853,7 @@ export class Engine {
       id: this.nextDamageIndicatorId++,
       sourcePosition: sourcePosition.clone(),
       age: 0,
-      lifetime: 1.15,
+      lifetime: 1.4,
       intensity,
     });
     if (this.damageIndicators.length > 4) {
@@ -4867,23 +4903,58 @@ export class Engine {
         1,
       );
       const pulse =
-        0.9 + Math.sin((1 - remaining) * Math.PI * 5) * 0.1 * remaining;
+        0.85 + Math.sin((1 - remaining) * Math.PI * 5) * 0.15 * remaining;
       return {
         id: indicator.id,
         angle: this.computeDamageIndicatorAngle(
           indicator.sourcePosition,
           localPos,
         ),
+        // sqrt(remaining) → sharp initial pop, slower fade so the hit reads.
         opacity: THREE.MathUtils.clamp(
-          remaining * (0.4 + indicator.intensity * 0.6),
+          Math.sqrt(remaining) * (0.55 + indicator.intensity * 0.45),
           0,
           1,
         ),
         intensity: THREE.MathUtils.clamp(
           indicator.intensity * pulse,
-          0.45,
-          1.2,
+          0.6,
+          1.35,
         ),
+      };
+    });
+  }
+
+  /**
+   * Spawn a floating damage number near the crosshair. Client-PREDICTED amount
+   * (weapon base damage × hits) for instant feel — consistent with the predicted
+   * hit marker. Not server-exact; abilities/falloff may differ slightly.
+   */
+  spawnDamageNumber(amount: number): void {
+    if (amount <= 0) return;
+    this.combatTexts.push({
+      id: this.nextCombatTextId++,
+      amount: Math.round(amount),
+      age: 0,
+      lifetime: 0.85,
+      offsetX: (Math.random() - 0.5) * 46,
+      offsetY: -8 - Math.random() * 14,
+    });
+    if (this.combatTexts.length > 8) this.combatTexts.shift();
+  }
+
+  private buildCombatTextState(): CombatTextState[] {
+    if (this.combatTexts.length === 0) return [];
+    return this.combatTexts.map((t) => {
+      const remaining = Math.max(0, 1 - t.age / t.lifetime);
+      const rise = (1 - remaining) * 26; // drift upward over life
+      return {
+        id: t.id,
+        amount: t.amount,
+        x: t.offsetX,
+        y: t.offsetY - rise,
+        opacity: Math.min(1, remaining * 1.6), // hold bright, fade at the end
+        scale: 0.85 + (1 - remaining) * 0.25,
       };
     });
   }

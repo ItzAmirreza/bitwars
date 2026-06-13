@@ -105,6 +105,43 @@ const CLIENT_PROJECTILE_CONFIGS: Record<number, ProjectileConfig> = {
   },
 };
 
+// ── Client-only recoil feel profiles ──
+// Recoil is purely a client-side feel parameter (the server never simulates it),
+// so per-weapon recoil patterns live here alongside the other client-only tuning
+// (projectile configs, vehicle spreads). The shared JSON `recoil` scalar is kept
+// separately for the cosmetic first-person gun-model kick (WeaponModel.triggerRecoil).
+export interface RecoilProfile {
+  vertical: number;       // upward pitch kick per shot (radians)
+  horizontal: number;     // max abs horizontal yaw kick per shot (radians, random sign)
+  recovery: number;       // exponential recovery rate back to aim (per second)
+  bloom: number;          // crosshair spread added per shot
+  bloomMax: number;       // ceiling for accumulated fire bloom (0..1)
+  bloomRecovery: number;  // bloom recovery rate (per second)
+}
+
+const DEFAULT_RECOIL: RecoilProfile = {
+  vertical: 0.02, horizontal: 0.006, recovery: 12, bloom: 0.08, bloomMax: 0.5, bloomRecovery: 6,
+};
+
+const RECOIL_PROFILES: Record<number, RecoilProfile> = {
+  // Rifle — crisp upward tick, tight horizontal, fast settle. Controllable.
+  0: { vertical: 0.013, horizontal: 0.004, recovery: 14, bloom: 0.06, bloomMax: 0.45, bloomRecovery: 7 },
+  // Shotgun — heavy single punch, slow settle.
+  1: { vertical: 0.05, horizontal: 0.012, recovery: 8, bloom: 0.3, bloomMax: 0.6, bloomRecovery: 4 },
+  // RPG — moderate kick (most weight comes from gun model + shake).
+  2: { vertical: 0.04, horizontal: 0.008, recovery: 9, bloom: 0.2, bloomMax: 0.4, bloomRecovery: 4 },
+  // Machine Gun — light per-shot kick that accumulates into a climb over a burst.
+  3: { vertical: 0.009, horizontal: 0.006, recovery: 7, bloom: 0.05, bloomMax: 0.75, bloomRecovery: 5 },
+  // Grenade Launcher — moderate kick.
+  4: { vertical: 0.045, horizontal: 0.008, recovery: 9, bloom: 0.2, bloomMax: 0.4, bloomRecovery: 4 },
+  // Sniper — big vertical kick, slow resettle (rewards re-aiming between shots).
+  5: { vertical: 0.07, horizontal: 0.005, recovery: 6, bloom: 0.4, bloomMax: 0.5, bloomRecovery: 3 },
+};
+
+export function getRecoilProfile(index: number): RecoilProfile {
+  return RECOIL_PROFILES[index] ?? DEFAULT_RECOIL;
+}
+
 // ── Client-only HUD descriptions ──
 
 const WEAPON_DESCRIPTIONS: Record<number, string> = {
