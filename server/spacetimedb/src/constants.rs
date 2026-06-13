@@ -610,18 +610,3 @@ pub fn ability_pickup_respawn_secs() -> u64 {
 pub fn ability_tick_interval_ms() -> u64 {
     shared_config::config().abilities.tick_interval_ms
 }
-
-// ── Backward-compatible const aliases ──
-// These are kept so that existing code using `constants::SOME_CONST` continues
-// to compile. They shadow the old `pub const` names with the same values
-// but sourced from the JSON at first access.
-//
-// For truly const values (used in const array sizes etc.), we keep hardcoded
-// consts above with comments noting the shared source.
-
-// Legacy const shims — re-export functions with const-like names via macros
-// is not ergonomic in Rust, so callers must migrate to function syntax.
-// However, to minimize changes across the codebase we provide uppercase aliases.
-//
-// Callers that previously used e.g. `constants::MAX_HEALTH` must now use
-// `constants::max_health()`. The search-and-replace is done below.
