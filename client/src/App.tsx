@@ -14,9 +14,12 @@ import { useMatchSession } from "./screens/hooks/useMatchSession";
 import { consumeAuthCallback } from "./auth";
 import { initTabSession } from "./tabSession";
 
-const UPDATE_RELOAD_AT_KEY = "bitwars-update-reload-at";
+// Persists (per tab session) the fingerprint of the update we last reloaded
+// for. A reload can only ever swap in a *different* client bundle, so we allow
+// at most one auto-reload per distinct build: if we already reloaded for this
+// exact target and still see it afterwards, reloading again is futile and we
+// must not loop.
 const UPDATE_RELOAD_TARGET_KEY = "bitwars-update-reload-target";
-const UPDATE_RELOAD_COOLDOWN_MS = 60000;
 
 type PendingUpdate = {
   kind: "client" | "compatibility";
@@ -126,9 +129,7 @@ function UpdateBanner({
   onReloadNow: () => void;
 }) {
   const message = pendingUpdate.kind === "compatibility"
-    ? canReloadNow
-      ? "Server update detected. Reloading BitWars to resync."
-      : "Server update detected. This round will finish before BitWars reloads."
+    ? "Server updated. Reload BitWars when ready to resync."
     : canReloadNow
       ? "New BitWars build ready. Reloading to update."
       : "New BitWars build ready. This round will finish before BitWars reloads.";
@@ -279,37 +280,32 @@ function App() {
   }, []);
 
   const canAutoReloadPendingUpdate = useCallback((update: PendingUpdate) => {
-    const target = pendingUpdateFingerprint(update);
-    const lastTarget = sessionStorage.getItem(UPDATE_RELOAD_TARGET_KEY);
-    const lastAttempt = Number(sessionStorage.getItem(UPDATE_RELOAD_AT_KEY) ?? "0");
+    // Reloading reruns the *same* deployed client, so it can only ever fix a
+    // genuine new-client-build update. A server-compatibility mismatch is not
+    // resolvable by reloading (the live server build is unchanged by it), so
+    // auto-reloading it would loop forever — show the banner instead.
+    if (update.kind !== "client") return false;
 
-    return !(
-      lastTarget === target && Date.now() - lastAttempt < UPDATE_RELOAD_COOLDOWN_MS
-    );
+    // Allow a single auto-reload per distinct build. If we already reloaded for
+    // this exact target (persisted across the reload) and still see it — e.g. a
+    // stale CDN edge still serving the old bundle — stop instead of thrashing.
+    const target = pendingUpdateFingerprint(update);
+    return sessionStorage.getItem(UPDATE_RELOAD_TARGET_KEY) !== target;
   }, []);
 
   const reloadForUpdate = useCallback(() => {
     if (!pendingUpdate) return;
 
-    const target = pendingUpdateFingerprint(pendingUpdate);
-    const now = Date.now();
-    const lastAttempt = Number(
-      sessionStorage.getItem(UPDATE_RELOAD_AT_KEY) ?? "0",
+    // Record what we are reloading for *before* reloading so the post-reload
+    // load can tell the reload already happened (and avoid looping if it did
+    // not resolve the update).
+    sessionStorage.setItem(
+      UPDATE_RELOAD_TARGET_KEY,
+      pendingUpdateFingerprint(pendingUpdate),
     );
-    const lastTarget = sessionStorage.getItem(UPDATE_RELOAD_TARGET_KEY);
-    if (
-      lastTarget === target &&
-      now - lastAttempt < UPDATE_RELOAD_COOLDOWN_MS
-    ) {
-      setError("BitWars is still updating. Try again in a few seconds.");
-      return;
-    }
-
-    sessionStorage.setItem(UPDATE_RELOAD_TARGET_KEY, target);
-    sessionStorage.setItem(UPDATE_RELOAD_AT_KEY, String(now));
     resetConnection();
     window.location.reload();
-  }, [pendingUpdate, setError]);
+  }, [pendingUpdate]);
 
   useEffect(() => {
     const result = consumeAuthCallback();
@@ -361,12 +357,6 @@ function App() {
     handleSessionLoss,
     connectAttempt,
   ]);
-
-  useEffect(() => {
-    if (pendingUpdate) return;
-    sessionStorage.removeItem(UPDATE_RELOAD_TARGET_KEY);
-    sessionStorage.removeItem(UPDATE_RELOAD_AT_KEY);
-  }, [pendingUpdate]);
 
   useEffect(() => {
     if (import.meta.env.DEV) return;
@@ -490,9 +480,12 @@ function App() {
     if (import.meta.env.DEV || !pendingUpdate || !canReloadForUpdate) return;
     if (!canAutoReloadPendingUpdate(pendingUpdate)) return;
 
+    // Only new-client-build updates reach here (canAutoReloadPendingUpdate
+    // rejects compatibility ones). Give the freshly deployed bundle a moment to
+    // propagate to the edge before reloading.
     const reloadTimer = window.setTimeout(() => {
       reloadForUpdate();
-    }, pendingUpdate.kind === "compatibility" ? 1500 : 4000);
+    }, 4000);
 
     return () => window.clearTimeout(reloadTimer);
   }, [
