@@ -23,6 +23,19 @@ export const MATCH = config.match;
 export const WEATHER = config.weather;
 export const ABILITIES = config.abilities;
 
+// ── Block colors ──
+// Stored in the shared config as hex strings keyed by block-type name.
+// Derived here into the numeric (blockTypeIndex → 0xRRGGBB) map the renderer wants.
+export const BLOCK_COLORS: Record<number, number> = Object.fromEntries(
+  Object.entries(config.blockColors).map(([name, hex]) => [
+    (config.blockTypes as Record<string, number>)[name],
+    parseInt(hex.slice(1), 16),
+  ]),
+);
+
+// ── Weather names (ordered by weather index) ──
+export const WEATHER_NAMES = config.weather.map((w) => w.name);
+
 // ── Vehicle physics ──
 export const VEHICLE_TICK_INTERVAL_MS = config.vehicleTickIntervalMs;
 

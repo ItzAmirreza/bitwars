@@ -1,25 +1,18 @@
 import * as THREE from 'three';
 import { invoke } from '@tauri-apps/api/core';
+import gameConstants from '../../../shared/game-constants.json';
 
 const CHUNK_SIZE = 16;
 
-const BLOCK_COLORS: Record<number, [number, number, number]> = {
-  1: [0.53, 0.53, 0.53],
-  2: [0.4, 0.4, 0.4],
-  3: [0.27, 0.27, 0.27],
-  4: [0.6, 0.33, 0.2],
-  5: [0.67, 0.4, 0.27],
-  6: [0.47, 0.6, 0.67],
-  7: [0.47, 0.4, 0.33],
-  8: [0.53, 0.4, 0.27],
-  9: [0.8, 0.73, 0.53],
-  10: [0.33, 0.53, 0.2],
-  11: [0.6, 0.47, 0.27],
-  12: [0.6, 0.6, 0.6],
-  13: [0.87, 0.87, 0.93],
-  14: [1.0, 0.8, 0.27],
-  15: [0.2, 0.2, 0.2],
-};
+// Block colors are sourced from shared/game-constants.json (single source of truth),
+// converted from hex strings into normalized 0–1 RGB triples keyed by block-type index.
+const BLOCK_COLORS: Record<number, [number, number, number]> = Object.fromEntries(
+  Object.entries(gameConstants.blockColors).map(([name, hex]) => {
+    const n = parseInt(hex.slice(1), 16);
+    const idx = (gameConstants.blockTypes as Record<string, number>)[name];
+    return [idx, [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255]];
+  }),
+);
 
 const FACE_SHADE = [1.0, 1.0, 1.15, 0.7, 0.95, 0.95];
 const FACE_DIRS: [number, number, number][] = [
