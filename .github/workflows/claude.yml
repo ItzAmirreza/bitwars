@@ -19,9 +19,9 @@ jobs:
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: read
-      issues: read
+      contents: write # Allow Claude to commit and push changes
+      pull-requests: write # Allow Claude to create/update PRs and comments
+      issues: write # Allow Claude to comment on and update issues
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:
@@ -45,7 +45,13 @@ jobs:
 
           # Run on Claude Opus 4.8 at xhigh reasoning effort.
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          #
+          # --allowedTools grants Claude the full tool set. Listing `Bash` bare
+          # (no parentheses) allows ALL shell commands — cargo, bun, git,
+          # spacetime, etc. — so Claude can build, test, and deploy without
+          # hitting permission prompts. WebFetch/WebSearch enable web access.
           claude_args: |
             --model claude-opus-4-8
             --effort xhigh
+            --allowedTools Bash,Edit,MultiEdit,Write,Read,Glob,Grep,LS,WebFetch,WebSearch,TodoWrite,NotebookEdit,Task
 
