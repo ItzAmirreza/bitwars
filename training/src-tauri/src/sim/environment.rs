@@ -54,6 +54,11 @@ const BREACH_DESTROY_REWARD_PER_BLOCK: f32 = 0.012;
 const STAGNATION_DRIFT_COST: f32 = 0.02;
 /// Per-step bonus for moving fast toward the target (at max sprint speed).
 const VELOCITY_TOWARD_TARGET_BONUS: f32 = 0.04;
+/// Penalty coefficient on the squared change in continuous actions
+/// (forward/strafe/yaw-rate/pitch-rate) between steps. Discourages high-frequency
+/// jitter so movement and aim read as human, not robotic. Small enough that it
+/// never overrides navigation success.
+const MOVE_SMOOTH_COST: f32 = 0.02;
 
 // ── Step result types ──
 
@@ -289,6 +294,9 @@ pub struct TrainingEnv {
     step_blocks_destroyed: u32,
     /// Weapon fired on this step, if any.
     fired_weapon_this_step: Option<u8>,
+    /// Previous step's continuous action [forward, strafe, yaw_rate, pitch_rate],
+    /// used by the action-smoothness (anti-jitter) penalty.
+    prev_move_action: [f32; 4],
 }
 
 impl TrainingEnv {
@@ -319,6 +327,7 @@ impl TrainingEnv {
             prev_remaining_work: 0.0,
             step_blocks_destroyed: 0,
             fired_weapon_this_step: None,
+            prev_move_action: [0.0; 4],
         }
     }
 
@@ -361,6 +370,7 @@ impl TrainingEnv {
         self.done = false;
         self.prev_remaining_work = 0.0;
         self.fired_weapon_this_step = None;
+        self.prev_move_action = [0.0; 4];
 
         // Compute initial task progress state.
         self.prev_distance = self.distance_to_target();
@@ -502,7 +512,27 @@ impl TrainingEnv {
         self.episode_step += 1;
 
         // Compute reward
-        let reward = self.compute_reward();
+        let mut reward = self.compute_reward();
+
+        // Action-smoothness (naturalness) penalty: discourage high-frequency
+        // jitter in movement/aim so motion reads as human. Skip the first step
+        // (no previous action to compare against).
+        let cur_move = [
+            forward,
+            strafe,
+            action[2].clamp(-1.0, 1.0),
+            action[3].clamp(-1.0, 1.0),
+        ];
+        if self.episode_step > 1 {
+            let mut jerk = 0.0f32;
+            for d in 0..4 {
+                let diff = cur_move[d] - self.prev_move_action[d];
+                jerk += diff * diff;
+            }
+            reward -= MOVE_SMOOTH_COST * jerk;
+        }
+        self.prev_move_action = cur_move;
+
         self.total_reward += reward;
 
         // Check done

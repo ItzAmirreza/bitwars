@@ -71,14 +71,14 @@ fn main() {
     }
 
     println!(
-        "\n{:<14} {:>4}  {:>8}  {:>8}  {:>8}  {:>9}  {:>7}",
-        "task", "eps", "success", "stall", "timeout", "reward", "len"
+        "\n{:<14} {:>4}  {:>8}  {:>8}  {:>8}  {:>9}  {:>7}  {:>7}",
+        "task", "eps", "success", "stall", "timeout", "reward", "len", "jerk"
     );
-    println!("{}", "-".repeat(70));
+    println!("{}", "-".repeat(80));
     let mut succ_sum = 0.0f32;
     for r in &results {
         println!(
-            "{:<14} {:>4} {:>7.1}% {:>7.1}% {:>7.1}% {:>9.1} {:>7.1}",
+            "{:<14} {:>4} {:>7.1}% {:>7.1}% {:>7.1}% {:>9.1} {:>7.1} {:>7.4}",
             r.task,
             r.episodes,
             r.success_rate * 100.0,
@@ -86,6 +86,7 @@ fn main() {
             r.timeout_rate * 100.0,
             r.mean_reward,
             r.mean_len,
+            r.mean_jerk,
         );
         succ_sum += r.success_rate;
     }
@@ -94,6 +95,6 @@ fn main() {
     } else {
         succ_sum / results.len() as f32
     };
-    println!("{}", "-".repeat(70));
+    println!("{}", "-".repeat(80));
     println!("overall mean success: {:.1}%", overall * 100.0);
 }

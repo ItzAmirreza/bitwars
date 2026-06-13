@@ -29,6 +29,9 @@ pub struct TaskEval {
     pub stall_rate: f32,
     pub mean_reward: f32,
     pub mean_len: f32,
+    /// Mean per-step squared change in continuous actions (lower = smoother,
+    /// more human; higher = jittery/robotic).
+    pub mean_jerk: f32,
 }
 
 /// Evaluate a checkpoint deterministically across all curriculum tasks.
@@ -101,10 +104,30 @@ fn eval_one_task(
     let mut stall = 0usize;
     let mut reward_sum = 0.0f32;
     let mut len_sum = 0.0f32;
+    let mut prev_actions: Vec<Option<[f32; 4]>> = vec![None; num_envs];
+    let mut jerk_sum = 0.0f64;
+    let mut jerk_steps = 0usize;
 
     while completed < episodes_target {
         let actions =
             deterministic_actions(network, device, &obs, &mut states).map_err(|e| e.to_string())?;
+
+        // Accumulate per-step movement jerk (squared change in continuous actions)
+        // as a smoothness/naturalness metric.
+        for i in 0..num_envs {
+            if let Some(p) = prev_actions[i] {
+                let a = &actions[i];
+                let mut j = 0.0f32;
+                for d in 0..4 {
+                    let df = a[d] - p[d];
+                    j += df * df;
+                }
+                jerk_sum += j as f64;
+                jerk_steps += 1;
+            }
+            prev_actions[i] = Some([actions[i][0], actions[i][1], actions[i][2], actions[i][3]]);
+        }
+
         let results: Vec<StepResult> = envs
             .par_iter_mut()
             .zip(actions.par_iter())
@@ -133,6 +156,7 @@ fn eval_one_task(
                 }
                 ep_reward[i] = 0.0;
                 ep_len[i] = 0;
+                prev_actions[i] = None;
                 obs[i] = envs[i].reset();
                 states[i] = (vec![0.0; HIDDEN_SIZE], vec![0.0; HIDDEN_SIZE]);
             } else {
@@ -150,6 +174,11 @@ fn eval_one_task(
         stall_rate: stall as f32 / n,
         mean_reward: reward_sum / n,
         mean_len: len_sum / n,
+        mean_jerk: if jerk_steps > 0 {
+            (jerk_sum / jerk_steps as f64) as f32
+        } else {
+            0.0
+        },
     })
 }
 

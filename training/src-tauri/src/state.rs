@@ -110,7 +110,10 @@ impl RuntimeTrainingConfig {
                 gamma: 0.995,
                 gae_lambda: 0.95,
                 clip_epsilon: 0.2,
-                entropy_coeff: 0.004,
+                // Default off: the deployed bot runs the DETERMINISTIC (mean) policy,
+                // and a positive entropy bonus inflates log_std so only the *sampled*
+                // policy is good (see the run1 regression). Pass --entropy to opt in.
+                entropy_coeff: 0.0,
                 value_coeff: 0.5,
                 max_grad_norm: 0.5,
                 num_epochs: 4,

@@ -209,7 +209,10 @@ pub struct PPOTrainer {
 const SEQ_LEN: usize = 8;
 
 const ENTROPY_DECAY_EPISODES: f32 = 50_000.0;
-const MIN_ENTROPY_COEFF: f32 = 0.003;
+// Floor of 0 so the entropy bonus can anneal fully to zero, letting the
+// deterministic (deployed) policy sharpen. A nonzero floor previously kept
+// log_std inflated and degraded the mean policy used at deployment.
+const MIN_ENTROPY_COEFF: f32 = 0.0;
 
 /// LR anneals linearly from the initial value down to 10% over this many episodes.
 const LR_DECAY_EPISODES: f32 = 30_000.0;
