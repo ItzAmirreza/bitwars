@@ -33,10 +33,8 @@ import {
   generateDeterministicPerfChunk,
   perfSceneSpawnPoint,
 } from "./PerfWorldScene";
-import {
-  RemotePlayerManager,
-  disposeObjectMaterials,
-} from "./RemotePlayerManager";
+import { RemotePlayerManager } from "./RemotePlayerManager";
+import { disposeObjectMaterials } from "./RemotePlayerModel";
 import VehicleManager, { VEHICLE_WEAPONS } from "./vehicles/VehicleManager";
 import type { VehicleEngineContext } from "./vehicles/VehicleManager";
 import { InfantryFireController } from "./InfantryFireController";
