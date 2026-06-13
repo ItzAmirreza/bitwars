@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & ideas
+    url: https://github.com/ItzAmirreza/bitwars/discussions
+    about: Ask questions, share ideas, and discuss the game in GitHub Discussions.
+  - name: Report a security vulnerability
+    url: https://github.com/ItzAmirreza/bitwars/security/advisories
+    about: Report security issues privately via GitHub Security Advisories — never in a public issue.

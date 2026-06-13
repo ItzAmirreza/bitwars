@@ -1,0 +1,146 @@
+BitWars Source-Available License
+
+Version 1.0
+
+This license makes the BitWars source code available to view, study, and
+contribute to. It is a source-available license, not an open source license:
+it does not grant the broad rights that open source licenses grant. By
+exercising any right granted in Section 3, You accept and agree to the terms
+of this license.
+
+1. Definitions
+
+1.1. "Licensor" means ItzAmirreza, the copyright holder of the Software.
+
+1.2. "Software" means the BitWars software, including all source code,
+     assets, configuration, documentation, and other files in the Canonical
+     Repository, and any portion of any of them.
+
+1.3. "Canonical Repository" means the Git repository at
+     https://github.com/ItzAmirreza/bitwars.
+
+1.4. "Authorized Instance" means the publicly available deployment of the
+     Software at https://bitwars.io, operated by the Licensor.
+
+1.5. "Contribution" means any work of authorship that You intentionally
+     submit to the Licensor for inclusion in the Software, including by
+     opening a pull request against the Canonical Repository.
+
+1.6. "You" (and "Your") means the individual or legal entity exercising
+     rights under this license.
+
+2. Copyright
+
+Copyright (c) 2026 ItzAmirreza. All rights reserved.
+
+The Software is licensed, not sold. All rights not expressly granted in
+Section 3 are reserved by the Licensor.
+
+3. Grant of Rights
+
+Subject to the terms of this license, the Licensor grants You a limited,
+non-exclusive, non-transferable, non-sublicensable, royalty-free license to:
+
+3.1. View and study. View, read, and study the source code of the Software.
+
+3.2. Build and run locally and privately. Clone, build, compile, and run the
+     Software locally and privately — on machines You control and that are
+     not made available to the public or to third parties — solely to
+     (a) evaluate the Software and (b) develop and test Contributions.
+
+3.3. Fork for contribution. Fork the Canonical Repository within GitHub
+     solely to prepare and submit pull requests back to the Canonical
+     Repository.
+
+4. Restrictions
+
+Except as expressly permitted by Section 3, You may not do any of the
+following, and nothing in Section 3 grants You any right to do so:
+
+4.1. No public hosting or deployment. You may not host, deploy, operate, or
+     otherwise make available to others the Software, any part of it, or any
+     derivative of it — as a playable game, server, service, or in any other
+     form — under any name and on any domain, whether or not money is
+     involved. The Authorized Instance is the only public deployment of the
+     Software authorized under this license.
+
+4.2. No redistribution. You may not distribute, publish, sell, rent, lease,
+     or lend the Software or copies of it, in source or compiled form,
+     except for the GitHub fork permitted by Section 3.3.
+
+4.3. No derivative works. You may not create derivative works of the
+     Software, except modifications made solely as reasonably necessary to
+     develop, test, and submit a Contribution to the Canonical Repository.
+
+4.4. No commercial use. You may not use the Software for any commercial
+     purpose, including advertising, sponsorships, donations, paid access,
+     or any other direct or indirect monetization.
+
+4.5. No sublicensing. You may not sublicense the Software or grant any third
+     party any right in it.
+
+4.6. No removal of notices. You may not remove or obscure copyright,
+     license, or attribution notices contained in the Software.
+
+5. Contributions
+
+5.1. Submitting a Contribution requires Your agreement to the BitWars
+     Individual Contributor License Agreement in the file CLA.md in the
+     Canonical Repository.
+
+5.2. The Licensor has no obligation to accept, review, merge, or respond to
+     any Contribution.
+
+6. Trademarks
+
+This license grants no rights to the "BitWars" name, logo, or branding, or
+to any other trademark, service mark, or trade name of the Licensor,
+including use in domain names, product names, or marketing.
+
+7. GitHub Terms of Service
+
+GitHub's Terms of Service independently permit users to fork public
+repositories within GitHub. This license does not — and cannot — override
+those terms. All other rights in any such fork, including use, building,
+running, hosting, deployment, distribution, and the creation of derivative
+works, remain governed by this license.
+
+8. Termination
+
+8.1. This license terminates automatically and immediately if You breach any
+     of its terms.
+
+8.2. Upon termination, all rights granted in Section 3 end, and You must
+     stop using the Software and delete all copies of it in Your possession
+     or control.
+
+8.3. Sections 1, 2, 4, 6, 7, 8, 9, 10, and 11 survive termination.
+
+9. Disclaimer of Warranty; Limitation of Liability
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NONINFRINGEMENT. THE ENTIRE
+RISK AS TO THE QUALITY AND PERFORMANCE OF THE SOFTWARE IS WITH YOU.
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
+LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY — INCLUDING
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, CONSEQUENTIAL, OR
+PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS, DATA, OR GOODWILL — WHETHER IN AN
+ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OF OR OTHER DEALINGS IN THE
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+10. Governing Law
+
+This license is governed by the laws of [JURISDICTION - TO BE DETERMINED
+WITH COUNSEL], without regard to its conflict-of-law rules.
+
+11. Contact
+
+For licensing questions or permission requests beyond what this license
+grants — including any request to host or deploy the Software — open a
+Discussion at the Canonical Repository:
+https://github.com/ItzAmirreza/bitwars
+
+<!-- NOTE TO MAINTAINER: have a lawyer review this license before launch; custom license enforceability varies by jurisdiction. -->

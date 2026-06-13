@@ -12,6 +12,7 @@ server/spacetimedb/target/
 *.env
 *.env.*
 *.local
+!.env.example
 
 # Logs
 logs/

@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest an improvement or new content for BitWars.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Got a big or fuzzy idea? Consider starting a thread in [GitHub Discussions](https://github.com/ItzAmirreza/bitwars/discussions) first — issues work best for concrete, scoped proposals.
+
+        Heads up: monetization features and anything enabling third-party hosting of the game won't be accepted (see CONTRIBUTING.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem does this solve? What is missing or frustrating today?
+      placeholder: There's no way to tell which teammate is talking in the kill feed when several players share similar names...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How should it work? For new content (weapons, vehicles, structures, biomes), include rough stats or behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought about, and why you prefer this one.
+    validations:
+      required: false
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      description: Which part of the project would this touch?
+      options:
+        - Client (rendering, HUD, audio, input)
+        - Server (gameplay rules, netcode, worldgen)
+        - Both client and server
+        - Documentation
+        - Not sure
+    validations:
+      required: true

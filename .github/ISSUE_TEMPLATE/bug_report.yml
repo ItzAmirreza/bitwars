@@ -1,0 +1,100 @@
+name: Bug report
+description: Something broke in BitWars — tell us about it.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please search existing issues first to avoid duplicates.
+
+        **Security vulnerabilities:** do NOT report them here — use "Report a vulnerability" on the repository's Security tab instead.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+      placeholder: The helicopter's rotor sound kept playing after the helicopter was destroyed.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact steps that trigger the bug, as a numbered list.
+      placeholder: |
+        1. Join a match
+        2. Mount a helicopter and take off
+        3. Get shot down by an anti-air vehicle
+        4. Respawn and listen near the crash site
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened, if it isn't already covered above (error messages, console output, etc.).
+    validations:
+      required: false
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Where did it happen?
+      options:
+        - Official game (bitwars.io)
+        - Local development setup
+        - Both
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      description: For client bugs — the browser you were playing in.
+      placeholder: e.g. Chrome 137, Firefox 139
+    validations:
+      required: false
+  - type: input
+    id: ingame-conditions
+    attributes:
+      label: In-game time and weather (for visual bugs)
+      description: Lighting and weather change rendering. If the bug is visual, note the in-game time of day and the weather (Clear, Cloudy, Overcast, Rainy, or Stormy).
+      placeholder: e.g. dusk, Stormy
+    validations:
+      required: false
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Crash or game-breaking
+        - Major — blocks normal play
+        - Minor — annoying but playable
+        - Cosmetic — visual or audio polish
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or clips
+      description: Drag and drop images or videos here. Extremely helpful for visual bugs.
+    validations:
+      required: false

@@ -8,6 +8,23 @@ BitWars is a multiplayer 3D voxel FPS built with a TypeScript/React client and a
 
 ---
 
+## Community & Licensing Docs
+
+| Doc | Purpose |
+|-----|---------|
+| `README.md` | Project overview, quick start, and links for new contributors |
+| `LICENSE` | BitWars Source-Available License v1.0 — the code is source-available, NOT open source |
+| `CLA.md` | Contributor License Agreement that governs all contributions |
+| `CONTRIBUTING.md` | Local setup, development workflow, and PR guidelines |
+| `CODE_OF_CONDUCT.md` | Community standards and enforcement |
+| `SECURITY.md` | How to report vulnerabilities (privately, via GitHub Security Advisories) |
+| `docs/REFACTORING.md` | Code-health roadmap: oversized files, planned splits, and structural cleanups |
+| `docs/LAUNCH_CHECKLIST.md` | Public source-available launch checklist |
+
+All gameplay/feature PRs must follow the architecture rules in this file.
+
+---
+
 ## Repository Layout
 
 ```
@@ -23,12 +40,15 @@ bitwars/
 │   ├── tables.rs                  All SpacetimeDB table schemas
 │   ├── weapons/                   1 file per weapon (registry pattern)
 │   │   ├── mod.rs                 WeaponDef, registry, ammo accessors, fire validation
-│   │   ├── rifle.rs ... grenade_launcher.rs
+│   │   ├── rifle.rs, machinegun.rs, shotgun.rs, sniper.rs, rpg.rs, grenade_launcher.rs
 │   │   └── vehicle_minigun.rs, vehicle_rockets.rs
 │   ├── vehicles/                  1 file per vehicle type (dispatcher pattern)
 │   │   ├── mod.rs                 tick_vehicles dispatcher
 │   │   ├── helicopter.rs          Helicopter physics
 │   │   ├── fighter_jet.rs         Fighter jet physics
+│   │   ├── apc.rs                 APC physics
+│   │   ├── anti_air.rs            Anti-Air physics
+│   │   ├── collision.rs           Vehicle collision
 │   │   ├── interaction.rs         Mount/dismount
 │   │   ├── weapons.rs             Vehicle fire/reload
 │   │   └── spawning.rs            Spawn logic
@@ -36,21 +56,23 @@ bitwars/
 │   │   ├── damage.rs              Shared hitscan/splash/kill helpers
 │   │   ├── fire.rs                fire_weapon, reload_weapon
 │   │   ├── projectile.rs          projectile_impact
-│   │   ├── bunker_buster.rs       Bunker buster weapon logic
+│   │   ├── kinetic_penetrator.rs  Kinetic penetrator weapon logic
 │   │   └── blocks.rs              destroy_blocks_physics, sync_entity_transform
+│   ├── abilities/                 mod.rs (ability reducers), spawning.rs (pickups)
 │   ├── worldgen/                  Procedural generation
 │   │   ├── mod.rs                 generate_chunk + RLE
 │   │   ├── noise.rs, biomes.rs, roads.rs, structural.rs
 │   │   └── structures/            1 file per structure type
-│   ├── helpers/                   math.rs, entity_ops.rs, player_state.rs, vehicle_helpers.rs, vehicle_input.rs, terrain_cache.rs
+│   ├── helpers/                   math.rs, entity_ops.rs, player_state.rs, vehicle_helpers.rs, vehicle_input.rs, vehicle_seats.rs, terrain_cache.rs, chat_moderation.rs
 │   ├── grenades.rs, player.rs, admin.rs, chat.rs, chunks.rs
+│   ├── matchmaking.rs             Match flow: round timer, intermission, results
 │   ├── lifecycle.rs, environment.rs, cleanup.rs, map.rs
-│   └── (56 files total)
+│   └── (66 files total)
 │
 ├── client/src/
 │   ├── shared-config.ts           Typed imports from game-constants.json
 │   ├── game/
-│   │   ├── Engine.ts              Orchestrator (2,981 lines — animate loop + server listeners)
+│   │   ├── Engine.ts              Orchestrator (5,008 lines — animate loop + server listeners)
 │   │   ├── WeaponRegistry.ts      Single source of truth for client weapon data
 │   │   ├── Weapons.ts             Weapon fire logic (raycasting, spread, recoil)
 │   │   ├── vehicles/
@@ -58,7 +80,9 @@ bitwars/
 │   │   │   ├── VehicleManager.ts  Universal vehicle manager with type registry
 │   │   │   ├── VehiclePhysics.ts  Vehicle physics simulation
 │   │   │   ├── HelicopterType.ts  Helicopter model + animation + breakup
-│   │   │   └── FighterJetType.ts  Fighter jet model + animation + breakup
+│   │   │   ├── FighterJetType.ts  Fighter jet model + animation + breakup
+│   │   │   ├── APCType.ts         APC model + animation + breakup
+│   │   │   └── AntiAirType.ts     Anti-Air model + animation + breakup
 │   │   ├── audio/                 Ray-traced procedural audio system
 │   │   │   ├── AudioCore.ts       Submix buses, dynamic reverb, spatial bus, voice mgmt
 │   │   │   ├── AudioRayTracer.worker.ts  Web Worker: DDA voxel raycasting for acoustics
@@ -76,20 +100,27 @@ bitwars/
 │   │   ├── VoxelWorld.ts, PhysicsSystem.ts, FPSControls.ts
 │   │   ├── SkySystem.ts, ProjectileManager.ts, VFX.ts
 │   │   ├── WeaponModel.ts, PostFX.ts, InterpolationBuffer.ts
-│   │   └── (45 files total)
+│   │   └── (52 files total)
 │   ├── screens/
-│   │   ├── GameScreen.tsx         Slim orchestrator (769 lines)
+│   │   ├── GameScreen.tsx         HUD orchestrator (1,048 lines)
 │   │   ├── LobbyScreen.tsx        Lobby / match browser
 │   │   ├── LoginScreen.tsx        Login flow
 │   │   ├── PerfPanel.tsx          Performance debug overlay
 │   │   ├── SettingsPanel.tsx      Settings UI
-│   │   ├── hud/                   8 extracted HUD components
+│   │   ├── hud/                   HUD components
 │   │   │   ├── BottomHud.tsx, TopHudBar.tsx, LoadoutOverlay.tsx
 │   │   │   ├── Crosshair.tsx, KillFeed.tsx, ChatOverlay.tsx, DeathScreen.tsx
-│   │   │   └── BunkerBusterDepthView.tsx
-│   │   └── hooks/                 useKillTracking.ts, useChat.ts
+│   │   │   ├── TacticalMap.tsx, BuffIndicators.tsx, MatchVictoryOverlay.tsx
+│   │   │   ├── TutorialOverlay.tsx, LivePerfOverlay.tsx
+│   │   └── hooks/                 useKillTracking.ts, useChat.ts, useTacticalMap.ts, useMatchSession.ts
 │   ├── store.ts, db.ts, App.tsx
 │   └── module_bindings/           Auto-generated — do NOT edit
+│
+├── bots/                          Headless neural-net bot client (real SpacetimeDB clients)
+│   └── src/                       bot.ts (HeadlessBitBot), movement, neural, observation, world, diagnostics + model/navigation.safetensors
+│
+└── training/                      Tauri desktop app — trains the bots' neural nav net (PPO reinforcement learning)
+    └── src-tauri/src/             rl/ (PPO on candle), sim/ (headless game sim), worldgen/ (DUPLICATE of server worldgen — keep in sync)
 ```
 
 ---
@@ -123,12 +154,14 @@ spacetime logs bitwars                                                         #
 
 ## MANDATORY: Deployment After Server Changes
 
-**Every time server code is modified, you MUST complete the full deploy cycle before considering the task done:**
+**Every time server code is modified, you MUST complete the full deploy cycle — against your own local SpacetimeDB instance — before considering the task done:**
 
 1. `cargo build --target wasm32-unknown-unknown --release` — verify it compiles
-2. `spacetime publish bitwars --clear-database -y --module-path ./spacetimedb` — deploy (use `--clear-database` only if schema changed)
+2. `spacetime publish <your-module> --clear-database -y --module-path ./spacetimedb` — deploy to YOUR OWN local instance (e.g. module `bitwars-local` on a `spacetime start` instance; use `--clear-database` only if schema changed)
 3. `spacetime generate --lang typescript --out-dir ../client/src/module_bindings --module-path ./spacetimedb` — regenerate bindings
 4. `bun run build` (in `client/`) — verify client compiles with new bindings
+
+**Production (bitwars.io) deploys are maintainer-only; never publish to databases you do not own.**
 
 Never leave server changes unpublished or bindings out of sync. The client WILL break if bindings don't match the deployed module.
 
@@ -355,12 +388,12 @@ When implementing ANY new feature:
 
 ## Client Architecture Details
 
-### Engine.ts (2,981 lines — the orchestrator)
+### Engine.ts (5,008 lines — the orchestrator)
 
 Engine.ts is the game's main class. It owns the Three.js scene, camera, renderer, and coordinates all sub-systems. Its two largest methods are:
 
-- **`setupServerListeners()`** (~590 lines): All SpacetimeDB table callbacks. When adding a new server table listener, add it here.
-- **`animate()`** (~367 lines): The per-frame game loop. Calls all sub-system `update()` methods.
+- **`setupServerListeners()`** (~1,080 lines across its `setup*Listeners` sub-methods): All SpacetimeDB table callbacks. When adding a new server table listener, add it here.
+- **`animate()`** (~220 lines): The per-frame game loop. Calls all sub-system `update()` methods.
 
 Engine delegates to these managers (each has a context interface):
 | Manager | Owns |
@@ -421,7 +454,7 @@ All sounds are procedurally generated (zero audio files). The system has three l
 ## Server Architecture Details
 
 ### Modular Structure
-The server is split into 50 focused files. `lib.rs` is just module declarations. Key patterns:
+The server is split into 66 focused files. `lib.rs` is just module declarations. Key patterns:
 
 - **Weapon registry** (`weapons/mod.rs`): `get_weapon(index)` returns stats parsed from JSON. Ammo is in a normalized `PlayerAmmo` table (1 row per player+weapon). Adding a weapon = add JSON entry + optional `.rs` file.
 - **Vehicle dispatcher** (`vehicles/mod.rs`): `tick_vehicles` dispatches to per-type physics (`helicopter.rs`). Adding a vehicle = new `.rs` file + match arm.
@@ -489,7 +522,7 @@ These features do NOT exist yet. When implementing them, follow the existing reg
 | Feature | Architecture approach |
 |---------|----------------------|
 | **Multiple maps** | Add map config to `game-constants.json` (seed, dimensions, biome weights). Map selection UI. Possibly separate SpacetimeDB databases per map. |
-| **Lobbies/matchmaking** | Lobby service that provisions SpacetimeDB databases per match. Match browser UI. Player routing between databases. |
+| **Cross-database lobbies/matchmaking** | NOTE: single-match flow already exists (`server/matchmaking.rs` — round timer, intermission, results; client `useMatchSession.ts` + `MatchVictoryOverlay.tsx`). Multi-database matchmaking (a lobby service that provisions SpacetimeDB databases per match, match browser UI, player routing between databases) is NOT yet built. |
 | **Game modes** (TDM, CTF, BR) | `server/gamemodes/` package with a `GameMode` trait. Per-mode scoring, spawn logic, win conditions. Mode-specific HUD components on client. |
 | **Teams** | New `Team` table + team assignment reducer. Team-based spawn points, friendly fire config, team HUD colors. |
 | **Progression/unlocks** | Persistent player profile table (XP, unlocks, stats). Separate from per-match state. |
@@ -501,8 +534,8 @@ These features do NOT exist yet. When implementing them, follow the existing reg
 
 ## Environment
 
-- Database name: `bitwars` (on maincloud)
-- Dashboard: https://spacetimedb.com/bitwars
-- Client connects to `wss://maincloud.spacetimedb.com` (configurable via `VITE_SPACETIMEDB_URI`)
-- Module name configurable via `VITE_MODULE_NAME` (defaults to `bitwars`)
+- Local dev runs against your own SpacetimeDB instance: `spacetime start` (serves at `ws://localhost:3000`)
+- Point the client at it via `client/.env.local`: set `VITE_SPACETIMEDB_URI=ws://localhost:3000` and `VITE_MODULE_NAME` to your module name (e.g. `bitwars-local`) — see `client/.env.example`
+- Without a `.env.local`, the client defaults to the production server — always create one for development
+- Production config (maincloud database, bitwars.io) is maintainer-only
 - Package manager: **bun** (not npm)
