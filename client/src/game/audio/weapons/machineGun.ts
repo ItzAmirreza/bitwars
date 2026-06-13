@@ -2,28 +2,33 @@
  * Machine gun — procedural fire sound (weapon index 3).
  */
 
-import type { AudioCore, SpatialSoundOptions } from '../AudioCore';
+import type { AudioCore, SpatialSoundOptions, SpatialBusOptions } from '../AudioCore';
 
 export function playMachineGun(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const result = core.resolveOutput(
-    spatial,
-    {
-      gain: 1,
-      minDistance: 2,
-      maxDistance: 125,
-      rolloff: 1.5,
-      coneInner: 90,
-      coneOuter: 220,
-      coneOuterGain: 0.24,
-      occlusionStrength: 0.85,
-      baseLowpass: 13000,
-      reverbAmount: 0.08,
-      bus: 'weapon',
-      voiceCategory: 'weapon',
-      voiceDuration: 0.08,
-    },
-    0.16,
-  );
+  const busOptions: SpatialBusOptions = {
+    gain: 1,
+    minDistance: 2,
+    maxDistance: 125,
+    rolloff: 1.5,
+    coneInner: 90,
+    coneOuter: 220,
+    coneOuterGain: 0.24,
+    occlusionStrength: 0.85,
+    baseLowpass: 13000,
+    reverbAmount: 0.08,
+    bus: 'weapon',
+    voiceCategory: 'weapon',
+    voiceDuration: 0.08,
+  };
+  // Real sample first; fall back to procedural synth below if not loaded.
+  // Per-shot pitch jitter prevents comb-filtering/phasing on fast overlap.
+  if (core.playSample('weapon_machinegun', spatial, busOptions, {
+    gain: 0.42,
+    pitchVary: 0.1,
+    gainVary: 0.12,
+  })) return;
+
+  const result = core.resolveOutput(spatial, busOptions, 0.16);
   if (!result) return;
   const { ctx, t, out, delay } = result;
   const t0 = t + delay;

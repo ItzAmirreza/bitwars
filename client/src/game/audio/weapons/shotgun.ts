@@ -20,6 +20,9 @@ export function playShotgun(core: AudioCore, spatial?: SpatialSoundOptions): voi
     voiceCategory: 'weapon',
     voiceDuration: 0.3,
   };
+  // Real sample first; fall back to procedural synth below if not loaded.
+  if (core.playSample('weapon_shotgun', spatial, busOptions, { gain: 0.9, pitchVary: 0.05, gainVary: 0.1 })) return;
+
   const result = core.resolveOutput(spatial, busOptions, 0.24);
   if (!result) return;
   const { ctx, t, out, delay } = result;

@@ -68,5 +68,5 @@ export { playVehicleMinigun } from './vehicleMinigun';
 export { playVehicleRocket } from './vehicleRockets';
 export { playKineticPenetratorFire, playKineticPenetratorDetonation } from './kineticPenetrator';
 export { playCarpetBombDrop } from './carpetBomb';
-export { playReload, playEmpty, playSwitch } from './actions';
+export { playReload, playEmpty, playSwitch, playLowAmmo, playReloadComplete } from './actions';
 export { playProjectileFlyby } from './flyby';

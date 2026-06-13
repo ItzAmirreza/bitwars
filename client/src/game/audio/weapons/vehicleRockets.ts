@@ -22,6 +22,9 @@ export function playVehicleRocket(core: AudioCore, spatial?: SpatialSoundOptions
     voiceCategory: 'weapon',
     voiceDuration: 0.5,
   };
+  // Real sample first; fall back to procedural synth below if not loaded.
+  if (core.playSample('weapon_rpg', spatial, busOptions, { gain: 0.9, pitchVary: 0.06, gainVary: 0.1 })) return;
+
   const result = core.resolveOutput(spatial, busOptions, 0.3);
   if (!result) return;
   const { ctx, t, out, delay } = result;

@@ -22,6 +22,15 @@ export function playVehicleMinigun(core: AudioCore, spatial?: SpatialSoundOption
     voiceCategory: 'weapon',
     voiceDuration: 0.1,
   };
+  // Real sample first; fall back to procedural synth below if not loaded.
+  // Per-shot pitch jitter prevents comb-filtering/phasing when fast cannons
+  // (e.g. anti-air) overlap many copies of the same sample.
+  if (core.playSample('weapon_minigun', spatial, busOptions, {
+    gain: 0.45,
+    pitchVary: 0.1,
+    gainVary: 0.12,
+  })) return;
+
   const result = core.resolveOutput(spatial, busOptions, 0.28);
   if (!result) return;
   const { ctx, t, out, delay } = result;

@@ -91,6 +91,7 @@ export class VehicleFireController {
         // Reload timer expired — client-predict ammo refill
         ctx.vehicleManager.vehicleAmmo[slot] = wep ? wep.maxAmmo : 0;
         ctx.vehicleManager.vehicleReloadingUntil[slot] = 0;
+        ctx.audio.playReloadComplete(ctx.localAudioSource(-0.15));
       }
     }
   }
@@ -371,7 +372,7 @@ export class VehicleFireController {
     if (hitPlayerIds.length > 0 || hitVehicleIds.length > 0) {
       ctx.hitMarkerTimer = 0.2;
       ctx.hitMarkerType = 'player';
-      ctx.audio.playHitMarker();
+      ctx.audio.playHitMarker('player');
     }
 
     // Audio: minigun burst

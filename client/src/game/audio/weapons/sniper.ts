@@ -20,6 +20,9 @@ export function playSniper(core: AudioCore, spatial?: SpatialSoundOptions): void
     voiceCategory: 'weapon',
     voiceDuration: 0.4,
   };
+  // Real sample first; fall back to procedural synth below if not loaded.
+  if (core.playSample('weapon_sniper', spatial, busOptions, { gain: 0.95, pitchVary: 0.04, gainVary: 0.08 })) return;
+
   const result = core.resolveOutput(spatial, busOptions, 0.35);
   if (!result) return;
   const { ctx, t, out, delay } = result;

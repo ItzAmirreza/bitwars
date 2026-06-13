@@ -8,25 +8,29 @@ import type { AudioCore, SpatialSoundOptions, SpatialBusOptions } from './AudioC
 let stepIndex = 0;
 
 export function playStep(core: AudioCore, sprinting = false, spatial?: SpatialSoundOptions): void {
-  const result = core.resolveOutput(
-    spatial,
-    {
-      gain: 1,
-      minDistance: 1.5,
-      maxDistance: 45,
-      rolloff: 2.2,
-      coneInner: 360,
-      coneOuter: 360,
-      coneOuterGain: 1,
-      occlusionStrength: 0.95,
-      baseLowpass: 3500,
-      reverbAmount: 0.08,
-      bus: 'movement',
-      voiceCategory: 'movement',
-      voiceDuration: 0.1,
-    },
-    0.12,
-  );
+  const busOptions: SpatialBusOptions = {
+    gain: 1,
+    minDistance: 1.5,
+    maxDistance: 45,
+    rolloff: 2.2,
+    coneInner: 360,
+    coneOuter: 360,
+    coneOuterGain: 1,
+    occlusionStrength: 0.95,
+    baseLowpass: 3500,
+    reverbAmount: 0.08,
+    bus: 'movement',
+    voiceCategory: 'movement',
+    voiceDuration: 0.1,
+  };
+  // Real sample first (random variant + pitch variation); fall back to synth.
+  if (core.playSample('footstep_grass', spatial, busOptions, {
+    gain: sprinting ? 0.5 : 0.35,
+    pitchVary: 0.1,
+    gainVary: 0.12,
+  })) return;
+
+  const result = core.resolveOutput(spatial, busOptions, 0.12);
   if (!result) return;
   const { ctx, t, out } = result;
 
@@ -194,6 +198,14 @@ export function playLanding(core: AudioCore, intensity: number, spatial?: Spatia
     voiceCategory: 'movement',
     voiceDuration: 0.2,
   };
+  // Real sample first (louder/lower for harder landings); fall back to synth.
+  if (core.playSample('land', spatial, busOptions, {
+    gain: 0.4 + intensity * 0.4,
+    rate: 1.1 - intensity * 0.25,
+    pitchVary: 0.06,
+    gainVary: 0.1,
+  })) return;
+
   const result = core.resolveOutput(spatial, busOptions, 0.15);
   if (!result) return;
   const { ctx, t, out } = result;

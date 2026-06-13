@@ -6,25 +6,28 @@
 import type { AudioCore, SpatialSoundOptions, SpatialBusOptions } from './AudioCore';
 
 export function playExplosion(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const result = core.resolveOutput(
-    spatial,
-    {
-      gain: 1,
-      minDistance: 3.5,
-      maxDistance: 240,
-      rolloff: 1.08,
-      coneInner: 360,
-      coneOuter: 360,
-      coneOuterGain: 1,
-      occlusionStrength: 1.2,
-      baseLowpass: 9200,
-      reverbAmount: 0.22,
-      bus: 'combat',
-      voiceCategory: 'combat',
-      voiceDuration: 1.0,
-    },
-    0.35,
-  );
+  const busOptions: SpatialBusOptions = {
+    gain: 1,
+    minDistance: 3.5,
+    maxDistance: 240,
+    rolloff: 1.08,
+    coneInner: 360,
+    coneOuter: 360,
+    coneOuterGain: 1,
+    occlusionStrength: 1.2,
+    baseLowpass: 9200,
+    reverbAmount: 0.22,
+    bus: 'combat',
+    voiceCategory: 'combat',
+    voiceDuration: 1.0,
+  };
+  // Real samples first (crunch + layered deep boom); fall back to synth below.
+  if (core.playSample('explosion', spatial, busOptions, { gain: 0.95, pitchVary: 0.12, gainVary: 0.12 })) {
+    core.playSample('explosion_boom', spatial, busOptions, { gain: 0.7, pitchVary: 0.12, gainVary: 0.1 });
+    return;
+  }
+
+  const result = core.resolveOutput(spatial, busOptions, 0.35);
   if (!result) return;
   const { ctx, t, out, delay } = result;
   const t0 = t + delay;
@@ -85,25 +88,25 @@ export function playExplosion(core: AudioCore, spatial?: SpatialSoundOptions): v
 }
 
 export function playBlockBreak(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const result = core.resolveOutput(
-    spatial,
-    {
-      gain: 1,
-      minDistance: 1.4,
-      maxDistance: 70,
-      rolloff: 1.85,
-      coneInner: 360,
-      coneOuter: 360,
-      coneOuterGain: 1,
-      occlusionStrength: 0.75,
-      baseLowpass: 12000,
-      reverbAmount: 0.03,
-      bus: 'combat',
-      voiceCategory: 'combat',
-      voiceDuration: 0.1,
-    },
-    0.12,
-  );
+  const busOptions: SpatialBusOptions = {
+    gain: 1,
+    minDistance: 1.4,
+    maxDistance: 70,
+    rolloff: 1.85,
+    coneInner: 360,
+    coneOuter: 360,
+    coneOuterGain: 1,
+    occlusionStrength: 0.75,
+    baseLowpass: 12000,
+    reverbAmount: 0.03,
+    bus: 'combat',
+    voiceCategory: 'combat',
+    voiceDuration: 0.1,
+  };
+  // Real sample first; fall back to procedural synth below if not loaded.
+  if (core.playSample('blockbreak', spatial, busOptions, { gain: 0.55, pitchVary: 0.12, gainVary: 0.12 })) return;
+
+  const result = core.resolveOutput(spatial, busOptions, 0.12);
   if (!result) return;
   const { ctx, t, out, delay } = result;
   const t0 = t + delay;
@@ -207,24 +210,36 @@ export function playCrumble(core: AudioCore, spatial?: SpatialSoundOptions): voi
   src.stop(t0 + 0.25);
 }
 
-export function playHitMarker(core: AudioCore): void {
+export type HitMarkerKind = 'player' | 'block';
+
+export function playHitMarker(core: AudioCore, kind: HitMarkerKind = 'player'): void {
+  // Real sample first; fall back to procedural synth below if not loaded.
+  if (core.playSampleOnBus('hitmarker', 'ui', { gain: 0.5 })) return;
+
   const ctx = core.ensure();
   const t = ctx.currentTime;
   const uiBus = core.getBus('ui');
 
+  // Player hits read as a bright "tick on flesh"; block hits as a lower, duller
+  // "thud on terrain" (block hits previously played no sound at all). Frequencies
+  // eased down from the original 1200/1600/2000/3000 to remove combat fizz.
+  const cfg = kind === 'block'
+    ? { f1: 900,  f2: 1300, harm: 1400, crunchHp: 1800, crunchGain: 0.04,  vol: 0.10 }
+    : { f1: 1200, f2: 1600, harm: 1800, crunchHp: 2400, crunchGain: 0.045, vol: 0.15 };
+
   // Primary tone
   const o1 = ctx.createOscillator();
   o1.type = 'sine';
-  o1.frequency.setValueAtTime(1200, t);
-  o1.frequency.setValueAtTime(1600, t + 0.02);
+  o1.frequency.setValueAtTime(cfg.f1, t);
+  o1.frequency.setValueAtTime(cfg.f2, t + 0.02);
 
   // Harmonic overlay
   const o2 = ctx.createOscillator();
   o2.type = 'sine';
-  o2.frequency.value = 2000;
+  o2.frequency.value = cfg.harm;
 
   const g = ctx.createGain();
-  g.gain.setValueAtTime(0.15, t);
+  g.gain.setValueAtTime(cfg.vol, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
 
   o1.connect(g).connect(uiBus);
@@ -239,9 +254,9 @@ export function playHitMarker(core: AudioCore): void {
   crunch.buffer = core.noise(0.03, 0.15);
   const hp = ctx.createBiquadFilter();
   hp.type = 'highpass';
-  hp.frequency.value = 3000;
+  hp.frequency.value = cfg.crunchHp;
   const cg = ctx.createGain();
-  cg.gain.setValueAtTime(0.06, t);
+  cg.gain.setValueAtTime(cfg.crunchGain, t);
   cg.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
   crunch.connect(hp).connect(cg).connect(uiBus);
   crunch.start(t);
@@ -249,6 +264,9 @@ export function playHitMarker(core: AudioCore): void {
 }
 
 export function playKillConfirm(core: AudioCore): void {
+  // Real sample first; fall back to procedural synth below if not loaded.
+  if (core.playSampleOnBus('killconfirm', 'ui', { gain: 0.6 })) return;
+
   const ctx = core.ensure();
   const t = ctx.currentTime;
   const uiBus = core.getBus('ui');
@@ -276,8 +294,8 @@ export function playKillConfirm(core: AudioCore): void {
   // Bright shimmer overlay
   const shimmer = ctx.createOscillator();
   shimmer.type = 'sine';
-  shimmer.frequency.setValueAtTime(2640, t + 0.12);
-  shimmer.frequency.exponentialRampToValueAtTime(3520, t + 0.3);
+  shimmer.frequency.setValueAtTime(2200, t + 0.12); // softer ceiling (was 2640→3520)
+  shimmer.frequency.exponentialRampToValueAtTime(2960, t + 0.3);
   const sg = ctx.createGain();
   sg.gain.setValueAtTime(0, t);
   sg.gain.setValueAtTime(0.06, t + 0.12);
@@ -413,25 +431,25 @@ export function playHeartbeat(core: AudioCore, spatial?: SpatialSoundOptions): v
 }
 
 export function playDamage(core: AudioCore, spatial?: SpatialSoundOptions): void {
-  const result = core.resolveOutput(
-    spatial,
-    {
-      gain: 1,
-      minDistance: 1.6,
-      maxDistance: 75,
-      rolloff: 1.7,
-      coneInner: 360,
-      coneOuter: 360,
-      coneOuterGain: 1,
-      occlusionStrength: 0.95,
-      baseLowpass: 7000,
-      reverbAmount: 0.05,
-      bus: 'combat',
-      voiceCategory: 'combat',
-      voiceDuration: 0.2,
-    },
-    0.08,
-  );
+  const busOptions: SpatialBusOptions = {
+    gain: 1,
+    minDistance: 1.6,
+    maxDistance: 75,
+    rolloff: 1.7,
+    coneInner: 360,
+    coneOuter: 360,
+    coneOuterGain: 1,
+    occlusionStrength: 0.95,
+    baseLowpass: 7000,
+    reverbAmount: 0.05,
+    bus: 'combat',
+    voiceCategory: 'combat',
+    voiceDuration: 0.2,
+  };
+  // Real sample first; fall back to procedural synth below if not loaded.
+  if (core.playSample('damage', spatial, busOptions, { gain: 0.7, pitchVary: 0.08, gainVary: 0.1 })) return;
+
+  const result = core.resolveOutput(spatial, busOptions, 0.08);
   if (!result) return;
   const { ctx, t, out } = result;
 
