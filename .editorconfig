@@ -1,0 +1,32 @@
+# EditorConfig — https://editorconfig.org
+#
+# Normalizes line endings, final newlines, and indentation across editors so
+# whitespace/EOL churn never pollutes diffs. Contributors span Windows/macOS/
+# Linux (the maintainer develops on Windows), so LF + final-newline matter.
+#
+# See docs/REFACTORING.md → P0.4.
+
+# Top-most EditorConfig file; stop searching parent directories.
+root = true
+
+# Defaults for every file: UTF-8, LF, trailing-newline, 2-space indent.
+# 2-space covers TypeScript/TSX, JSON, YAML, and the shared config.
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Rust uses 4-space indentation (matches rustfmt defaults).
+[*.rs]
+indent_size = 4
+
+# Makefiles require literal tabs.
+[{Makefile,*.mk}]
+indent_style = tab
+
+# Markdown: trailing whitespace can be a hard line break, so don't trim it.
+[*.md]
+trim_trailing_whitespace = false
