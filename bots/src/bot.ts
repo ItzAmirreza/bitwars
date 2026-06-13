@@ -43,6 +43,56 @@ const MAX_BURST_COOLDOWN_MS = 760;
 const RESPAWN_DELAY_MS = 3200;
 const MAX_TURN_RATE = Math.PI * 1.35;
 const MAX_PITCH_RATE = Math.PI * 1.1;
+
+// ── Per-bot personality ─────────────────────────────────────────────────────
+// Each bot derives a stable "personality" from its name so the roster plays like
+// distinct people, not identical clones: different reaction speed, aim rate,
+// aggression, look bias, and burst discipline — all within human-plausible ranges.
+interface BotPersonality {
+  reactionMinMs: number;
+  reactionMaxMs: number;
+  turnRate: number;
+  acquireRange: number;
+  pitchBias: number;
+  burstMin: number;
+  burstMax: number;
+}
+
+function hashStringToSeed(s: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function makePersonality(name: string): BotPersonality {
+  const rng = mulberry32(hashStringToSeed(name));
+  const skill = rng(); // 0 = looser/slower, 1 = sharper
+  // Center the reaction window on the shared baseline, scaled by skill.
+  const reactionCenter =
+    ((MIN_TARGET_REACTION_MS + MAX_TARGET_REACTION_MS) / 2) * (0.72 + (1 - skill) * 0.5);
+  return {
+    reactionMinMs: Math.round(reactionCenter - 45),
+    reactionMaxMs: Math.round(reactionCenter + 95),
+    turnRate: MAX_TURN_RATE * (0.85 + skill * 0.3),
+    acquireRange: TARGET_ACQUIRE_RANGE * (0.85 + rng() * 0.27),
+    pitchBias: -0.08 + rng() * 0.13,
+    burstMin: Math.max(2, MIN_BURST_SHOTS + (rng() < 0.5 ? 0 : 1)),
+    burstMax: Math.max(4, MAX_BURST_SHOTS + (rng() < 0.5 ? 0 : 2)),
+  };
+}
 const WAYPOINT_RADIUS = 2.5;
 const WAYPOINT_LIFETIME_MS = 9000;
 const MAX_STEP_UP = 0.6;
@@ -266,6 +316,7 @@ export class HeadlessBitBot {
   private respawnAt = 0;
   private claimedUsername = false;
   private activeName: string;
+  private readonly personality: BotPersonality;
   private jumpCooldownUntil = 0;
   private blockedSince = 0;
   private lastHealth = PLAYER.maxHealth;
@@ -304,6 +355,12 @@ export class HeadlessBitBot {
   constructor(options: BotRuntimeOptions) {
     this.options = options;
     this.activeName = options.name;
+    this.personality = makePersonality(options.name);
+    console.log(
+      `[bot:${options.name}] personality react=${this.personality.reactionMinMs}-${this.personality.reactionMaxMs}ms ` +
+        `turn=${this.personality.turnRate.toFixed(2)} acq=${this.personality.acquireRange.toFixed(0)} ` +
+        `pitchBias=${this.personality.pitchBias.toFixed(2)} burst=${this.personality.burstMin}-${this.personality.burstMax}`,
+    );
     try {
       this.neuralNav = new NeuralNavigator(NAV_MODEL_PATH);
     } catch {
@@ -913,7 +970,7 @@ export class HeadlessBitBot {
       const d2 = distSq(me.pos, enemy.pos);
       const distance = Math.sqrt(d2);
       if (distance > TARGET_KEEP_RANGE) continue;
-      if (distance > TARGET_ACQUIRE_RANGE && this.trackedTarget?.identityHex !== identityHex(enemy.identity)) continue;
+      if (distance > this.personality.acquireRange && this.trackedTarget?.identityHex !== identityHex(enemy.identity)) continue;
       const targetEye = this.targetEye(enemy);
       if (!this.canSeePoint(me, targetEye, peripheralLock)) continue;
       if (now < this.underFireUntil && distance > 38 && Math.random() < 0.18) continue;
@@ -940,7 +997,7 @@ export class HeadlessBitBot {
         this.trackedTarget = {
           identityHex: nextIdentity,
           lastSeenAt: now,
-          reactionReadyAt: now + randomBetween(MIN_TARGET_REACTION_MS, MAX_TARGET_REACTION_MS),
+          reactionReadyAt: now + randomBetween(this.personality.reactionMinMs, this.personality.reactionMaxMs),
         };
       } else if (this.trackedTarget) {
         this.trackedTarget.lastSeenAt = now;
@@ -1990,13 +2047,13 @@ export class HeadlessBitBot {
       // navPitch for observations (see computeNeuralAction); here we only clamp
       // the *displayed* pitch to a natural near-level range. The bot isn't aiming
       // while navigating, so this is purely cosmetic and doesn't affect pathing.
-      desiredPitch = clamp(this.navPitch, -0.28, 0.2);
+      desiredPitch = clamp(this.navPitch + this.personality.pitchBias, -0.3, 0.22);
     } else if (Math.abs(movement.x) > 0.01 || Math.abs(movement.z) > 0.01) {
       desiredYaw = Math.atan2(-movement.x, -movement.z);
-      desiredPitch = 0;
+      desiredPitch = this.personality.pitchBias;
     }
 
-    this.yaw = approachAngle(this.yaw, desiredYaw, MAX_TURN_RATE * dtSec);
+    this.yaw = approachAngle(this.yaw, desiredYaw, this.personality.turnRate * dtSec);
     this.pitch = clamp(
       this.pitch + clamp(desiredPitch - this.pitch, -MAX_PITCH_RATE * dtSec, MAX_PITCH_RATE * dtSec),
       -1.0,
@@ -2057,7 +2114,7 @@ export class HeadlessBitBot {
       } else if (weapon === SHOTGUN_INDEX) {
         this.burstShotsRemaining = randomInt(1, 2);
       } else {
-        this.burstShotsRemaining = randomInt(MIN_BURST_SHOTS, MAX_BURST_SHOTS);
+        this.burstShotsRemaining = randomInt(this.personality.burstMin, this.personality.burstMax);
       }
     }
 
