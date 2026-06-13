@@ -192,7 +192,7 @@ The codebase uses registry patterns so new content (weapons, vehicles, structure
 1. Add entry to `shared/game-constants.json` → `weapons` array
 2. **Server**: Create `server/weapons/my_weapon.rs` (optional — only if it has special behavior like grenade bouncing). Add `pub mod` to `weapons/mod.rs`. The registry auto-reads from JSON.
 3. **Client**: Add client-only rendering data to `WeaponRegistry.ts` (recoil, projectile VFX config, HUD description). The stats come from shared config automatically.
-4. Add audio to `client/audio/WeaponAudio.ts`
+4. Add audio: create `client/src/game/audio/weapons/my_weapon.ts` exporting its play function, then register it in `client/src/game/audio/weapons/index.ts` (`WEAPON_FIRE_SOUNDS` map) — mirrors the server one-file-per-weapon layout
 5. Add first-person model to `client/WeaponModel.ts`
 6. Add SVG silhouette to `client/screens/hud/LoadoutOverlay.tsx`
 
