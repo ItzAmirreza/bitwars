@@ -56,6 +56,7 @@ bitwars/
 ├── database metrics/   SpacetimeDB dashboard metric exports
 ├── .github/            CI + deploy workflows, issue/PR templates, CODEOWNERS
 ├── docs/               REFACTORING.md (code-health roadmap) + LAUNCH_CHECKLIST.md
+├── ROADMAP.md          Product roadmap — where the game is going
 ├── CLAUDE.md           Architecture guide (for developers and AI agents)
 └── DESIGN.md           Visual style bible — read before touching any UI
 ```
@@ -126,8 +127,13 @@ Contributions are welcome — bug fixes, performance work, new weapons, vehicles
 - [CLA.md](CLA.md) — the contributor license agreement that covers your PRs
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — be excellent to each other
 - [CLAUDE.md](CLAUDE.md) and [DESIGN.md](DESIGN.md) — architecture and visual style references
+- [ROADMAP.md](ROADMAP.md) (product direction) and [docs/REFACTORING.md](docs/REFACTORING.md) (code-health tasks) — what to work on
 
 One thing to be clear about up front: **BitWars is source-available, not open source.** The code is public so you can study it, learn from it, and improve the game — but the license is not an OSI open-source license. It forbids redistribution, public hosting, and commercial use. The only authorized public instance is [bitwars.io](https://bitwars.io). If that model isn't for you, no hard feelings — you can still play, file issues, and join the discussion.
+
+## Roadmap
+
+Where the game is headed — gameplay, content, and the player experience — lives in [ROADMAP.md](ROADMAP.md), priority-ordered (`P0` → `P3`, no dates). It's a living document: react in the pinned roadmap thread in [Discussions](https://github.com/ItzAmirreza/bitwars/discussions), propose features in the Ideas category, and pick up an epic by commenting on its tracking issue first. Code-health work (file splits, tests, cleanup) has its own track in [docs/REFACTORING.md](docs/REFACTORING.md).
 
 ## Community
 
