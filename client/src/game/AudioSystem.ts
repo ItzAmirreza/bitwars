@@ -233,6 +233,14 @@ export class AudioSystem {
     WeaponAudio.playSwitch(this.core, spatial);
   }
 
+  playLowAmmo(spatial?: SpatialSoundOptions): void {
+    WeaponAudio.playLowAmmo(this.core, spatial);
+  }
+
+  playReloadComplete(spatial?: SpatialSoundOptions): void {
+    WeaponAudio.playReloadComplete(this.core, spatial);
+  }
+
   // ── Combat ──
 
   playExplosion(spatial?: SpatialSoundOptions): void {
@@ -251,8 +259,8 @@ export class AudioSystem {
     CombatAudio.playCrumble(this.core, spatial);
   }
 
-  playHitMarker(): void {
-    CombatAudio.playHitMarker(this.core);
+  playHitMarker(kind: CombatAudio.HitMarkerKind = 'player'): void {
+    CombatAudio.playHitMarker(this.core, kind);
   }
 
   playKillConfirm(): void {

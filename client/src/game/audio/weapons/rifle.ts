@@ -24,6 +24,9 @@ export function playRifle(core: AudioCore, spatial?: SpatialSoundOptions): void 
     voiceCategory: 'weapon',
     voiceDuration: 0.15,
   };
+  // Real sample first; fall back to procedural synth below if not loaded.
+  if (core.playSample('weapon_rifle', spatial, busOptions, { gain: 0.85, pitchVary: 0.05, gainVary: 0.1 })) return;
+
   const result = core.resolveOutput(spatial, busOptions, 0.22);
   if (!result) return;
   const { ctx, t, out, delay } = result;
@@ -55,13 +58,13 @@ export function playRifle(core: AudioCore, spatial?: SpatialSoundOptions): void 
   punch.start(t0);
   punch.stop(t0 + 0.06);
 
-  // Metallic ping
+  // Metallic ping (softened from 4500→3000 / 0.07 — was the harshest per-shot element)
   const osc = ctx.createOscillator();
   osc.type = 'sine';
-  osc.frequency.setValueAtTime(4500, t0);
-  osc.frequency.exponentialRampToValueAtTime(3000, t0 + 0.06);
+  osc.frequency.setValueAtTime(3600, t0);
+  osc.frequency.exponentialRampToValueAtTime(2600, t0 + 0.06);
   const og = ctx.createGain();
-  og.gain.setValueAtTime(0.07, t0);
+  og.gain.setValueAtTime(0.05, t0);
   og.gain.exponentialRampToValueAtTime(0.001, t0 + 0.06);
   osc.connect(og).connect(out);
   osc.start(t0);
@@ -71,9 +74,10 @@ export function playRifle(core: AudioCore, spatial?: SpatialSoundOptions): void 
   core.scheduleSpatialLayer(spatial, busOptions, 0.22, 0.08, (lateCtx, lateT, lateOut) => {
     const casing = lateCtx.createOscillator();
     casing.type = 'sine';
-    casing.frequency.setValueAtTime(6000 + Math.random() * 1000, lateT);
+    // Lowered from 6-7 kHz "tinkle fizz" to a softer 4.5-5.3 kHz casing.
+    casing.frequency.setValueAtTime(4500 + Math.random() * 800, lateT);
     const cg = lateCtx.createGain();
-    cg.gain.setValueAtTime(0.03, lateT);
+    cg.gain.setValueAtTime(0.025, lateT);
     cg.gain.exponentialRampToValueAtTime(0.001, lateT + 0.04);
     casing.connect(cg).connect(lateOut);
     casing.start(lateT);

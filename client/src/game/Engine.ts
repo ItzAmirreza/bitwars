@@ -382,6 +382,8 @@ export class Engine {
     offsetY: number;
   }> = [];
   private nextCombatTextId = 1;
+  /** Bumped on each reload so a stale scheduled reload-complete cue is ignored. */
+  private reloadToken = 0;
   private recentDamageSources: Array<{
     position: THREE.Vector3;
     timestamp: number;
@@ -2232,6 +2234,17 @@ export class Engine {
       }
       this.weapons.reload(); // Client prediction
       this.audio.playReload(this.localAudioSource(-0.15));
+      // Server refills infantry ammo instantly; the reload "feel" is the ~0.65s
+      // playReload click sequence. Confirm "ready" right as that finishes.
+      const reloadWeaponIndex = this.weapons.currentWeapon;
+      const token = ++this.reloadToken;
+      window.setTimeout(() => {
+        // Skip if superseded by another reload, dead, mounted, or weapon switched.
+        if (token !== this.reloadToken) return;
+        if (this.health <= 0 || this.mountedVehicleId !== 0) return;
+        if (this.weapons.currentWeapon !== reloadWeaponIndex) return;
+        this.audio.playReloadComplete(this.localAudioSource(-0.15));
+      }, 700);
       // Server-authoritative reload
       if (this.conn) this.conn.reducers.reloadWeapon({});
     }

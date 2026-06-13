@@ -70,6 +70,95 @@ export function playEmpty(core: AudioCore, spatial?: SpatialSoundOptions): void 
   osc.stop(t + 0.04);
 }
 
+/**
+ * Low-ammo cue — a soft, muted "tock" that informs without alarming.
+ * Fire once when remaining ammo crosses the low threshold (~20%).
+ */
+export function playLowAmmo(core: AudioCore, spatial?: SpatialSoundOptions): void {
+  const result = core.resolveOutput(
+    spatial,
+    {
+      gain: 1,
+      minDistance: 1.2,
+      maxDistance: 45,
+      rolloff: 2.2,
+      coneInner: 120,
+      coneOuter: 260,
+      coneOuterGain: 0.2,
+      occlusionStrength: 0.65,
+      baseLowpass: 6000,
+      reverbAmount: 0.02,
+      bus: 'weapon',
+      voiceCategory: 'weapon',
+      voiceDuration: 0.08,
+    },
+    0.06,
+  );
+  if (!result) return;
+  const { ctx, t, out } = result;
+
+  const osc = ctx.createOscillator();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(520, t);
+  osc.frequency.exponentialRampToValueAtTime(380, t + 0.05);
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 1200;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.05, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+  osc.connect(lp).connect(g).connect(out);
+  osc.start(t);
+  osc.stop(t + 0.06);
+}
+
+/**
+ * Reload-complete confirm — a satisfying mechanical "chunk" plus a rising
+ * two-note ping (perfect fourth = "ready"). Fire when a reload finishes.
+ */
+export function playReloadComplete(core: AudioCore, spatial?: SpatialSoundOptions): void {
+  const result = core.resolveOutput(
+    spatial,
+    {
+      gain: 1,
+      minDistance: 1.4,
+      maxDistance: 55,
+      rolloff: 1.8,
+      coneInner: 120,
+      coneOuter: 260,
+      coneOuterGain: 0.22,
+      occlusionStrength: 0.7,
+      baseLowpass: 9000,
+      reverbAmount: 0.04,
+      bus: 'weapon',
+      voiceCategory: 'weapon',
+      voiceDuration: 0.25,
+    },
+    0.06,
+  );
+  if (!result) return;
+  const { ctx, t, out } = result;
+
+  // Mechanical "chunk" (bolt seats).
+  core.click(ctx, out, t, 700, 0.04);
+
+  // Rising two-note ping: A5 → D6 (perfect fourth, reads as "ready/positive").
+  const ping = ctx.createOscillator();
+  ping.type = 'sine';
+  ping.frequency.setValueAtTime(880, t + 0.05);
+  ping.frequency.setValueAtTime(1175, t + 0.12);
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 3000;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0, t);
+  g.gain.setValueAtTime(0.08, t + 0.05);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+  ping.connect(lp).connect(g).connect(out);
+  ping.start(t + 0.05);
+  ping.stop(t + 0.2);
+}
+
 export function playSwitch(core: AudioCore, spatial?: SpatialSoundOptions): void {
   const result = core.resolveOutput(
     spatial,

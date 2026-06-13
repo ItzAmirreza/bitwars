@@ -6,30 +6,32 @@
 import type { AudioCore } from './AudioCore';
 
 export function playUIHover(core: AudioCore): void {
+  if (core.playSampleOnBus('ui_hover', 'ui', { gain: 0.35 })) return;
   const ctx = core.ensure();
   const t = ctx.currentTime;
   const uiBus = core.getBus('ui');
 
   const osc = ctx.createOscillator();
   osc.type = 'sine';
-  osc.frequency.value = 2400;
+  osc.frequency.value = 1800; // softened from 2400 (eased off the piercing band)
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.04, t);
-  g.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
   osc.connect(g).connect(uiBus);
   osc.start(t);
-  osc.stop(t + 0.03);
+  osc.stop(t + 0.035);
 }
 
 export function playUIClick(core: AudioCore): void {
+  if (core.playSampleOnBus('ui_click', 'ui', { gain: 0.5 })) return;
   const ctx = core.ensure();
   const t = ctx.currentTime;
   const uiBus = core.getBus('ui');
 
   const osc = ctx.createOscillator();
   osc.type = 'sine';
-  osc.frequency.setValueAtTime(1800, t);
-  osc.frequency.exponentialRampToValueAtTime(2600, t + 0.04);
+  osc.frequency.setValueAtTime(1500, t); // warmer click sweep (was 1800→2600)
+  osc.frequency.exponentialRampToValueAtTime(2100, t + 0.04);
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.08, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
@@ -39,6 +41,7 @@ export function playUIClick(core: AudioCore): void {
 }
 
 export function playUIDeploy(core: AudioCore): void {
+  if (core.playSampleOnBus('ui_deploy', 'ui', { gain: 0.6 })) return;
   const ctx = core.ensure();
   const t = ctx.currentTime;
   const uiBus = core.getBus('ui');
@@ -69,6 +72,7 @@ export function playUIDeploy(core: AudioCore): void {
 }
 
 export function playUINavigate(core: AudioCore): void {
+  if (core.playSampleOnBus('ui_navigate', 'ui', { gain: 0.5 })) return;
   const ctx = core.ensure();
   const t = ctx.currentTime;
   const uiBus = core.getBus('ui');
@@ -86,6 +90,7 @@ export function playUINavigate(core: AudioCore): void {
 }
 
 export function playUIError(core: AudioCore): void {
+  if (core.playSampleOnBus('ui_error', 'ui', { gain: 0.5 })) return;
   const ctx = core.ensure();
   const t = ctx.currentTime;
   const uiBus = core.getBus('ui');
@@ -95,11 +100,11 @@ export function playUIError(core: AudioCore): void {
   osc.frequency.setValueAtTime(300, t);
   osc.frequency.setValueAtTime(200, t + 0.08);
   const g = ctx.createGain();
-  g.gain.setValueAtTime(0.06, t);
+  g.gain.setValueAtTime(0.05, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass';
-  lp.frequency.value = 800;
+  lp.frequency.value = 600; // rounds the square to a soft "bonk" (was 800)
   osc.connect(lp).connect(g).connect(uiBus);
   osc.start(t);
   osc.stop(t + 0.16);
@@ -112,11 +117,16 @@ export function playUIType(core: AudioCore): void {
 
   const osc = ctx.createOscillator();
   osc.type = 'sine';
-  osc.frequency.value = 3000 + Math.random() * 600;
+  // Lowered from 3000-3600 Hz — fires rapidly while typing, so a softer,
+  // lowpassed click avoids fatigue/sharpness.
+  osc.frequency.value = 2200 + Math.random() * 300;
   const g = ctx.createGain();
-  g.gain.setValueAtTime(0.02, t);
+  g.gain.setValueAtTime(0.018, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.02);
-  osc.connect(g).connect(uiBus);
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 4000;
+  osc.connect(lp).connect(g).connect(uiBus);
   osc.start(t);
   osc.stop(t + 0.02);
 }

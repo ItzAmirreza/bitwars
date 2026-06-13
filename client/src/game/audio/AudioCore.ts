@@ -16,6 +16,7 @@ import { NoisePool } from './NoisePool';
 import { VoiceManager } from './VoiceManager';
 import type { VoiceCategory } from './VoiceManager';
 import { AudioRayState } from './AudioRayState';
+import { SampleLibrary } from './SampleLibrary';
 // AudioRayState types used by AudioSystem for worker result forwarding
 export type { RayTraceResult } from './AudioRayState';
 
@@ -52,6 +53,26 @@ export interface SpatialBusOptions {
   voiceCategory?: VoiceCategory;
   /** Duration hint for voice tracking (seconds). */
   voiceDuration?: number;
+}
+
+/** Options for one-shot sample playback. */
+export interface SamplePlayOptions {
+  /** Linear gain multiplier (default 1). */
+  gain?: number;
+  /** Base playback rate / pitch (default 1). */
+  rate?: number;
+  /** Random pitch variation, fractional (e.g. 0.06 → rate ±6% per play). */
+  pitchVary?: number;
+  /** Random gain variation, fractional (e.g. 0.1 → gain ±10% per play). */
+  gainVary?: number;
+  /** Scheduling delay passed to resolveOutput (default 0). */
+  maxDelay?: number;
+}
+
+/** Apply random ±fraction jitter to a base value (natural per-play variation). */
+function jitter(base: number, vary: number | undefined): number {
+  if (!vary) return base;
+  return base * (1 + (Math.random() * 2 - 1) * vary);
 }
 
 /** Persistent audio state for a single helicopter's looping sound. */
@@ -108,12 +129,29 @@ type LegacyPanner = {
 // These are mixed into the master bus. Weapons are loudest, movement quietest.
 
 const BUS_LEVELS: Record<AudioBusName, number> = {
-  weapon:   0.71, // -3 dB
+  weapon:   0.67, // -3.5 dB — already very present; make room for movement/combat
   combat:   0.79, // -2 dB
   vehicle:  0.63, // -4 dB
-  ui:       0.50, // -6 dB
-  movement: 0.40, // -8 dB
+  ui:       0.56, // -5 dB — menu pad + softened UI cues read clearly
+  movement: 0.50, // -6 dB — nearby-footstep clarity
 };
+
+/**
+ * Build a gentle tanh soft-clip curve for the master saturator.
+ * Rounds harsh transient peaks and adds pleasant even harmonics ("analog glue").
+ * Normalized by tanh(drive) so unity input maps to unity output — perceived
+ * loudness stays ~constant, so this warms the tone without slamming the limiter.
+ * drive ~1 = barely audible, ~2-3 = warm, >4 = obvious distortion.
+ */
+function makeSaturationCurve(drive: number, n = 1024): Float32Array<ArrayBuffer> {
+  const curve = new Float32Array(n);
+  const norm = Math.tanh(drive);
+  for (let i = 0; i < n; i++) {
+    const x = (i * 2) / (n - 1) - 1; // -1..1
+    curve[i] = Math.tanh(drive * x) / norm;
+  }
+  return curve;
+}
 
 // ── Core class ──
 
@@ -126,6 +164,10 @@ export class AudioCore {
 
   private compressor: DynamicsCompressorNode | null = null;
   private limiter: DynamicsCompressorNode | null = null;
+  /** Gentle tanh soft-clip — rounds harsh transients, adds warmth (master bus). */
+  private saturator: WaveShaperNode | null = null;
+  /** Gentle high-shelf cut — tames digital fizz/sibilance (master bus). */
+  private highShelf: BiquadFilterNode | null = null;
   private occlusionSampler: OcclusionSampler | null = null;
   private listenerPos: Vec3Like = { x: 0, y: 0, z: 0 };
   private listenerForward: Vec3Like = { x: 0, y: 0, z: -1 };
@@ -146,6 +188,9 @@ export class AudioCore {
 
   /** Voice manager — polyphony limiter. */
   readonly voices = new VoiceManager();
+
+  /** Decoded audio sample library (real recorded/produced sounds). */
+  readonly samples = new SampleLibrary();
 
   /** Ray-traced acoustic environment state. */
   readonly rayState = new AudioRayState();
@@ -182,8 +227,24 @@ export class AudioCore {
       this.limiter.attack.value = 0.001;
       this.limiter.release.value = 0.05;
 
+      // Gentle tanh saturator — rounds harsh transient peaks before the
+      // compressor reacts, adding pleasant even harmonics ("analog glue").
+      this.saturator = this.ctx.createWaveShaper();
+      this.saturator.curve = makeSaturationCurve(2.2);
+      this.saturator.oversample = '4x'; // avoid aliasing the added harmonics
+
+      // Gentle high-shelf — tame digital fizz above 7 kHz without dulling the
+      // 2-5 kHz presence band that carries weapon crack + intelligibility.
+      this.highShelf = this.ctx.createBiquadFilter();
+      this.highShelf.type = 'highshelf';
+      this.highShelf.frequency.value = 7000;
+      this.highShelf.gain.value = -3;
+
+      // master → saturator → compressor → highShelf → limiter → destination
       this.master
+        .connect(this.saturator)
         .connect(this.compressor)
+        .connect(this.highShelf)
         .connect(this.limiter)
         .connect(this.ctx.destination);
 
@@ -201,6 +262,10 @@ export class AudioCore {
 
       // ── Init noise pool ──
       this.noisePool.init(this.ctx);
+
+      // ── Preload audio samples (non-blocking; sounds fall back to procedural
+      //    synth until their buffer is decoded) ──
+      void this.samples.load(this.ctx);
 
       this.applyListenerToContext(this.ctx);
     }
@@ -604,6 +669,68 @@ export class AudioCore {
     }
   }
 
+  // ── Sample playback ──
+
+  /**
+   * Play a decoded sample spatially through the full panner/bus/reverb/occlusion
+   * chain. Returns `true` if a sample existed (played or culled), `false` if no
+   * sample is loaded for `name` — callers use that to fall back to procedural synth.
+   * voiceDuration is widened to the sample length so the spatial nodes aren't
+   * disconnected mid-playback.
+   */
+  playSample(
+    name: string,
+    spatial: SpatialSoundOptions | undefined,
+    busOptions: SpatialBusOptions,
+    opts?: SamplePlayOptions,
+  ): boolean {
+    const buf = this.samples.get(name);
+    if (!buf) return false;
+    const rate = jitter(opts?.rate ?? 1, opts?.pitchVary);
+    const gain = jitter(opts?.gain ?? 1, opts?.gainVary);
+    const playDur = buf.duration / rate;
+    const bo: SpatialBusOptions = {
+      ...busOptions,
+      voiceDuration: Math.max(busOptions.voiceDuration ?? 0, playDur),
+    };
+    const result = this.resolveOutput(spatial, bo, opts?.maxDelay ?? 0);
+    if (!result) return true; // sample exists but voice was culled — don't fall back
+    const { ctx, t, out, delay } = result;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = rate;
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    src.connect(g).connect(out);
+    src.start(t + delay);
+    src.stop(t + delay + playDur + 0.05);
+    this.scheduleNodeCleanup(g, playDur + 0.1);
+    return true;
+  }
+
+  /**
+   * Play a decoded sample non-spatially straight to a submix bus (UI, music cues).
+   * Returns `true` if a sample existed, `false` otherwise (procedural fallback).
+   */
+  playSampleOnBus(name: string, busName: AudioBusName, opts?: SamplePlayOptions): boolean {
+    const buf = this.samples.get(name);
+    if (!buf) return false;
+    const ctx = this.ensure();
+    const rate = jitter(opts?.rate ?? 1, opts?.pitchVary);
+    const gain = jitter(opts?.gain ?? 1, opts?.gainVary);
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = rate;
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    src.connect(g).connect(this.getBus(busName));
+    src.start(t);
+    src.stop(t + buf.duration / rate + 0.05);
+    this.scheduleNodeCleanup(g, buf.duration / rate + 0.1);
+    return true;
+  }
+
   // ── Noise buffer (delegates to pool) ──
 
   noise(duration: number, decay: number): AudioBuffer {
@@ -650,6 +777,7 @@ export class AudioCore {
   dispose(): void {
     this.voices.dispose();
     this.noisePool.dispose();
+    this.samples.dispose();
     this.rayState.reset();
 
     if (this.ctx) {
@@ -662,6 +790,8 @@ export class AudioCore {
       this.buses = null;
       this.compressor = null;
       this.limiter = null;
+      this.saturator = null;
+      this.highShelf = null;
       this.reverbSend = null;
       this.reverbDelay = null;
       this.reverbFilter = null;

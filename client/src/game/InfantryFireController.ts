@@ -44,6 +44,8 @@ export interface InfantryFireContext {
 
 export class InfantryFireController {
   private ctx: InfantryFireContext;
+  /** Tracks whether the low-ammo cue already fired for the current magazine. */
+  private lowAmmoPlayed = false;
   private readonly impactChunkApplyBudget: ChunkApplyBudget = {
     maxChunks: 32,
     maxBuildChunks: 32,
@@ -99,6 +101,16 @@ export class InfantryFireController {
       rp.bloomMax,
       rp.bloomRecovery,
     );
+
+    // Low-ammo cue — a soft tick once when this magazine crosses ~20% remaining.
+    const ammoLeft = ctx.weapons.getAmmo();
+    const lowThreshold = Math.ceil(WEAPONS[result.weaponIndex].maxAmmo * 0.2);
+    if (ammoLeft > lowThreshold) {
+      this.lowAmmoPlayed = false; // refilled / above threshold — re-arm the cue
+    } else if (ammoLeft > 0 && !this.lowAmmoPlayed) {
+      ctx.audio.playLowAmmo(ctx.localAudioSource(-0.1));
+      this.lowAmmoPlayed = true;
+    }
 
     if (result.isProjectile) {
       // ── PROJECTILE PATH ──
@@ -182,7 +194,7 @@ export class InfantryFireController {
     if (result.hitPlayerIds.length > 0) {
       ctx.hitMarkerTimer = 0.2;
       ctx.hitMarkerType = 'player';
-      ctx.audio.playHitMarker();
+      ctx.audio.playHitMarker('player');
       const pos = ctx.weapons.getPlayerPosition(result.hitPlayerIds[0]);
       if (pos) ctx.vfx.emitHitSpark(pos.x, pos.y + 1.2, pos.z);
       // hitPlayerIds may contain duplicates (one per shotgun pellet that hit).
@@ -242,7 +254,7 @@ export class InfantryFireController {
     if (impact.hitPlayerIds.length > 0) {
       ctx.hitMarkerTimer = 0.2;
       ctx.hitMarkerType = 'player';
-      ctx.audio.playHitMarker();
+      ctx.audio.playHitMarker('player');
       ctx.vfx.emitHitSpark(impact.hitPos.x, impact.hitPos.y + 0.5, impact.hitPos.z);
       ctx.spawnDamageNumber(w.damage);
     } else if (impact.destroyedBlocks.length > 0) {
