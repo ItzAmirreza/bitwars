@@ -31,6 +31,9 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Typecheck bots
+        run: bun run bots:typecheck
+
   # Builds the Rust SpacetimeDB module for the wasm32 target (no publish, no database access).
   server:
     runs-on: ubuntu-latest
