@@ -389,7 +389,7 @@ impl TrainingEnv {
         self.compute_observation()
     }
 
-    pub fn set_task(&mut self, task: TrainingTask) {
+    pub(crate) fn set_task(&mut self, task: TrainingTask) {
         self.task = task;
     }
 

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use rayon::prelude::*;
 
-use crate::bridge::{LiveBotState, SharedState, TrainingStats};
+use crate::state::{LiveBotState, SharedState, TrainingStats};
 use crate::rl::checkpoint::{CheckpointManager, CheckpointMeta};
 use crate::rl::network::HIDDEN_SIZE;
 use crate::rl::ppo::{PPOConfig, PPOTrainer};

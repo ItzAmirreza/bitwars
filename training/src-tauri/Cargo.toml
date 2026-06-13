@@ -5,8 +5,8 @@ edition = "2021"
 description = "BitWars Neural Bot Training Environment"
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-shell = "2"
+tauri = { version = "2", features = [], optional = true }
+tauri-plugin-shell = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = "0.8"
@@ -53,6 +53,26 @@ opt-level = 3
 opt-level = 3
 lto = true
 
+# ── Targets ──
+# The crate is a library (reused by both the GUI app and the headless trainer)
+# plus two binaries. The GUI binary requires the `gui` feature (tauri/webkit);
+# the headless `train` binary builds with `--no-default-features` (CPU-only, no
+# tauri) so it runs on a headless training server.
+[lib]
+name = "bitwars_training"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bitwars-training"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "train"
+path = "src/bin/train.rs"
+
 [features]
-default = ["custom-protocol"]
-custom-protocol = ["tauri/custom-protocol"]
+default = ["gui"]
+# Desktop GUI app (Tauri + webkit). Off for headless training builds.
+gui = ["dep:tauri", "dep:tauri-plugin-shell", "custom-protocol"]
+custom-protocol = ["tauri?/custom-protocol"]

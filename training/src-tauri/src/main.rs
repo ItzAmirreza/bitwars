@@ -1,11 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod bridge;
-mod rl;
-mod sim;
-mod training_loop;
-#[allow(dead_code, unused_imports)]
-mod worldgen;
+//! Tauri desktop GUI entrypoint. Only built with the `gui` feature; the headless
+//! trainer lives in `src/bin/train.rs`. All logic lives in the `bitwars_training`
+//! library crate.
+
+use bitwars_training::bridge;
+use bitwars_training::state::{SharedState, TrainingState};
 
 fn main() {
     // Workaround for WebKitGTK rendering issues on Wayland + AMD GPU.
@@ -20,8 +20,8 @@ fn main() {
 
     env_logger::init();
 
-    let shared_state: bridge::SharedState =
-        std::sync::Arc::new(std::sync::Mutex::new(bridge::TrainingState::default()));
+    let shared_state: SharedState =
+        std::sync::Arc::new(std::sync::Mutex::new(TrainingState::default()));
 
     tauri::Builder::default()
         .manage(shared_state)

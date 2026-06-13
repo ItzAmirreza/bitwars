@@ -565,7 +565,7 @@ impl PPOTrainer {
                 let mut step_old_lp: Vec<Tensor> = Vec::with_capacity(SEQ_LEN);
                 let mut step_advantages: Vec<Tensor> = Vec::with_capacity(SEQ_LEN);
                 let mut step_returns: Vec<Tensor> = Vec::with_capacity(SEQ_LEN);
-                let mut seq_entropy_sum = 0.0f32;
+                let mut step_entropies: Vec<Tensor> = Vec::with_capacity(SEQ_LEN);
 
                 for t in 0..SEQ_LEN {
                     // Gather buffer indices for timestep t across sequences
@@ -590,7 +590,7 @@ impl PPOTrainer {
 
                     step_log_probs.push(log_probs_t);
                     step_values.push(values_t);
-                    seq_entropy_sum += entropy_t.to_scalar::<f32>()?;
+                    step_entropies.push(entropy_t);
 
                     // Reset hidden states where episodes ended (zero out done envs)
                     let dones_t: Vec<bool> = mb_seq_ids
@@ -620,10 +620,15 @@ impl PPOTrainer {
                 let all_old_lp = Tensor::cat(&step_old_lp, 0)?;
                 let all_advantages = Tensor::cat(&step_advantages, 0)?;
                 let all_returns = Tensor::cat(&step_returns, 0)?;
-                let avg_entropy = Tensor::new(
-                    seq_entropy_sum / SEQ_LEN as f32,
-                    &self.device,
-                )?;
+                // Mean entropy over the sequence, kept in the autograd graph so the
+                // entropy bonus contributes a real gradient (it previously did not).
+                let avg_entropy = {
+                    let mut acc = step_entropies[0].clone();
+                    for e in step_entropies.iter().skip(1) {
+                        acc = (acc + e)?;
+                    }
+                    acc.affine(1.0 / SEQ_LEN as f64, 0.0)?
+                };
 
                 // PPO clipped surrogate loss
                 let log_ratio = (&all_log_probs - &all_old_lp)?;
@@ -646,7 +651,36 @@ impl PPOTrainer {
                     + value_loss.affine(self.config.value_coeff as f64, 0.0)?)?
                 .broadcast_sub(&avg_entropy.affine(entropy_coeff as f64, 0.0)?)?;
 
-                self.optimizer.backward_step(&loss)?;
+                // Backprop, clip the global gradient norm to max_grad_norm (which was
+                // configured but never enforced), then apply the optimizer step.
+                let mut grads = loss.backward()?;
+                let max_norm = self.config.max_grad_norm as f64;
+                if max_norm > 0.0 {
+                    let vars = self.network.var_map().all_vars();
+                    let mut sum_sq = 0.0f64;
+                    for v in &vars {
+                        if let Some(g) = grads.get(v.as_tensor()) {
+                            sum_sq += g.sqr()?.sum_all()?.to_scalar::<f32>()? as f64;
+                        }
+                    }
+                    let norm = sum_sq.sqrt();
+                    if norm.is_finite() && norm > max_norm {
+                        let scale = max_norm / (norm + 1e-6);
+                        let scaled: Vec<(Tensor, Tensor)> = {
+                            let mut out = Vec::new();
+                            for v in &vars {
+                                if let Some(g) = grads.get(v.as_tensor()) {
+                                    out.push((v.as_tensor().clone(), g.affine(scale, 0.0)?));
+                                }
+                            }
+                            out
+                        };
+                        for (t, g) in scaled {
+                            grads.insert(&t, g);
+                        }
+                    }
+                }
+                self.optimizer.step(&grads)?;
 
                 total_policy_loss += policy_loss.to_scalar::<f32>()?;
                 total_value_loss += value_loss.to_scalar::<f32>()?;

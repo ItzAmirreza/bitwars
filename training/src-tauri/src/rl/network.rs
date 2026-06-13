@@ -325,13 +325,14 @@ impl ActorCritic {
         .sum(D::Minus1)?
         .mean_all()?;
 
-        // Continuous entropy.
+        // Continuous (Gaussian) entropy = sum_d [0.5*ln(2πe) + log_std_d].
+        // Kept as a graph tensor (differentiable wrt log_std) so the entropy bonus
+        // actually back-propagates instead of being a detached constant.
         let half_ln2pie = 0.5 * (2.0_f64 * std::f64::consts::PI * std::f64::consts::E).ln();
         let continuous_entropy = log_std
             .narrow(0, 0, CONTINUOUS_ACTION_DIM)?
             .sum_all()?
-            .to_scalar::<f32>()? as f64
-            + half_ln2pie * CONTINUOUS_ACTION_DIM as f64;
+            .affine(1.0, half_ln2pie * CONTINUOUS_ACTION_DIM as f64)?;
 
         // Weapon log prob
         let weapon_logits = weapon_logits.narrow(1, 0, POLICY_WEAPON_DIM)?;
@@ -339,18 +340,19 @@ impl ActorCritic {
         let weapon_indices_2d = weapon_indices.unsqueeze(1)?;
         let weapon_lp = weapon_log_probs.gather(&weapon_indices_2d, 1)?.squeeze(1)?;
 
-        // Weapon entropy
+        // Weapon (categorical) entropy, mean over batch — differentiable wrt weapon logits.
         let weapon_probs = candle_nn::ops::softmax(&weapon_logits, D::Minus1)?;
-        let weapon_entropy_per_sample =
-            weapon_probs.mul(&weapon_log_probs)?.neg()?.sum(D::Minus1)?;
-        let weapon_entropy: f64 = weapon_entropy_per_sample.mean_all()?.to_scalar::<f32>()? as f64;
+        let weapon_entropy = weapon_probs
+            .mul(&weapon_log_probs)?
+            .neg()?
+            .sum(D::Minus1)?
+            .mean_all()?;
 
         let total_log_prob = ((log_prob_continuous + binary_log_probs)? + weapon_lp)?;
-        let total_entropy = Tensor::new(
-            (continuous_entropy + binary_entropy.to_scalar::<f32>()? as f64 + weapon_entropy)
-                as f32,
-            &self.device,
-        )?;
+        // Total entropy stays in the autograd graph: continuous (∝ log_std) +
+        // Bernoulli (jump/sprint/fire) + categorical (weapon). Previously this was
+        // rebuilt via to_scalar()/Tensor::new(), detaching it → zero gradient.
+        let total_entropy = ((continuous_entropy + binary_entropy)? + weapon_entropy)?;
         let value_squeezed = value.squeeze(1)?;
 
         Ok((total_log_prob, value_squeezed, total_entropy, new_state))
