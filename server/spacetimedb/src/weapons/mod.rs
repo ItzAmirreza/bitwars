@@ -7,7 +7,6 @@ pub mod machinegun;
 pub mod rifle;
 pub mod rpg;
 pub mod shotgun;
-pub mod sniper;
 pub mod vehicle_minigun;
 pub mod vehicle_rockets;
 
