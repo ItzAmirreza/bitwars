@@ -7,6 +7,7 @@
 //! Everything except the `bridge` module (the Tauri IPC command layer) is
 //! tauri-free, so the engine compiles and runs on a headless training server.
 
+pub mod eval;
 pub mod rl;
 pub mod sim;
 pub mod state;
