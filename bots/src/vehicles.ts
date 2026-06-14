@@ -35,8 +35,8 @@ const JET_PITCH_SIGN = 1; // +lift = nose up (climb)
 const HELI_STANDOFF = 38; // preferred horizontal range to target (m)
 const HELI_HEIGHT_ABOVE = 18; // hover this far above the target
 const HELI_MAX_FIRE_RANGE = 92;
-const JET_THROTTLE = 0.9; // keep well above stall (40)
-const JET_HEIGHT_ABOVE = 30;
+const JET_THROTTLE = 0.92; // keep well above stall (40)
+const JET_CRUISE_ALT = 56; // hold this altitude when airborne (above most structures)
 
 export interface VehicleControl {
   forward: number;
@@ -149,37 +149,57 @@ function helicopterControl(inp: VehicleControlInput): VehicleControl {
   };
 }
 
-// ── Fighter Jet: keep speed, manage altitude, bomb runs / air missiles ──
+// ── Fighter Jet: takeoff roll → climb → high-speed attack passes (bombs/missiles) ──
 function jetControl(inp: VehicleControlInput): VehicleControl {
-  if (!inp.hasTarget || !inp.target) {
+  const alt = inp.pos.y;
+
+  // Takeoff roll: below ~26m fly STRAIGHT at full throttle with a gentle nose-up
+  // (no turning, so it stays on the runway instead of veering into structures).
+  if (alt < 26) {
     return {
-      ...ZERO,
-      forward: 0.7,
-      lift: JET_PITCH_SIGN * clamp((60 - inp.pos.y) * 0.05, -1, 1),
+      forward: 1,
+      strafe: 0,
+      lift: JET_PITCH_SIGN * 0.5,
+      yaw: 0,
+      boosting: false,
+      fire: false,
+      weaponSlot: inp.targetIsAir ? 2 : 1,
+      aimDir: null,
     };
   }
-  const dx = inp.target.x - inp.pos.x;
-  const dy = inp.target.y - inp.pos.y;
-  const dz = inp.target.z - inp.pos.z;
-  const horiz = Math.hypot(dx, dz) || 0.001;
-  const yawErr = wrapAngle(faceYaw(dx, dz) - inp.yaw);
-  const yaw = YAW_SIGN * clamp(yawErr * 1.2, -1, 1);
 
-  const desiredY = inp.target.y + JET_HEIGHT_ABOVE;
-  const lift = JET_PITCH_SIGN * clamp((desiredY - inp.pos.y) * 0.06, -1, 1);
+  // Airborne: keep speed up (above stall 40), hold altitude, maneuver to attack.
+  const forward = JET_THROTTLE;
+  let desiredY = JET_CRUISE_ALT;
+  let yaw = 0;
+  let fire = false;
+  let weaponSlot = 1;
+  let aimDir: BotVec3 | null = null;
 
-  const useMissile = inp.targetIsAir && inp.ammoTertiary > 0;
-  const overTarget = horiz < 18 && dy < -8; // roughly above a ground target
-  return {
-    forward: JET_THROTTLE,
-    strafe: 0,
-    lift,
-    yaw,
-    boosting: false,
-    fire: useMissile ? Math.abs(yawErr) < 0.3 : overTarget,
-    weaponSlot: useMissile ? 2 : 1, // 2=air missile, 1=carpet bomb
-    aimDir: norm3(dx, dy, dz),
-  };
+  if (inp.hasTarget && inp.target) {
+    const dx = inp.target.x - inp.pos.x;
+    const dy = inp.target.y - inp.pos.y;
+    const dz = inp.target.z - inp.pos.z;
+    const horiz = Math.hypot(dx, dz) || 0.001;
+    const yawErr = wrapAngle(faceYaw(dx, dz) - inp.yaw);
+    yaw = YAW_SIGN * clamp(yawErr * 1.3, -1, 1);
+    aimDir = norm3(dx, dy, dz);
+
+    if (inp.targetIsAir && inp.ammoTertiary > 0) {
+      weaponSlot = 2; // air missile
+      desiredY = Math.max(JET_CRUISE_ALT - 8, inp.target.y + 6);
+      fire = Math.abs(yawErr) < 0.4 && horiz < 130;
+    } else {
+      weaponSlot = 1; // carpet bomb — bombs fall down+forward (~10m lead), so
+      // release a string only when aligned and close. Fly a bit higher than the
+      // first pass for survivability (less ground fire / terrain risk).
+      desiredY = Math.max(38, inp.target.y + 28);
+      fire = Math.abs(yawErr) < 0.4 && horiz < 26 && horiz > 2 && alt > inp.target.y + 12;
+    }
+  }
+
+  const lift = JET_PITCH_SIGN * clamp((desiredY - alt) * 0.045, -0.7, 0.9);
+  return { forward, strafe: 0, lift, yaw, boosting: false, fire, weaponSlot, aimDir };
 }
 
 // ── APC: ground transport — drive/steer toward goal (no weapons) ──

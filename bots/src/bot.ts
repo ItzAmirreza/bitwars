@@ -48,8 +48,14 @@ const MAX_PITCH_RATE = Math.PI * 1.1;
 // ── Vehicle piloting tuning (indexed by vehicleType: 0=heli,1=jet,2=AA,3=APC) ──
 const VEHICLE_SEEK_RANGE = 150; // consider grabbing an unoccupied vehicle within this (m)
 const VEHICLE_LOW_HP = [180, 140, 220, 320]; // dismount below this health
-const VEHICLE_FIRE_INTERVAL = [90, 360, 70, 1000]; // ms between vehicle weapon shots
+const VEHICLE_FIRE_INTERVAL = [90, 180, 70, 1000]; // ms between vehicle weapon shots (jet: bomb strings)
 const VEHICLE_TURRET_RATE = Math.PI * 2.2; // rad/s — how fast the bot swings its vehicle aim
+// Debug/testing hook: force bots to seek only this vehicle type (0-3) with full
+// eagerness. Unset in normal play. e.g. BOT_FORCE_VEHICLE_TYPE=1 to test the jet.
+const FORCE_VEHICLE_TYPE: number | null =
+  process.env.BOT_FORCE_VEHICLE_TYPE != null && process.env.BOT_FORCE_VEHICLE_TYPE !== ''
+    ? Number(process.env.BOT_FORCE_VEHICLE_TYPE)
+    : null;
 
 // ── Per-bot personality ─────────────────────────────────────────────────────
 // Each bot derives a stable "personality" from its name so the roster plays like
@@ -2081,12 +2087,13 @@ export class HeadlessBitBot {
       const v = row as VehicleRow;
       if (v.pilotIdentity) continue; // only unoccupied → we become pilot
       if (Number(v.health ?? 0) <= 0) continue;
+      if (FORCE_VEHICLE_TYPE !== null && Number(v.vehicleType) !== FORCE_VEHICLE_TYPE) continue;
       const e = this.conn.db.entity.id.find(v.entityId as any) as EntityRow | undefined;
       if (!e || !e.active) continue;
       const dx = e.pos.x - me.pos.x;
       const dz = e.pos.z - me.pos.z;
       const d2 = dx * dx + dz * dz;
-      if (d2 > VEHICLE_SEEK_RANGE * VEHICLE_SEEK_RANGE) continue;
+      if (FORCE_VEHICLE_TYPE === null && d2 > VEHICLE_SEEK_RANGE * VEHICLE_SEEK_RANGE) continue;
       if (!best || d2 < best.d2) {
         best = { entityId: v.entityId, pos: { x: e.pos.x, y: e.pos.y, z: e.pos.z }, d2 };
       }
@@ -2099,7 +2106,7 @@ export class HeadlessBitBot {
     if (!this.conn) return false;
     if (this.seekVehicleId === null && now >= this.nextVehicleSeekCheckAt) {
       this.nextVehicleSeekCheckAt = now + 1500;
-      if (Math.random() < this.personality.vehicleAffinity) {
+      if (FORCE_VEHICLE_TYPE !== null || Math.random() < this.personality.vehicleAffinity) {
         const found = this.findSeekableVehicle(me);
         if (found) {
           this.seekVehicleId = found.entityId;
