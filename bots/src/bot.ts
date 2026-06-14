@@ -373,6 +373,7 @@ export class HeadlessBitBot {
   private vehicleNoTargetSince = 0;
   private lastVehicleSwitchAt = 0;
   private nextVehicleFireAt = 0;
+  private lastVehicleReloadAt = 0;
 
   constructor(options: BotRuntimeOptions) {
     this.options = options;
@@ -2250,7 +2251,19 @@ export class HeadlessBitBot {
       this.lastVehicleSwitchAt = now;
       void conn.reducers.switchVehicleWeapon({ weaponIndex: ctrl.weaponSlot } as any).catch(() => {});
     }
-    if (ctrl.fire && ctrl.aimDir && target && now >= this.nextVehicleFireAt) {
+    const slotAmmo = [
+      Number(v.weaponAmmoPrimary ?? 0),
+      Number(v.weaponAmmoSecondary ?? 0),
+      Number(v.weaponAmmoTertiary ?? 0),
+    ];
+    const curSlot = Number(v.weaponType ?? 0);
+    if ((slotAmmo[curSlot] ?? 0) <= 0) {
+      // Out of ammo on this slot — reload (server enforces the reload delay).
+      if (now - this.lastVehicleReloadAt > 600) {
+        this.lastVehicleReloadAt = now;
+        void conn.reducers.reloadVehicleWeapon({} as any).catch(() => {});
+      }
+    } else if (ctrl.fire && ctrl.aimDir && target && now >= this.nextVehicleFireAt) {
       this.nextVehicleFireAt = now + (VEHICLE_FIRE_INTERVAL[vType] ?? 150);
       const hitPlayers = target.player ? [target.player.identity] : [];
       const hitVehicles = target.vehicleEntityId != null ? [BigInt(target.vehicleEntityId as any)] : [];
