@@ -2159,10 +2159,11 @@ export class HeadlessBitBot {
     ) => {
       const d = Math.hypot(pos.x - vpos.x, pos.y - vpos.y, pos.z - vpos.z);
       if (d > range) return;
-      // Require real line of sight from the vehicle to the target — no shooting
-      // through walls (this is what made the anti-air feel like a wall-hacking
-      // aimbot). Aircraft sit high so they still see ground targets over walls.
-      if (!this.world.hasLineOfSight({ x: vpos.x, y: vpos.y + 2.0, z: vpos.z }, pos)) return;
+      // Require real line of sight from the vehicle's elevated gun to the target —
+      // no shooting through walls (this is what made the anti-air feel like a
+      // wall-hacking aimbot). The +3.5 lifts the muzzle to ~turret height so it can
+      // see OVER low outpost walls but is still blocked by solid structures.
+      if (!this.world.hasLineOfSight({ x: vpos.x, y: vpos.y + 3.5, z: vpos.z }, pos)) return;
       let score = baseScore - d * 0.02;
       if (vehicleType === VEHICLE_TYPE.ANTI_AIR && isAir) score += 100; // AA hunts aircraft
       cands.push({ pos, isAir, score, player, vehicleEntityId });
