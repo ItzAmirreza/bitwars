@@ -1,4 +1,4 @@
-import { ENTITY_KINDS, PLAYER, WORLD, WEAPONS_CONFIG } from '../../client/src/shared-config.ts';
+import { ENTITY_KINDS, PLAYER, WORLD, WEAPONS_CONFIG, getVehicleWeaponConfig } from '../../client/src/shared-config.ts';
 import { DbConnection } from '../../client/src/module_bindings/index.ts';
 import {
   buildPlayerMovementFlags,
@@ -536,6 +536,12 @@ export class HeadlessBitBot {
   private onShotEvent(shot: any): void {
     if (!this.identityHexValue) return;
     const shooterHex = identityHex(shot.shooter);
+    // Detonate my OWN vehicle PROJECTILE shots: fire_vehicle_weapon spawns the
+    // projectile, but the pilot's client must call vehicle_projectile_impact for it
+    // to explode. The bot is that client — otherwise bombs/rockets fly but never blow up.
+    if (shooterHex === this.identityHexValue && Number(shot.sourceVehicle ?? 0) !== 0) {
+      this.detonateVehicleProjectile(shot);
+    }
     if (!shooterHex || shooterHex === this.identityHexValue) return;
     const me = this.getSelf();
     if (!me) return;
@@ -549,6 +555,86 @@ export class HeadlessBitBot {
       expiresAt: Date.now() + HEARD_CONTACT_MS,
       source: 'shot',
     };
+  }
+
+  /** Simulate a fired vehicle projectile to its impact and call the impact reducer so it explodes. */
+  private detonateVehicleProjectile(shot: any): void {
+    if (!this.conn) return;
+    const weaponCode = Number(shot.weapon ?? 0);
+    const resolvedIdx = weaponCode >= 100 ? weaponCode - 100 : weaponCode;
+    const def: any = getVehicleWeaponConfig(resolvedIdx);
+    if (!def || def.delivery !== 'projectile') return; // hitscan damage is applied at fire time
+    const origin = shot.origin as BotVec3 | undefined;
+    const dir = shot.direction as BotVec3 | undefined;
+    if (!origin || !dir) return;
+    const { pos, travelMs } = this.simulateVehicleProjectile(origin, dir, def);
+    const conn = this.conn;
+    const shotId = BigInt(shot.id);
+    const srcVeh = BigInt(Number(shot.sourceVehicle ?? 0));
+    const detonate = () => {
+      void conn.reducers
+        .vehicleProjectileImpact({
+          shotOrigin: { x: origin.x, y: origin.y, z: origin.z },
+          impactPos: pos,
+          direction: { x: dir.x, y: dir.y, z: dir.z },
+          vehicleWeapon: weaponCode,
+          travelTimeMs: travelMs,
+          hitPlayers: [],
+          hitVehicles: [],
+          hitBlocks: [],
+          shotEventId: shotId,
+          sourceVehicleId: srcVeh,
+        } as any)
+        .catch(() => {});
+    };
+    // Fire the impact when the projectile would ACTUALLY land — the server rejects
+    // impacts that arrive much earlier than the reported travel time (the bomb has
+    // to fall first). So we wait ~travelMs before detonating.
+    const delay = Math.min(4000, Math.max(0, travelMs));
+    if (delay < 20) detonate();
+    else setTimeout(detonate, delay);
+  }
+
+  /** Ballistic projectile sim (matches the game's gravity + terrain hit) → impact point. */
+  private simulateVehicleProjectile(
+    origin: BotVec3,
+    dir: BotVec3,
+    def: any,
+  ): { pos: BotVec3; travelMs: number } {
+    const speed = Number(def.projectileSpeed) || 60;
+    const gravity = Number(def.gravity) || 0;
+    const maxRange = Number(def.maxRange) || 220;
+    const len = Math.hypot(dir.x, dir.y, dir.z) || 1;
+    let vx = (dir.x / len) * speed;
+    let vy = (dir.y / len) * speed;
+    let vz = (dir.z / len) * speed;
+    let px = origin.x;
+    let py = origin.y;
+    let pz = origin.z;
+    const dt = 1 / 30;
+    let traveled = 0;
+    let timeMs = 0;
+    for (let t = 0; t < 6; t += dt) {
+      vy -= gravity * dt;
+      const v = Math.hypot(vx, vy, vz);
+      const sub = Math.max(1, Math.ceil(v * dt)); // sub-step to avoid tunneling
+      const sdt = dt / sub;
+      let hit = false;
+      for (let s = 0; s < sub; s++) {
+        px += vx * sdt;
+        py += vy * sdt;
+        pz += vz * sdt;
+        traveled += v * sdt;
+        if (this.world.getBlock(px, py, pz) !== 0) {
+          hit = true;
+          break;
+        }
+      }
+      timeMs += dt * 1000;
+      if (hit) break;
+      if (py < -10 || px < 0 || px >= WORLD.sizeX || pz < 0 || pz >= WORLD.sizeZ || traveled > maxRange) break;
+    }
+    return { pos: { x: px, y: py, z: pz }, travelMs: Math.round(timeMs) };
   }
 
   private onExplosionEvent(explosion: any): void {
