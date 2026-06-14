@@ -50,6 +50,7 @@ const VEHICLE_SEEK_RANGE = 150; // consider grabbing an unoccupied vehicle withi
 const VEHICLE_LOW_HP = [180, 140, 220, 320]; // dismount below this health
 const VEHICLE_FIRE_INTERVAL = [90, 180, 70, 1000]; // ms between vehicle weapon shots (jet: bomb strings)
 const VEHICLE_TURRET_RATE = Math.PI * 2.2; // rad/s — how fast the bot swings its vehicle aim
+const AA_DANGER_RANGE = 108; // on-foot bots respect a manned anti-air within this (CRAM ~130)
 // Debug/testing hook: force bots to seek only this vehicle type (0-3) with full
 // eagerness. Unset in normal play. e.g. BOT_FORCE_VEHICLE_TYPE=1 to test the jet.
 const FORCE_VEHICLE_TYPE: number | null =
@@ -2178,6 +2179,25 @@ export class HeadlessBitBot {
     return { pos: best.pos, isAir: best.isAir, player: best.player, vehicleEntityId: best.vehicleEntityId };
   }
 
+  /** Nearest MANNED enemy anti-air within its danger range that currently sees me. */
+  private threateningAA(me: PlayerRow): EntityRow | null {
+    if (!this.conn) return null;
+    let best: EntityRow | null = null;
+    let bestD = Infinity;
+    for (const { vehicle, entity } of this.listVehicleTargets()) {
+      if (Number(vehicle.vehicleType) !== VEHICLE_TYPE.ANTI_AIR) continue;
+      if (!vehicle.pilotIdentity) continue; // only a manned AA is a threat
+      if (identityHex(vehicle.pilotIdentity) === this.identityHexValue) continue;
+      const dist = Math.hypot(entity.pos.x - me.pos.x, entity.pos.z - me.pos.z);
+      if (dist > AA_DANGER_RANGE || dist >= bestD) continue;
+      if (this.world.hasLineOfSight(me.pos, { x: entity.pos.x, y: entity.pos.y + 1.5, z: entity.pos.z })) {
+        best = entity;
+        bestD = dist;
+      }
+    }
+    return best;
+  }
+
   private tickVehicle(me: PlayerRow, now: number, dtSec: number): void {
     const conn = this.conn;
     if (!conn) return;
@@ -2564,7 +2584,29 @@ export class HeadlessBitBot {
       this.pendingNeuralJump = false;
 
       const seekingVehicle = this.updateVehicleSeek(self, now);
-      const target = seekingVehicle ? null : this.getPreferredTarget(self, now);
+      let target = seekingVehicle ? null : this.getPreferredTarget(self, now);
+      // Human-like respect for a MANNED anti-air: if exposed to one and not in a
+      // close fight, break its line of sight by retreating away from it.
+      if (!seekingVehicle) {
+        const aa = this.threateningAA(self);
+        if (aa) {
+          const tgtDist =
+            target && target.kind === 'player'
+              ? Math.hypot(target.player.pos.x - self.pos.x, target.player.pos.z - self.pos.z)
+              : Infinity;
+          if (tgtDist > 26) {
+            const ax = self.pos.x - aa.pos.x;
+            const az = self.pos.z - aa.pos.z;
+            const al = Math.hypot(ax, az) || 1;
+            this.moveDirective = {
+              x: clamp(self.pos.x + (ax / al) * 34, 4, WORLD.sizeX - 4),
+              z: clamp(self.pos.z + (az / al) * 34, 4, WORLD.sizeZ - 4),
+              expiresAt: now + 2500,
+            };
+            target = null; // focus on escaping the AA's field of fire
+          }
+        }
+      }
       this.chooseWeaponForTarget(self, target);
       const movement = this.computeMovement(self, target, now, dtSec);
       const liveSelf = this.getActiveSelf(me);
