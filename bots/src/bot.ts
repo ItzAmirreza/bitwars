@@ -2141,7 +2141,7 @@ export class HeadlessBitBot {
   ): { pos: BotVec3; isAir: boolean; player?: PlayerRow; vehicleEntityId?: number | bigint } | null {
     if (!this.conn) return null;
     const myMount = Number(me.mountedVehicleId ?? 0);
-    const range = vehicleType === VEHICLE_TYPE.ANTI_AIR ? 200 : vehicleType === VEHICLE_TYPE.FIGHTER_JET ? 150 : 110;
+    const range = vehicleType === VEHICLE_TYPE.ANTI_AIR ? 200 : vehicleType === VEHICLE_TYPE.FIGHTER_JET ? 220 : 110;
     type Cand = {
       pos: BotVec3;
       isAir: boolean;
@@ -2159,6 +2159,10 @@ export class HeadlessBitBot {
     ) => {
       const d = Math.hypot(pos.x - vpos.x, pos.y - vpos.y, pos.z - vpos.z);
       if (d > range) return;
+      // Require real line of sight from the vehicle to the target — no shooting
+      // through walls (this is what made the anti-air feel like a wall-hacking
+      // aimbot). Aircraft sit high so they still see ground targets over walls.
+      if (!this.world.hasLineOfSight({ x: vpos.x, y: vpos.y + 2.0, z: vpos.z }, pos)) return;
       let score = baseScore - d * 0.02;
       if (vehicleType === VEHICLE_TYPE.ANTI_AIR && isAir) score += 100; // AA hunts aircraft
       cands.push({ pos, isAir, score, player, vehicleEntityId });
@@ -2220,6 +2224,19 @@ export class HeadlessBitBot {
       return;
     }
 
+    // Terrain heights below + ahead (flight direction) for clearance / anti-crash.
+    const gBelow = this.world.getGroundHeightBelow(tf.pos.x, tf.pos.y, tf.pos.z);
+    const groundY = gBelow >= 0 ? gBelow + 1 : -100;
+    const spd = Math.hypot(tf.vel.x, tf.vel.z);
+    let ax = -Math.sin(tf.yaw);
+    let az = -Math.cos(tf.yaw);
+    if (spd > 3) {
+      ax = tf.vel.x / spd;
+      az = tf.vel.z / spd;
+    }
+    const gAhead = this.world.getGroundHeightBelow(tf.pos.x + ax * 50, tf.pos.y, tf.pos.z + az * 50);
+    const groundYAhead = gAhead >= 0 ? gAhead + 1 : -100;
+
     const ctrl = computeVehicleControl({
       type: vType,
       pos: tf.pos,
@@ -2232,6 +2249,8 @@ export class HeadlessBitBot {
       ammoPrimary: Number(v.weaponAmmoPrimary ?? 0),
       ammoSecondary: Number(v.weaponAmmoSecondary ?? 0),
       ammoTertiary: Number(v.weaponAmmoTertiary ?? 0),
+      groundY,
+      groundYAhead,
       dt: dtSec,
     });
 
