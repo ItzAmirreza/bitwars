@@ -9,6 +9,7 @@ import {
 } from '../../client/src/game/playerMovementFlags.ts';
 import { WorldSnapshot, type BotVec3 } from './world.ts';
 import { NeuralNavigator } from './neural.ts';
+import { computeVehicleControl, VEHICLE_TYPE } from './vehicles.ts';
 import { buildObservation } from './observation.ts';
 import { runtimeDiagnostics } from './diagnostics.ts';
 import { BotMovementState } from './movement.ts';
@@ -44,6 +45,12 @@ const RESPAWN_DELAY_MS = 3200;
 const MAX_TURN_RATE = Math.PI * 1.35;
 const MAX_PITCH_RATE = Math.PI * 1.1;
 
+// ── Vehicle piloting tuning (indexed by vehicleType: 0=heli,1=jet,2=AA,3=APC) ──
+const VEHICLE_SEEK_RANGE = 150; // consider grabbing an unoccupied vehicle within this (m)
+const VEHICLE_LOW_HP = [180, 140, 220, 320]; // dismount below this health
+const VEHICLE_FIRE_INTERVAL = [90, 360, 70, 1000]; // ms between vehicle weapon shots
+const VEHICLE_TURRET_RATE = Math.PI * 2.2; // rad/s — how fast the bot swings its vehicle aim
+
 // ── Per-bot personality ─────────────────────────────────────────────────────
 // Each bot derives a stable "personality" from its name so the roster plays like
 // distinct people, not identical clones: different reaction speed, aim rate,
@@ -56,6 +63,7 @@ interface BotPersonality {
   pitchBias: number;
   burstMin: number;
   burstMax: number;
+  vehicleAffinity: number; // 0..1 eagerness to grab/pilot a vehicle when one is near
 }
 
 function hashStringToSeed(s: string): number {
@@ -91,6 +99,7 @@ function makePersonality(name: string): BotPersonality {
     pitchBias: -0.08 + rng() * 0.13,
     burstMin: Math.max(2, MIN_BURST_SHOTS + (rng() < 0.5 ? 0 : 1)),
     burstMax: Math.max(4, MAX_BURST_SHOTS + (rng() < 0.5 ? 0 : 2)),
+    vehicleAffinity: 0.12 + rng() * 0.45,
   };
 }
 const WAYPOINT_RADIUS = 2.5;
@@ -169,6 +178,10 @@ type VehicleRow = {
   vehicleType: number;
   pilotIdentity?: IdentityLike | null;
   health: number;
+  weaponType?: number;
+  weaponAmmoPrimary?: number;
+  weaponAmmoSecondary?: number;
+  weaponAmmoTertiary?: number;
 };
 
 type SubscriptionHandle = {
@@ -351,6 +364,15 @@ export class HeadlessBitBot {
   private usingNeuralThisTick = false;
   private wasUsingNeural = false;
   private pendingNeuralJump = false;
+
+  // ── Vehicle piloting state ──
+  private vehicleInputSeq = 1;
+  private seekVehicleId: number | bigint | null = null;
+  private seekAbortAt = 0;
+  private nextVehicleSeekCheckAt = 0;
+  private vehicleNoTargetSince = 0;
+  private lastVehicleSwitchAt = 0;
+  private nextVehicleFireAt = 0;
 
   constructor(options: BotRuntimeOptions) {
     this.options = options;
@@ -2025,6 +2047,224 @@ export class HeadlessBitBot {
     };
   }
 
+  // ── Vehicle seeking & piloting ──────────────────────────────────────────
+
+  private vehicleTransform(
+    entityId: number | bigint,
+  ): { pos: BotVec3; vel: BotVec3; yaw: number; pitch: number } | null {
+    const e = this.conn?.db.entity.id.find(entityId as any) as EntityRow | undefined;
+    if (!e) return null;
+    return {
+      pos: { x: e.pos.x, y: e.pos.y, z: e.pos.z },
+      vel: { x: e.vel.x, y: e.vel.y, z: e.vel.z },
+      yaw: e.rot.yaw,
+      pitch: e.rot.pitch,
+    };
+  }
+
+  private mountRangeFor(vehicleType: number): number {
+    switch (vehicleType) {
+      case VEHICLE_TYPE.HELICOPTER:
+        return 8.0;
+      case VEHICLE_TYPE.APC:
+        return 5.5;
+      default:
+        return 6.5; // jet, anti-air
+    }
+  }
+
+  private findSeekableVehicle(me: PlayerRow): { entityId: number | bigint; pos: BotVec3 } | null {
+    if (!this.conn) return null;
+    let best: { entityId: number | bigint; pos: BotVec3; d2: number } | null = null;
+    for (const row of this.conn.db.vehicle.iter() as Iterable<any>) {
+      const v = row as VehicleRow;
+      if (v.pilotIdentity) continue; // only unoccupied → we become pilot
+      if (Number(v.health ?? 0) <= 0) continue;
+      const e = this.conn.db.entity.id.find(v.entityId as any) as EntityRow | undefined;
+      if (!e || !e.active) continue;
+      const dx = e.pos.x - me.pos.x;
+      const dz = e.pos.z - me.pos.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > VEHICLE_SEEK_RANGE * VEHICLE_SEEK_RANGE) continue;
+      if (!best || d2 < best.d2) {
+        best = { entityId: v.entityId, pos: { x: e.pos.x, y: e.pos.y, z: e.pos.z }, d2 };
+      }
+    }
+    return best ? { entityId: best.entityId, pos: best.pos } : null;
+  }
+
+  /** Returns true while actively heading to mount a vehicle (suppress infantry combat). */
+  private updateVehicleSeek(me: PlayerRow, now: number): boolean {
+    if (!this.conn) return false;
+    if (this.seekVehicleId === null && now >= this.nextVehicleSeekCheckAt) {
+      this.nextVehicleSeekCheckAt = now + 1500;
+      if (Math.random() < this.personality.vehicleAffinity) {
+        const found = this.findSeekableVehicle(me);
+        if (found) {
+          this.seekVehicleId = found.entityId;
+          this.seekAbortAt = now + 16000;
+        }
+      }
+    }
+    if (this.seekVehicleId === null) return false;
+
+    const v = this.conn.db.vehicle.entityId.find(this.seekVehicleId as any) as VehicleRow | undefined;
+    const e = v ? (this.conn.db.entity.id.find(this.seekVehicleId as any) as EntityRow | undefined) : undefined;
+    if (!v || !e || v.pilotIdentity || Number(v.health ?? 0) <= 0 || now >= this.seekAbortAt) {
+      this.seekVehicleId = null;
+      return false;
+    }
+    const dist = Math.hypot(e.pos.x - me.pos.x, e.pos.z - me.pos.z);
+    if (dist <= this.mountRangeFor(v.vehicleType) - 0.5) {
+      void this.conn.reducers.interactVehicle({} as any).catch(() => {});
+      this.seekVehicleId = null; // mounted next tick
+      return true;
+    }
+    // Path toward the vehicle via the normal nav waypoint.
+    this.moveDirective = { x: e.pos.x, z: e.pos.z, expiresAt: now + 4000 };
+    return true;
+  }
+
+  private pickVehicleTarget(
+    me: PlayerRow,
+    vehicleType: number,
+    vpos: BotVec3,
+  ): { pos: BotVec3; isAir: boolean; player?: PlayerRow; vehicleEntityId?: number | bigint } | null {
+    if (!this.conn) return null;
+    const myMount = Number(me.mountedVehicleId ?? 0);
+    const range = vehicleType === VEHICLE_TYPE.ANTI_AIR ? 200 : vehicleType === VEHICLE_TYPE.FIGHTER_JET ? 150 : 110;
+    type Cand = {
+      pos: BotVec3;
+      isAir: boolean;
+      score: number;
+      player?: PlayerRow;
+      vehicleEntityId?: number | bigint;
+    };
+    const cands: Cand[] = [];
+    const consider = (
+      pos: BotVec3,
+      isAir: boolean,
+      baseScore: number,
+      player?: PlayerRow,
+      vehicleEntityId?: number | bigint,
+    ) => {
+      const d = Math.hypot(pos.x - vpos.x, pos.y - vpos.y, pos.z - vpos.z);
+      if (d > range) return;
+      let score = baseScore - d * 0.02;
+      if (vehicleType === VEHICLE_TYPE.ANTI_AIR && isAir) score += 100; // AA hunts aircraft
+      cands.push({ pos, isAir, score, player, vehicleEntityId });
+    };
+    for (const p of this.listEnemies(me)) {
+      if (Number(p.mountedVehicleId ?? 0) !== 0) continue;
+      consider({ x: p.pos.x, y: p.pos.y + 0.2, z: p.pos.z }, false, 5, p);
+    }
+    for (const { vehicle, entity } of this.listVehicleTargets()) {
+      if (Number(vehicle.entityId) === myMount) continue;
+      const isAir =
+        vehicle.vehicleType === VEHICLE_TYPE.HELICOPTER || vehicle.vehicleType === VEHICLE_TYPE.FIGHTER_JET;
+      consider({ x: entity.pos.x, y: entity.pos.y, z: entity.pos.z }, isAir, isAir ? 7 : 5.5, undefined, vehicle.entityId);
+    }
+    if (cands.length === 0) return null;
+    let best = cands[0]!;
+    for (const c of cands) if (c.score > best.score) best = c;
+    return { pos: best.pos, isAir: best.isAir, player: best.player, vehicleEntityId: best.vehicleEntityId };
+  }
+
+  private tickVehicle(me: PlayerRow, now: number, dtSec: number): void {
+    const conn = this.conn;
+    if (!conn) return;
+    const v = conn.db.vehicle.entityId.find(me.mountedVehicleId as any) as VehicleRow | undefined;
+    const tf = this.vehicleTransform(me.mountedVehicleId);
+    if (!v || !tf) return;
+    const amPilot = v.pilotIdentity ? identityHex(v.pilotIdentity) === this.identityHexValue : false;
+    if (!amPilot) return; // passenger: just ride
+
+    const vType = Number(v.vehicleType);
+    const target = this.pickVehicleTarget(me, vType, tf.pos);
+    if (target) this.vehicleNoTargetSince = 0;
+    else if (this.vehicleNoTargetSince === 0) this.vehicleNoTargetSince = now;
+
+    const lowHp = Number(v.health ?? 0) <= (VEHICLE_LOW_HP[vType] ?? 200);
+    const bored = this.vehicleNoTargetSince !== 0 && now - this.vehicleNoTargetSince > 14000;
+    if (lowHp || bored) {
+      void conn.reducers.interactVehicle({} as any).catch(() => {});
+      this.vehicleNoTargetSince = 0;
+      return;
+    }
+
+    const ctrl = computeVehicleControl({
+      type: vType,
+      pos: tf.pos,
+      vel: tf.vel,
+      yaw: tf.yaw,
+      pitch: tf.pitch,
+      target: target ? target.pos : null,
+      targetIsAir: target ? target.isAir : false,
+      hasTarget: !!target,
+      ammoPrimary: Number(v.weaponAmmoPrimary ?? 0),
+      ammoSecondary: Number(v.weaponAmmoSecondary ?? 0),
+      ammoTertiary: Number(v.weaponAmmoTertiary ?? 0),
+      dt: dtSec,
+    });
+
+    this.vehicleInputSeq = Math.max(2, this.vehicleInputSeq + 1);
+    void conn.reducers
+      .updateVehicleInput({
+        forward: ctrl.forward,
+        strafe: ctrl.strafe,
+        lift: ctrl.lift,
+        yaw: ctrl.yaw,
+        boosting: ctrl.boosting,
+        inputSeq: this.vehicleInputSeq,
+      } as any)
+      .catch(() => {});
+
+    // Aim the pilot's look at the target so the turret/weapon visually tracks
+    // (server uses pilot look for aim; mounted pos is seat-locked server-side).
+    // Rate-limit the swing so it isn't a robotic instant snap.
+    if (ctrl.aimDir) {
+      const desiredYaw = Math.atan2(-ctrl.aimDir.x, -ctrl.aimDir.z);
+      const desiredPitch = clamp(Math.asin(clamp(ctrl.aimDir.y, -1, 1)), -1.45, 1.45);
+      this.yaw = approachAngle(this.yaw, desiredYaw, VEHICLE_TURRET_RATE * dtSec);
+      this.pitch = clamp(
+        this.pitch + clamp(desiredPitch - this.pitch, -VEHICLE_TURRET_RATE * dtSec, VEHICLE_TURRET_RATE * dtSec),
+        -1.45,
+        1.45,
+      );
+    }
+    this.sendPosition({
+      pos: tf.pos,
+      vel: tf.vel,
+      rot: { yaw: this.yaw, pitch: this.pitch },
+      weapon: this.selectedWeapon,
+      movementFlags: buildPlayerMovementFlags({
+        sprinting: false,
+        crouching: false,
+        sliding: false,
+        climbing: false,
+        grounded: true,
+      }),
+    });
+
+    if (ctrl.weaponSlot !== Number(v.weaponType ?? 0) && now - this.lastVehicleSwitchAt > 250) {
+      this.lastVehicleSwitchAt = now;
+      void conn.reducers.switchVehicleWeapon({ weaponIndex: ctrl.weaponSlot } as any).catch(() => {});
+    }
+    if (ctrl.fire && ctrl.aimDir && target && now >= this.nextVehicleFireAt) {
+      this.nextVehicleFireAt = now + (VEHICLE_FIRE_INTERVAL[vType] ?? 150);
+      const hitPlayers = target.player ? [target.player.identity] : [];
+      const hitVehicles = target.vehicleEntityId != null ? [BigInt(target.vehicleEntityId as any)] : [];
+      void conn.reducers
+        .fireVehicleWeapon({
+          direction: { x: ctrl.aimDir.x, y: ctrl.aimDir.y, z: ctrl.aimDir.z },
+          hitPlayers,
+          hitVehicles,
+          hitBlocks: [],
+        } as any)
+        .catch(() => {});
+    }
+  }
+
   private updateLook(me: PlayerRow, target: BotTarget | null, movement: BotVec3, dtSec: number): void {
     let desiredYaw = this.yaw;
     let desiredPitch = 0;
@@ -2274,6 +2514,12 @@ export class HeadlessBitBot {
       this.syncMovementState(me);
       const self = this.getActiveSelf(me);
 
+      // If mounted in a vehicle, run the vehicle pilot loop and skip infantry logic.
+      if (Number(me.mountedVehicleId ?? 0) !== 0) {
+        this.tickVehicle(me, now, dtSec);
+        return;
+      }
+
       if (me.spawnProtected && !this.lastSpawnProtected) {
         this.spawnRushUntil = now + SPAWN_RUSH_MS;
         this.moveDirective = this.chooseSpawnExitWaypoint(self, now);
@@ -2297,7 +2543,8 @@ export class HeadlessBitBot {
       this.usingNeuralThisTick = false;
       this.pendingNeuralJump = false;
 
-      const target = this.getPreferredTarget(self, now);
+      const seekingVehicle = this.updateVehicleSeek(self, now);
+      const target = seekingVehicle ? null : this.getPreferredTarget(self, now);
       this.chooseWeaponForTarget(self, target);
       const movement = this.computeMovement(self, target, now, dtSec);
       const liveSelf = this.getActiveSelf(me);
