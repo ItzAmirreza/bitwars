@@ -260,8 +260,13 @@ pub struct PlayerMovementState {
 #[table(
     accessor = world_chunk,
     public,
-    index(accessor = idx_world_chunk_cx, btree(columns = [cx])),
-    index(accessor = idx_world_chunk_cz, btree(columns = [cz]))
+    // Composite index serves the client AOI box subscription
+    // (WHERE cx >= a AND cx <= b AND cz >= c AND cz <= d) with a single
+    // bounded index scan instead of a full-table sequential scan. The old
+    // single-column [cx]/[cz] indexes couldn't satisfy the dual-range query
+    // and were unused by reducer code, so they're replaced (not kept) to
+    // avoid extra write cost on this write-hot table.
+    index(accessor = idx_world_chunk_cx_cz, btree(columns = [cx, cz]))
 )]
 pub struct WorldChunk {
     #[primary_key]
