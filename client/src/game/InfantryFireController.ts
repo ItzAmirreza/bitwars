@@ -318,8 +318,10 @@ export class InfantryFireController {
     const dz = this.ctx.camera.position.z - cz;
     const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-    // Keep blast shake local to nearby explosions and fade fully out at the edge.
-    const maxEffectDist = 10;
+    // Keep blast shake local: scale reach to the blast size so small explosions
+    // don't rattle distant players, while still covering the destruction radius.
+    // Capped at 10 so the largest blasts never reach farther than before.
+    const maxEffectDist = Math.min(radius * 1.5, 10);
     if (dist >= maxEffectDist) return;
 
     const proximity = 1 - dist / maxEffectDist;
