@@ -128,8 +128,9 @@ export function TopHudBar({
               style={{ ...hudBtnBase, color: '#6b7080' }}
               onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#ff2d78'; e.currentTarget.style.color = '#ff2d78'; }}
               onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#1a1e2e'; e.currentTarget.style.color = '#6b7080'; }}
+              title="Leave match and return to the main menu"
             >
-              [ESC] EXIT
+              EXIT
             </button>
             <button
               onClick={() => setShowSettings(!showSettings)}

@@ -559,7 +559,7 @@ export function GameScreen({ active }: GameScreenProps) {
       <div ref={canvasRef} className="absolute inset-0" />
 
       {/* Settings Panel */}
-      {showSettings && <SettingsPanel />}
+      {showSettings && <SettingsPanel onExitToMenu={handleLeave} />}
 
       {perfRunning && !showPerfPanel && (
         <div
