@@ -131,9 +131,19 @@ pub fn reset_map(ctx: &ReducerContext, _timer: MapResetTimer) {
     }
 
     // Clean up stale events
-    let event_ids: Vec<u64> = ctx.db.detach_event().iter().map(|e| e.id).collect();
-    for id in event_ids {
-        ctx.db.detach_event().id().delete(&id);
+    let settle_ids: Vec<u64> = ctx.db.block_settle_event().iter().map(|e| e.id).collect();
+    for id in settle_ids {
+        ctx.db.block_settle_event().id().delete(&id);
+    }
+    // Cancel any in-flight settle landing writes so they don't fire into the new round
+    let settle_write_ids: Vec<u64> = ctx
+        .db
+        .settle_write()
+        .iter()
+        .map(|w| w.scheduled_id)
+        .collect();
+    for id in settle_write_ids {
+        ctx.db.settle_write().scheduled_id().delete(&id);
     }
     let shot_ids: Vec<u64> = ctx.db.shot_event().iter().map(|s| s.id).collect();
     for id in shot_ids {

@@ -2790,70 +2790,30 @@ export class Engine {
   private setupStructuralListeners(): void {
     if (!this.conn) return;
 
-    // DetachEvent: server-authoritative structural collapse → spawn falling blocks
-    this.conn.db.detach_event.onInsert((_ctx: unknown, event: any) => {
-      const createdAtMs =
-        event.createdAt && typeof event.createdAt.toMillis === "function"
-          ? Number(event.createdAt.toMillis())
-          : Date.now();
-
-      const blocksX = event.blocksX as ArrayLike<number>;
-      const blocksY = event.blocksY as ArrayLike<number>;
-      const blocksZ = event.blocksZ as ArrayLike<number>;
+    // BlockSettleEvent: server-authoritative collapse → blocks fall straight down
+    // to the cell the server committed them to, then become solid again. The
+    // server owns every landing position, so all clients agree on the result.
+    this.conn.db.block_settle_event.onInsert((_ctx: unknown, event: any) => {
+      const xs = event.xs as ArrayLike<number>;
+      const zs = event.zs as ArrayLike<number>;
+      const fromYs = event.fromYs as ArrayLike<number>;
+      const toYs = event.toYs as ArrayLike<number>;
       const blockTypes = event.blockTypes as ArrayLike<number>;
-      const count = Math.min(blocksX.length, blocksY.length, blocksZ.length, blockTypes.length);
+      const count = Math.min(xs.length, zs.length, fromYs.length, toYs.length, blockTypes.length);
 
-      // Clear detached voxels locally as soon as the collapse event arrives.
-      // Waiting for the chunk table update leaves "ghost" blocks visibly stuck
-      // in the source structure while their debris is already falling.
+      // Clear the unsupported blocks from their origin cells immediately so the
+      // source structure visibly empties as the debris starts to fall (rather
+      // than leaving "ghost" blocks until the chunk update arrives).
       for (let i = 0; i < count; i++) {
-        const bx = Number(blocksX[i]);
-        const by = Number(blocksY[i]);
-        const bz = Number(blocksZ[i]);
+        const bx = Number(xs[i]);
+        const by = Number(fromYs[i]);
+        const bz = Number(zs[i]);
         if (this.world.getBlock(bx, by, bz) !== 0) {
           this.world.setBlock(bx, by, bz, 0);
         }
       }
 
-      this.physics.spawnFromDetachEvent({
-        eventId: Number(event.id ?? 0),
-        blocksX,
-        blocksY,
-        blocksZ,
-        blockTypes,
-        motionMode: Number(event.motionMode ?? 0),
-        pivot: {
-          x: Number(event.pivot?.x ?? 0),
-          y: Number(event.pivot?.y ?? 0),
-          z: Number(event.pivot?.z ?? 0),
-        },
-        axis: {
-          x: Number(event.axis?.x ?? 0),
-          y: Number(event.axis?.y ?? 1),
-          z: Number(event.axis?.z ?? 0),
-        },
-        drift: {
-          x: Number(event.drift?.x ?? 0),
-          y: Number(event.drift?.y ?? -0.5),
-          z: Number(event.drift?.z ?? 0),
-        },
-        fractureOrigin: {
-          x: Number(event.fractureOrigin?.x ?? 0),
-          y: Number(event.fractureOrigin?.y ?? 0),
-          z: Number(event.fractureOrigin?.z ?? 0),
-        },
-        fractureDir: {
-          x: Number(event.fractureDir?.x ?? 1),
-          y: Number(event.fractureDir?.y ?? 0),
-          z: Number(event.fractureDir?.z ?? 0),
-        },
-        angAccel: Number(event.angAccel ?? 0.3),
-        initialAngVel: Number(event.initialAngVel ?? 0),
-        gravityScale: Number(event.gravityScale ?? 1),
-        fractureSpeed: Number(event.fractureSpeed ?? 4),
-        lifetimeMs: Number(event.lifetimeMs ?? 5000),
-        createdAtMs,
-      });
+      this.physics.spawnSettleBlocks({ xs, zs, fromYs, toYs, blockTypes });
     });
   }
 

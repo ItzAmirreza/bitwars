@@ -4,14 +4,11 @@ import type { AudioSystem } from './AudioSystem';
 import {
   type FallingBlock,
   type SettledDebris,
-  type StructuralDetachParams,
+  type BlockSettleParams,
   getBlockMat,
-  hashUnit,
   type FallingBlockPool,
   MAX_FALLING,
   SETTLED_DEBRIS_LIFETIME_MS,
-  SCRIPTED_TOPPLE_TIME,
-  SCRIPTED_SHEAR_TIME,
 } from './PhysicsTypes';
 
 // ── Blast Occlusion ──
@@ -116,102 +113,49 @@ function configureDebrisPhysics(fb: FallingBlock, blastIntensity: number): void 
   fb.lifetimeMs = Math.round(THREE.MathUtils.lerp(1800, 5200, normalizedScale) * (0.9 + blastIntensity * 0.08));
 }
 
-// ── Detach Event Spawning ──
+// ── Settle Event Spawning ──
 
-export function spawnFromDetachEvent(
-  params: StructuralDetachParams,
+/// Spawn server-authoritative settling blocks. Each block drops straight down to
+/// the `toYs[i]` cell the server has committed it to; the descent is purely
+/// cosmetic (slight tumble), so the landing position is identical for everyone.
+export function spawnSettleBlocks(
+  params: BlockSettleParams,
   falling: FallingBlock[],
   pool: FallingBlockPool,
   audio: AudioSystem,
 ): void {
-  const {
-    eventId,
-    blocksX,
-    blocksY,
-    blocksZ,
-    blockTypes,
-    motionMode,
-    pivot,
-    axis,
-    drift,
-    fractureOrigin,
-    fractureDir,
-    angAccel,
-    initialAngVel,
-    gravityScale,
-    fractureSpeed,
-    lifetimeMs,
-    createdAtMs,
-  } = params;
+  const { xs, zs, fromYs, toYs, blockTypes } = params;
 
   let sumX = 0;
   let sumY = 0;
   let sumZ = 0;
-  const count = Math.min(blocksX.length, MAX_FALLING - falling.length);
-
-  const axisLen = Math.hypot(axis.x, axis.y, axis.z) || 1;
-  const nx = axis.x / axisLen;
-  const ny = axis.y / axisLen;
-  const nz = axis.z / axisLen;
-  const fracLen = Math.hypot(fractureDir.x, fractureDir.y, fractureDir.z) || 1;
-  const fx = fractureDir.x / fracLen;
-  const fy = fractureDir.y / fracLen;
-  const fz = fractureDir.z / fracLen;
-  const nowMs = Date.now();
-  const inferredAge = Number.isFinite(createdAtMs) ? nowMs - createdAtMs : 0;
-  const ageAtReceiveMs = Math.max(0, Math.min(5000, inferredAge));
-  const bornAtMs = nowMs - ageAtReceiveMs;
-  const speed = Math.max(0.25, fractureSpeed);
+  const count = Math.min(xs.length, MAX_FALLING - falling.length);
 
   for (let i = 0; i < count; i++) {
-    const bx = blocksX[i];
-    const by = blocksY[i];
-    const bz = blocksZ[i];
+    const bx = xs[i];
+    const fromY = fromYs[i];
+    const bz = zs[i];
     const bt = blockTypes[i];
 
-    const fb = pool.acquire(bt, bx, by, bz);
-    fb.motionMode = motionMode === 1 ? 1 : 0;
-    fb.bornAtMs = bornAtMs;
-    fb.activated = false;
-    fb.startX = fb.x;
-    fb.startY = fb.y;
-    fb.startZ = fb.z;
-    fb.pivotX = pivot.x;
-    fb.pivotY = pivot.y;
-    fb.pivotZ = pivot.z;
-    fb.axisX = nx;
-    fb.axisY = ny;
-    fb.axisZ = nz;
-    fb.driftX = drift.x;
-    fb.driftY = drift.y;
-    fb.driftZ = drift.z;
-    fb.angAccel = angAccel;
-    fb.initialAngVel = initialAngVel;
-    fb.gravityScale = Math.max(0.2, gravityScale);
-    fb.lifetimeMs = Math.max(1500, lifetimeMs);
-
-    const relX = fb.startX - fractureOrigin.x;
-    const relY = fb.startY - fractureOrigin.y;
-    const relZ = fb.startZ - fractureOrigin.z;
-    const planeDist = Math.max(0, relX * fx + relY * fy + relZ * fz);
-    // Keep fracture propagation visible without leaving upper blocks frozen
-    // in place for multiple seconds on larger structures.
-    fb.delaySec = Math.min(1.15, planeDist / Math.max(3.2, speed) * 0.18);
-
-    const seedBase = ((eventId * 73856093) ^ ((bx | 0) * 19349663) ^ ((by | 0) * 83492791) ^ ((bz | 0) * 2654435761)) >>> 0;
-    const r1 = hashUnit(seedBase ^ 0x9e3779b9);
-    const r2 = hashUnit(seedBase ^ 0x85ebca6b);
-    const inertiaScale = 1 / Math.sqrt(Math.max(0.85, fb.weight));
-    const spinScale = (fb.motionMode === 1 ? 2.2 : 1.4) * inertiaScale;
-    fb.rotSpeedX = (r1 * 2 - 1) * spinScale;
-    fb.rotSpeedZ = (r2 * 2 - 1) * spinScale;
+    const fb = pool.acquire(bt, bx, fromY, bz);
+    fb.settling = true;
+    fb.targetY = toYs[i];
+    fb.scale = 1;
+    fb.canSettle = false;
+    fb.vx = 0;
+    fb.vy = 0;
+    fb.vz = 0;
+    // A gentle tumble while falling — cosmetic only, never affects the landing.
+    fb.rotSpeedX = (Math.random() - 0.5) * 1.6;
+    fb.rotSpeedZ = (Math.random() - 0.5) * 1.6;
 
     falling.push(fb);
 
     sumX += bx;
-    sumY += by;
+    sumY += fromY;
     sumZ += bz;
   }
+
   if (count > 0) {
     audio.playCrumble({
       position: {
@@ -333,10 +277,9 @@ export function applyExplosionForce(
   pool: FallingBlockPool,
   world: VoxelWorld,
 ): void {
-  const nowMs = Date.now();
   const r2 = radius * radius;
   for (const fb of falling) {
-    if (fb.motionMode >= 0) continue;
+    if (fb.settling) continue;
     const dx = fb.x - cx, dy = fb.y - cy, dz = fb.z - cz;
     const d2 = dx * dx + dy * dy + dz * dz;
     if (d2 < r2 && d2 > 0.01) {
@@ -407,89 +350,9 @@ export function applyExplosionForce(
     fb.rotSpeedX = (Math.random() - 0.5) * 16;
     fb.rotSpeedZ = (Math.random() - 0.5) * 16;
     fb.age = 0;
-    fb.bornAtMs = nowMs;
 
     falling.push(fb);
     settled[i] = settled[settled.length - 1];
     settled.pop();
   }
-}
-
-// ── Structural Block Motion ──
-
-function rotateAroundAxis(
-  x: number, y: number, z: number,
-  ox: number, oy: number, oz: number,
-  ax: number, ay: number, az: number,
-  angle: number,
-): { x: number; y: number; z: number } {
-  const px = x - ox;
-  const py = y - oy;
-  const pz = z - oz;
-  const c = Math.cos(angle);
-  const s = Math.sin(angle);
-  const dot = ax * px + ay * py + az * pz;
-
-  const rx = px * c + (ay * pz - az * py) * s + ax * dot * (1 - c);
-  const ry = py * c + (az * px - ax * pz) * s + ay * dot * (1 - c);
-  const rz = pz * c + (ax * py - ay * px) * s + az * dot * (1 - c);
-
-  return { x: ox + rx, y: oy + ry, z: oz + rz };
-}
-
-export function updateStructuralBlock(fb: FallingBlock, nowMs: number, dt: number): void {
-  const elapsed = (nowMs - fb.bornAtMs) / 1000;
-  const t = Math.max(0, elapsed - fb.delaySec);
-  const g = 9.8 * fb.gravityScale;
-  const prevT = Math.max(0, t - Math.max(0.001, dt));
-
-  if (fb.motionMode === 1) {
-    const angle = Math.min(1.45, fb.initialAngVel * t + 0.5 * fb.angAccel * t * t);
-    const prevAngle = Math.min(1.45, fb.initialAngVel * prevT + 0.5 * fb.angAccel * prevT * prevT);
-
-    const rotated = rotateAroundAxis(
-      fb.startX, fb.startY, fb.startZ,
-      fb.pivotX, fb.pivotY, fb.pivotZ,
-      fb.axisX, fb.axisY, fb.axisZ,
-      angle,
-    );
-    const prevRotated = rotateAroundAxis(
-      fb.startX, fb.startY, fb.startZ,
-      fb.pivotX, fb.pivotY, fb.pivotZ,
-      fb.axisX, fb.axisY, fb.axisZ,
-      prevAngle,
-    );
-
-    fb.x = rotated.x + fb.driftX * t;
-    fb.z = rotated.z + fb.driftZ * t;
-    fb.y = rotated.y + fb.driftY * t - 0.5 * g * t * t;
-
-    const prevX = prevRotated.x + fb.driftX * prevT;
-    const prevZ = prevRotated.z + fb.driftZ * prevT;
-    const prevY = prevRotated.y + fb.driftY * prevT - 0.5 * g * prevT * prevT;
-
-    if (t > SCRIPTED_TOPPLE_TIME || angle > 0.55) {
-      const invDt = 1 / Math.max(0.001, dt);
-      fb.vx = (fb.x - prevX) * invDt;
-      fb.vy = (fb.y - prevY) * invDt;
-      fb.vz = (fb.z - prevZ) * invDt;
-      fb.motionMode = -1;
-      fb.activated = true;
-    }
-  } else {
-    fb.x = fb.startX + fb.driftX * t;
-    fb.z = fb.startZ + fb.driftZ * t;
-    fb.y = fb.startY + fb.driftY * t - 0.5 * g * t * t;
-
-    if (t > SCRIPTED_SHEAR_TIME) {
-      fb.vx = fb.driftX;
-      fb.vy = fb.driftY - g * t;
-      fb.vz = fb.driftZ;
-      fb.motionMode = -1;
-      fb.activated = true;
-    }
-  }
-
-  fb.rotX = fb.rotSpeedX * (t + fb.delaySec * 0.3);
-  fb.rotZ = fb.rotSpeedZ * (t + fb.delaySec * 0.3);
 }

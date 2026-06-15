@@ -248,7 +248,7 @@ export function connect(
             "SELECT * FROM player_profile",
             "SELECT * FROM player_loadout",
             "SELECT * FROM shot_event",
-            "SELECT * FROM detach_event",
+            "SELECT * FROM block_settle_event",
             "SELECT * FROM player_ammo",
             // player_fire_state and player_movement are server-private
             // (not needed client-side, reduces subscription scan load)

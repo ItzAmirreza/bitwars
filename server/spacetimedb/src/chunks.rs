@@ -2,13 +2,15 @@
 // Block queries, destruction, structural integrity orchestration.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
-use spacetimedb::{ReducerContext, Table};
+use spacetimedb::{ReducerContext, ScheduleAt, Table};
 
 use crate::helpers::block_in_bounds;
 use crate::tables::*;
-use crate::types::*;
-use crate::worldgen::{self, AIR, BEDROCK, CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z};
+use crate::worldgen::{
+    self, SettleMove, AIR, BEDROCK, CHUNK_SIZE, NUM_CHUNKS_X, NUM_CHUNKS_Y, NUM_CHUNKS_Z,
+};
 
 type LocalBlockRef = (i32, i32, i32, usize, usize, usize);
 
@@ -338,93 +340,132 @@ fn decompress_nearby_chunks(
     result
 }
 
-/// Run structural integrity check after block destruction.
+/// Write settled blocks back into the world. Only fills cells that are currently
+/// AIR — never overwrites terrain or player builds — so the authoritative landed
+/// state stays consistent with each client's predicted landing.
+pub fn place_blocks_in_world(ctx: &ReducerContext, blocks: &[(i32, i32, i32, u8)]) {
+    let mut chunks_affected: HashMap<u32, Vec<(usize, u8)>> = HashMap::new();
+
+    for &(x, y, z, bt) in blocks {
+        if bt == AIR || !block_in_bounds(x, y, z) {
+            continue;
+        }
+        let cx = (x / CHUNK_SIZE as i32) as u8;
+        let cy = (y / CHUNK_SIZE as i32) as u8;
+        let cz = (z / CHUNK_SIZE as i32) as u8;
+        let chunk_id = worldgen::pack_chunk_id(cx, cy, cz);
+        let lx = (x % CHUNK_SIZE as i32) as usize;
+        let ly = (y % CHUNK_SIZE as i32) as usize;
+        let lz = (z % CHUNK_SIZE as i32) as usize;
+        let local_idx = lx + ly * CHUNK_SIZE + lz * CHUNK_SIZE * CHUNK_SIZE;
+        chunks_affected
+            .entry(chunk_id)
+            .or_default()
+            .push((local_idx, bt));
+    }
+
+    for (chunk_id, cells) in chunks_affected {
+        let (cx, cy, cz) = worldgen::unpack_chunk_id(chunk_id);
+        let Some(chunk) = get_or_generate_chunk(ctx, cx, cy, cz) else {
+            continue;
+        };
+        let mut block_data = decode_chunk(&chunk);
+
+        let mut modified = false;
+        for (local_idx, bt) in cells {
+            if block_data[local_idx] == AIR {
+                block_data[local_idx] = bt;
+                modified = true;
+            }
+        }
+
+        if modified {
+            let new_version = chunk.version + 1;
+            let new_data = worldgen::rle_encode(&block_data);
+            ctx.db.world_chunk().chunk_id().update(WorldChunk {
+                data: new_data,
+                version: new_version,
+                ..chunk
+            });
+        }
+    }
+}
+
+// ── Structural Integrity ──
+
+/// Falling time (ms) for a block dropping `drop` cells under the client's
+/// gravity. Used to schedule the authoritative landing write so it never lands
+/// a block before its falling animation has visibly reached the floor.
+fn settle_fall_ms(drop: i32) -> u64 {
+    if drop <= 0 {
+        return 120;
+    }
+    // t = sqrt(2d/g); g ≈ 22 m/s² to match the client's GRAVITY constant.
+    let t = (2.0 * drop as f32 / 22.0).sqrt();
+    ((t * 1000.0) as u64).clamp(150, 1500)
+}
+
+/// Broadcast a settle batch to all clients (for the falling animation) and
+/// schedule the deferred authoritative write of the landed blocks.
+fn emit_block_settle(ctx: &ReducerContext, moves: &[SettleMove]) {
+    let mut xs = Vec::with_capacity(moves.len());
+    let mut zs = Vec::with_capacity(moves.len());
+    let mut from_ys = Vec::with_capacity(moves.len());
+    let mut to_ys = Vec::with_capacity(moves.len());
+    let mut block_types = Vec::with_capacity(moves.len());
+    let mut max_drop = 0i32;
+
+    for m in moves {
+        xs.push(m.x);
+        zs.push(m.z);
+        from_ys.push(m.from_y);
+        to_ys.push(m.to_y);
+        block_types.push(m.block_type);
+        max_drop = max_drop.max(m.from_y - m.to_y);
+    }
+
+    ctx.db.block_settle_event().insert(BlockSettleEvent {
+        id: 0,
+        xs: xs.clone(),
+        zs: zs.clone(),
+        from_ys,
+        to_ys: to_ys.clone(),
+        block_types: block_types.clone(),
+        created_at: ctx.timestamp,
+    });
+
+    let fall_ms = settle_fall_ms(max_drop);
+    ctx.db.settle_write().insert(SettleWrite {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_millis(fall_ms)),
+        xs,
+        ys: to_ys,
+        zs,
+        block_types,
+    });
+}
+
+/// After blocks are destroyed, settle any structures that are now unsupported.
+/// Instead of deleting the unsupported blocks (the old behaviour), they fall
+/// straight down and come to rest as real, server-authoritative blocks.
 pub fn run_structural_check(ctx: &ReducerContext, destroyed_positions: &[(i32, i32, i32)]) {
     if destroyed_positions.is_empty() {
         return;
     }
 
-    let max_structural_cascade_steps: usize = 6;
-
-    let mut frontier: Vec<(i32, i32, i32)> = destroyed_positions.to_vec();
-    let mut total_components = 0usize;
-    let mut total_detached = 0usize;
-
-    for _ in 0..max_structural_cascade_steps {
-        if frontier.is_empty() {
-            break;
-        }
-
-        let chunks = decompress_nearby_chunks(ctx, &frontier);
-        let collapse_plans = worldgen::check_structural_integrity_sparse(&chunks, &frontier);
-        if collapse_plans.is_empty() {
-            break;
-        }
-
-        let mut candidate_coords: Vec<(i32, i32, i32)> = Vec::new();
-        for plan in &collapse_plans {
-            candidate_coords.extend(plan.blocks.iter().map(|&(x, y, z, _)| (x, y, z)));
-        }
-
-        let actually_detached = destroy_blocks_in_world(ctx, &candidate_coords);
-        if actually_detached.is_empty() {
-            break;
-        }
-
-        let detached_set: std::collections::HashSet<(i32, i32, i32)> = actually_detached
-            .iter()
-            .map(|&(x, y, z, _)| (x, y, z))
-            .collect();
-
-        for plan in collapse_plans {
-            let filtered_blocks: Vec<(i32, i32, i32, u8)> = plan
-                .blocks
-                .into_iter()
-                .filter(|(x, y, z, _)| detached_set.contains(&(*x, *y, *z)))
-                .collect();
-            if filtered_blocks.is_empty() {
-                continue;
-            }
-
-            let blocks_x: Vec<i32> = filtered_blocks.iter().map(|&(x, _, _, _)| x).collect();
-            let blocks_y: Vec<i32> = filtered_blocks.iter().map(|&(_, y, _, _)| y).collect();
-            let blocks_z: Vec<i32> = filtered_blocks.iter().map(|&(_, _, z, _)| z).collect();
-            let block_types: Vec<u8> = filtered_blocks.iter().map(|&(_, _, _, bt)| bt).collect();
-
-            ctx.db.detach_event().insert(DetachEvent {
-                id: 0,
-                blocks_x,
-                blocks_y,
-                blocks_z,
-                block_types,
-                motion_mode: plan.motion_mode,
-                pivot: vec3_from_tuple(plan.pivot),
-                axis: vec3_from_tuple(plan.axis),
-                drift: vec3_from_tuple(plan.drift),
-                fracture_origin: vec3_from_tuple(plan.fracture_origin),
-                fracture_dir: vec3_from_tuple(plan.fracture_dir),
-                ang_accel: plan.ang_accel,
-                initial_ang_vel: plan.initial_ang_vel,
-                gravity_scale: plan.gravity_scale,
-                fracture_speed: plan.fracture_speed,
-                lifetime_ms: plan.lifetime_ms,
-                created_at: ctx.timestamp,
-            });
-            total_components += 1;
-        }
-
-        total_detached += actually_detached.len();
-        frontier = actually_detached
-            .iter()
-            .map(|&(x, y, z, _)| (x, y, z))
-            .collect();
+    let chunks = decompress_nearby_chunks(ctx, destroyed_positions);
+    let moves = worldgen::compute_settle_moves(&chunks, destroyed_positions);
+    if moves.is_empty() {
+        return;
     }
 
-    if total_detached > 0 {
-        log::info!(
-            "Structural check: {} components, {} detached blocks",
-            total_components,
-            total_detached
-        );
-    }
+    // Remove the unsupported blocks from their original cells immediately so the
+    // source structure visibly empties as the debris starts to fall.
+    let origin_coords: Vec<(i32, i32, i32)> =
+        moves.iter().map(|m| (m.x, m.from_y, m.z)).collect();
+    destroy_blocks_in_world(ctx, &origin_coords);
+
+    log::info!("Structural settle: {} blocks falling", moves.len());
+
+    emit_block_settle(ctx, &moves);
 }

@@ -60,10 +60,6 @@ pub fn init(ctx: &ReducerContext) {
     );
 
     // Schedule periodic tasks
-    ctx.db.detach_cleanup().insert(DetachCleanup {
-        scheduled_id: 0,
-        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(5)),
-    });
     ctx.db.shot_cleanup().insert(ShotCleanup {
         scheduled_id: 0,
         scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(3)),

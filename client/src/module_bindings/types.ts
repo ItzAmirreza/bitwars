@@ -55,6 +55,17 @@ export const AdminTeleportEvent = __t.object("AdminTeleportEvent", {
 });
 export type AdminTeleportEvent = __Infer<typeof AdminTeleportEvent>;
 
+export const BlockSettleEvent = __t.object("BlockSettleEvent", {
+  id: __t.u64(),
+  xs: __t.array(__t.i32()),
+  zs: __t.array(__t.i32()),
+  fromYs: __t.array(__t.i32()),
+  toYs: __t.array(__t.i32()),
+  blockTypes: __t.byteArray(),
+  createdAt: __t.timestamp(),
+});
+export type BlockSettleEvent = __Infer<typeof BlockSettleEvent>;
+
 export const ChatMessage = __t.object("ChatMessage", {
   id: __t.u64(),
   sender: __t.identity(),
@@ -81,43 +92,6 @@ export const DestroyedBlock = __t.object("DestroyedBlock", {
   blockType: __t.u8(),
 });
 export type DestroyedBlock = __Infer<typeof DestroyedBlock>;
-
-export const DetachCleanup = __t.object("DetachCleanup", {
-  scheduledId: __t.u64(),
-  scheduledAt: __t.scheduleAt(),
-});
-export type DetachCleanup = __Infer<typeof DetachCleanup>;
-
-export const DetachEvent = __t.object("DetachEvent", {
-  id: __t.u64(),
-  blocksX: __t.array(__t.i32()),
-  blocksY: __t.array(__t.i32()),
-  blocksZ: __t.array(__t.i32()),
-  blockTypes: __t.byteArray(),
-  motionMode: __t.u8(),
-  get pivot() {
-    return Vec3;
-  },
-  get axis() {
-    return Vec3;
-  },
-  get drift() {
-    return Vec3;
-  },
-  get fractureOrigin() {
-    return Vec3;
-  },
-  get fractureDir() {
-    return Vec3;
-  },
-  angAccel: __t.f32(),
-  initialAngVel: __t.f32(),
-  gravityScale: __t.f32(),
-  fractureSpeed: __t.f32(),
-  lifetimeMs: __t.u32(),
-  createdAt: __t.timestamp(),
-});
-export type DetachEvent = __Infer<typeof DetachEvent>;
 
 export const Entity = __t.object("Entity", {
   id: __t.u64(),
@@ -334,6 +308,16 @@ export const ServerInfo = __t.object("ServerInfo", {
   buildHash: __t.string(),
 });
 export type ServerInfo = __Infer<typeof ServerInfo>;
+
+export const SettleWrite = __t.object("SettleWrite", {
+  scheduledId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+  xs: __t.array(__t.i32()),
+  ys: __t.array(__t.i32()),
+  zs: __t.array(__t.i32()),
+  blockTypes: __t.byteArray(),
+});
+export type SettleWrite = __Infer<typeof SettleWrite>;
 
 export const ShotCleanup = __t.object("ShotCleanup", {
   scheduledId: __t.u64(),

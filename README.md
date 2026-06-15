@@ -65,6 +65,21 @@ bitwars/
 
 You will run the full stack locally: your own SpacetimeDB instance, the game module published to it, and the client dev server. Works on Windows, macOS, and Linux.
 
+### Quick start (one command)
+
+Once the prerequisites below are installed, a single script brings up the **whole** local stack — it picks a free port, starts a local SpacetimeDB instance, publishes the module, regenerates the client bindings, and runs the client. **Press `Ctrl+C` once to stop everything.**
+
+| OS | Command (from the repo root) |
+|---|---|
+| Windows | `./scripts/run-local.ps1` |
+| Linux | `./scripts/run-local.sh` |
+| macOS | `./scripts/run-local-macos.sh` |
+
+> On Windows, if PowerShell blocks the script: `powershell -ExecutionPolicy Bypass -File scripts\run-local.ps1`.
+> The script injects the local connection settings as environment variables, so it works **without** a `.env.local` and never overwrites one you already have.
+
+Prefer to understand each step (or already have a server running)? Do it manually below.
+
 ### Prerequisites
 
 - [Bun](https://bun.sh) — the project uses Bun, not npm

@@ -15,7 +15,7 @@ pub mod structures;
 // Re-export everything for backward compat
 pub use biomes::*;
 pub use noise::*;
-pub use structural::{check_structural_integrity_sparse, StructuralCollapsePlan};
+pub use structural::{compute_settle_moves, SettleMove};
 
 // ── World Constants ──
 
