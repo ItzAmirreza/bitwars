@@ -142,7 +142,7 @@ function MinimapSideSelect({ value, onChange }: {
   );
 }
 
-export function SettingsPanel() {
+export function SettingsPanel({ onExitToMenu }: { onExitToMenu?: () => void } = {}) {
   const { settings, setSettings, resetSettings, setShowSettings } = useGameStore();
 
   const sectionTitleStyle: React.CSSProperties = {
@@ -232,6 +232,23 @@ export function SettingsPanel() {
         >
           RESET DEFAULTS
         </button>
+
+        {onExitToMenu && (
+          <button
+            onClick={() => { menuAudio.playUIClick(); onExitToMenu(); }}
+            style={{
+              width: '100%', marginTop: '10px',
+              fontFamily: 'var(--font-pixel)', fontSize: '8px',
+              color: '#ff2d78', background: 'rgba(255,45,120,0.08)',
+              border: '2px solid #ff2d78', padding: '12px',
+              cursor: 'pointer', letterSpacing: '0.12em', transition: 'all 0.1s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,45,120,0.18)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,45,120,0.08)'; }}
+          >
+            EXIT TO MAIN MENU
+          </button>
+        )}
       </div>
     </div>
   );

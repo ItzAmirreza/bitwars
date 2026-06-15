@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { DbConnection } from './module_bindings';
 import { normalizeCharacterPreset } from './characterPresets';
+import { normalizeGameMode } from './gameModes';
 
 export type Screen = 'login' | 'lobby' | 'game';
 
@@ -56,6 +57,24 @@ function saveCharacterPreset(preset: number): void {
   }
 }
 
+function loadGameMode(): string {
+  try {
+    const raw = localStorage.getItem('bitwars-game-mode');
+    if (raw !== null) return normalizeGameMode(raw);
+  } catch {
+    // ignore
+  }
+  return normalizeGameMode(null);
+}
+
+function saveGameMode(mode: string): void {
+  try {
+    localStorage.setItem('bitwars-game-mode', normalizeGameMode(mode));
+  } catch {
+    // ignore
+  }
+}
+
 interface GameStore {
   screen: Screen;
   username: string;
@@ -67,6 +86,7 @@ interface GameStore {
   settings: GameSettings;
   showSettings: boolean;
   selectedCharacterPreset: number;
+  selectedGameMode: string;
 
   setScreen: (screen: Screen) => void;
   setUsername: (username: string) => void;
@@ -79,6 +99,7 @@ interface GameStore {
   resetSettings: () => void;
   setShowSettings: (show: boolean) => void;
   setSelectedCharacterPreset: (preset: number) => void;
+  setSelectedGameMode: (mode: string) => void;
   resetSession: (error?: string | null) => void;
 }
 
@@ -93,6 +114,7 @@ export const useGameStore = create<GameStore>((set) => ({
   settings: loadSettings(),
   showSettings: false,
   selectedCharacterPreset: loadCharacterPreset(),
+  selectedGameMode: loadGameMode(),
 
   setScreen: (screen) => set({ screen }),
   setUsername: (username) => set({ username }),
@@ -116,6 +138,11 @@ export const useGameStore = create<GameStore>((set) => ({
     const normalized = normalizeCharacterPreset(preset);
     saveCharacterPreset(normalized);
     set({ selectedCharacterPreset: normalized });
+  },
+  setSelectedGameMode: (mode) => {
+    const normalized = normalizeGameMode(mode);
+    saveGameMode(normalized);
+    set({ selectedGameMode: normalized });
   },
   resetSession: (error = null) => set({
     screen: 'login',

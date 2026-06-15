@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useGameStore } from "../store";
 import { CLIENT_BUILD_HASH } from "../versionCheck";
 import { menuAudio } from "../menuAudio";
 import { PixelArtBg } from "./PixelArtBg";
+import { GAME_MODES, getGameMode } from "../gameModes";
 import {
   getActiveProvider,
   getAuthMode,
@@ -38,11 +39,29 @@ function PixelBar({
 }
 
 export function LobbyScreen() {
-  const { username, identity, connection, setScreen, resetSession } =
-    useGameStore();
+  const {
+    username,
+    identity,
+    connection,
+    setScreen,
+    setUsername,
+    resetSession,
+    selectedCharacterPreset,
+    selectedGameMode,
+    setSelectedGameMode,
+  } = useGameStore();
   const settings = useGameStore((s) => s.settings);
   const [mounted, setMounted] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
+
+  // Inline player-name editing
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(username);
+  const [savingName, setSavingName] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  const activeMode = getGameMode(selectedGameMode);
 
   const players = connection
     ? Array.from(connection.db.player.iter()).filter((p: any) => p.online)
@@ -94,7 +113,80 @@ export function LobbyScreen() {
     menuAudio.setMasterVolume(settings.masterVolume);
   }, [settings.masterVolume]);
 
+  // Keep the draft in sync if the name changes elsewhere while not editing
+  useEffect(() => {
+    if (!editingName) setNameDraft(username);
+  }, [username, editingName]);
+
+  useEffect(() => {
+    if (editingName) {
+      nameInputRef.current?.focus();
+      nameInputRef.current?.select();
+    }
+  }, [editingName]);
+
+  const startEditingName = () => {
+    menuAudio.playUIClick();
+    setNameDraft(username);
+    setNameError(null);
+    setEditingName(true);
+  };
+
+  const cancelEditingName = () => {
+    menuAudio.playUIClick();
+    setNameError(null);
+    setEditingName(false);
+    setNameDraft(username);
+  };
+
+  const handleSaveName = async () => {
+    const name = nameDraft.trim();
+    if (!connection || savingName) return;
+    if (!name || name.length > 20) {
+      menuAudio.playUIError();
+      setNameError("Name must be 1-20 characters");
+      return;
+    }
+    if (name === username) {
+      setEditingName(false);
+      setNameError(null);
+      return;
+    }
+    setSavingName(true);
+    setNameError(null);
+    try {
+      await connection.reducers.setUsername({
+        username: name,
+        characterPreset: selectedCharacterPreset,
+      });
+      setUsername(name);
+      menuAudio.playUINavigate();
+      setEditingName(false);
+    } catch (error) {
+      menuAudio.playUIError();
+      setNameError(
+        error instanceof Error ? error.message : "Failed to update name",
+      );
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const handleSelectMode = (modeId: string, available: boolean) => {
+    if (!available) {
+      menuAudio.playUIError();
+      return;
+    }
+    if (modeId === selectedGameMode) return;
+    menuAudio.playUIClick();
+    setSelectedGameMode(modeId);
+  };
+
   const handleEnterGame = () => {
+    if (!activeMode.available) {
+      menuAudio.playUIError();
+      return;
+    }
     menuAudio.playUIDeploy();
     setScreen("game");
   };
@@ -267,10 +359,318 @@ export function LobbyScreen() {
             width: "min(460px, calc(100vw - 40px))",
           }}
         >
+          {/* Call sign (editable player name) */}
+          <div
+            className="anim-fade-up"
+            style={{ animationDelay: "0.1s", width: "100%" }}
+          >
+            <div
+              style={{
+                background: "rgba(18, 22, 32, 0.92)",
+                border: "3px solid #1a1e2a",
+                borderLeft: "3px solid #ffd600",
+                padding: "16px 18px",
+                boxShadow: "6px 6px 0 #00000044",
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: "var(--font-pixel)",
+                  fontSize: "8px",
+                  color: "#ffd600",
+                  letterSpacing: "0.16em",
+                  marginBottom: "12px",
+                }}
+              >
+                CALL SIGN
+              </div>
+
+              {editingName ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                  }}
+                >
+                  <div style={{ position: "relative" }}>
+                    <input
+                      ref={nameInputRef}
+                      type="text"
+                      value={nameDraft}
+                      maxLength={20}
+                      onChange={(e) => {
+                        setNameDraft(e.target.value);
+                        menuAudio.playUIType();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void handleSaveName();
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          cancelEditingName();
+                        }
+                      }}
+                      placeholder="ENTER NAME..."
+                      style={{
+                        width: "100%",
+                        background: "#12161e",
+                        border: "3px solid #ffd600",
+                        color: "#e8e8f0",
+                        fontFamily: "var(--font-pixel)",
+                        fontSize: "13px",
+                        letterSpacing: "0.06em",
+                        padding: "12px 48px 12px 14px",
+                        outline: "none",
+                        boxShadow: "4px 4px 0 #0005",
+                        imageRendering: "pixelated",
+                      }}
+                    />
+                    <span
+                      style={{
+                        position: "absolute",
+                        right: "12px",
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        fontFamily: "var(--font-pixel)",
+                        fontSize: "8px",
+                        color: "#4a4e5e",
+                      }}
+                    >
+                      {nameDraft.length}/20
+                    </span>
+                  </div>
+
+                  {nameError && (
+                    <span
+                      style={{
+                        fontFamily: "var(--font-pixel)",
+                        fontSize: "7px",
+                        color: "#ff2d78",
+                        letterSpacing: "0.06em",
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      {nameError}
+                    </span>
+                  )}
+
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      onClick={() => void handleSaveName()}
+                      disabled={savingName}
+                      onMouseEnter={() => menuAudio.playUIHover()}
+                      style={{
+                        flex: 1,
+                        background: savingName ? "#3a3e2a" : "#ffd600",
+                        border: "3px solid #000",
+                        color: "#000",
+                        fontFamily: "var(--font-pixel)",
+                        fontSize: "9px",
+                        letterSpacing: "0.12em",
+                        padding: "10px 12px",
+                        cursor: savingName ? "not-allowed" : "pointer",
+                        boxShadow: "3px 3px 0 #00000066",
+                      }}
+                    >
+                      {savingName ? "SAVING..." : "SAVE"}
+                    </button>
+                    <button
+                      onClick={cancelEditingName}
+                      disabled={savingName}
+                      onMouseEnter={() => menuAudio.playUIHover()}
+                      style={{
+                        background: "transparent",
+                        border: "3px solid #2a2e3e",
+                        color: "#6b7080",
+                        fontFamily: "var(--font-pixel)",
+                        fontSize: "9px",
+                        letterSpacing: "0.12em",
+                        padding: "10px 16px",
+                        cursor: savingName ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      CANCEL
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: "var(--font-pixel)",
+                      fontSize: "15px",
+                      color: "#fff",
+                      letterSpacing: "0.04em",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {username || "UNNAMED"}
+                  </span>
+                  <button
+                    onClick={startEditingName}
+                    onMouseEnter={() => menuAudio.playUIHover()}
+                    style={{
+                      flexShrink: 0,
+                      background: "transparent",
+                      border: "2px solid #ffd60055",
+                      color: "#ffd600",
+                      fontFamily: "var(--font-pixel)",
+                      fontSize: "8px",
+                      letterSpacing: "0.1em",
+                      padding: "8px 14px",
+                      cursor: "pointer",
+                      transition: "all 0.1s",
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.borderColor = "#ffd600";
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.borderColor = "#ffd60055";
+                    }}
+                  >
+                    EDIT
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Game mode selection */}
+          <div
+            className="anim-fade-up"
+            style={{ animationDelay: "0.18s", width: "100%" }}
+          >
+            <div
+              style={{
+                fontFamily: "var(--font-pixel)",
+                fontSize: "8px",
+                color: "#6b7080",
+                letterSpacing: "0.16em",
+                marginBottom: "10px",
+                padding: "0 4px",
+              }}
+            >
+              SELECT MODE
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+              }}
+            >
+              {GAME_MODES.map((mode) => {
+                const selected =
+                  mode.available && mode.id === selectedGameMode;
+                return (
+                  <button
+                    key={mode.id}
+                    onClick={() => handleSelectMode(mode.id, mode.available)}
+                    onMouseEnter={() =>
+                      mode.available && menuAudio.playUIHover()
+                    }
+                    disabled={!mode.available}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      background: selected
+                        ? `${mode.color}18`
+                        : "rgba(18, 22, 32, 0.92)",
+                      border: `3px solid ${
+                        selected ? mode.color : "#1a1e2a"
+                      }`,
+                      padding: "14px 16px",
+                      cursor: mode.available ? "pointer" : "not-allowed",
+                      opacity: mode.available ? 1 : 0.5,
+                      transition: "all 0.1s",
+                      boxShadow: selected
+                        ? `4px 4px 0 ${mode.color}44`
+                        : "4px 4px 0 #00000033",
+                    }}
+                  >
+                    {/* Selection marker */}
+                    <div
+                      style={{
+                        width: "12px",
+                        height: "12px",
+                        flexShrink: 0,
+                        border: `2px solid ${
+                          mode.available ? mode.color : "#4a4e5e"
+                        }`,
+                        background: selected ? mode.color : "transparent",
+                      }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontFamily: "var(--font-pixel)",
+                            fontSize: "10px",
+                            color: mode.available ? "#fff" : "#6b7080",
+                            letterSpacing: "0.06em",
+                          }}
+                        >
+                          {mode.name}
+                        </span>
+                        <span
+                          style={{
+                            fontFamily: "var(--font-pixel)",
+                            fontSize: "6px",
+                            color: mode.available ? mode.color : "#6b7080",
+                            letterSpacing: "0.08em",
+                            border: `1px solid ${
+                              mode.available ? `${mode.color}66` : "#2a2e3e"
+                            }`,
+                            padding: "2px 6px",
+                          }}
+                        >
+                          {mode.tagline}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: "var(--font-pixel)",
+                          fontSize: "6px",
+                          color: "#6b7080",
+                          letterSpacing: "0.06em",
+                          lineHeight: 1.8,
+                          marginTop: "6px",
+                        }}
+                      >
+                        {mode.description}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Play section */}
           <div
             className="anim-scale-in"
-            style={{ animationDelay: "0.15s", width: "100%" }}
+            style={{ animationDelay: "0.26s", width: "100%" }}
           >
             <div
               style={{
@@ -281,24 +681,39 @@ export function LobbyScreen() {
                 boxShadow: "6px 6px 0 #00000044",
               }}
             >
+              {/* Selected mode label */}
+              <div
+                style={{
+                  fontFamily: "var(--font-pixel)",
+                  fontSize: "7px",
+                  color: activeMode.color,
+                  letterSpacing: "0.14em",
+                  marginBottom: "14px",
+                }}
+              >
+                MODE: {activeMode.name}
+              </div>
+
               {/* Play button */}
               <button
                 onClick={handleEnterGame}
                 onMouseEnter={() => menuAudio.playUIHover()}
+                disabled={!activeMode.available}
                 style={{
                   width: "100%",
-                  background: "#ff6b35",
+                  background: activeMode.available ? "#ff6b35" : "#3a3e4e",
                   border: "4px solid #000",
                   color: "#000",
                   fontFamily: "var(--font-pixel)",
                   fontSize: "20px",
                   letterSpacing: "0.2em",
                   padding: "20px 24px",
-                  cursor: "pointer",
+                  cursor: activeMode.available ? "pointer" : "not-allowed",
                   transition: "all 0.1s",
                   boxShadow: "5px 5px 0 #00000066",
                 }}
                 onMouseOver={(e) => {
+                  if (!activeMode.available) return;
                   e.currentTarget.style.transform = "translate(-2px, -2px)";
                   e.currentTarget.style.boxShadow = "7px 7px 0 #00000066";
                 }}
@@ -307,10 +722,12 @@ export function LobbyScreen() {
                   e.currentTarget.style.boxShadow = "5px 5px 0 #00000066";
                 }}
                 onMouseDown={(e) => {
+                  if (!activeMode.available) return;
                   e.currentTarget.style.transform = "translate(3px, 3px)";
                   e.currentTarget.style.boxShadow = "1px 1px 0 #00000066";
                 }}
                 onMouseUp={(e) => {
+                  if (!activeMode.available) return;
                   e.currentTarget.style.transform = "translate(-2px, -2px)";
                   e.currentTarget.style.boxShadow = "7px 7px 0 #00000066";
                 }}
@@ -328,7 +745,7 @@ export function LobbyScreen() {
                   lineHeight: "2",
                 }}
               >
-                ALL WEAPONS UNLOCKED &bull; NO RULES
+                {activeMode.description.toUpperCase()}
               </p>
 
               {/* Weapon pills */}
