@@ -6,7 +6,7 @@ use spacetimedb::{table, Identity, ScheduleAt, Timestamp};
 use crate::types::{DestroyedBlock, Rotation, Vec3};
 
 // Scheduled table macros need reducer functions in scope.
-use crate::cleanup::{cleanup_detach_events, cleanup_shots_scheduled, tick_health_regen};
+use crate::cleanup::{apply_settle_write, cleanup_shots_scheduled, tick_health_regen};
 use crate::environment::tick_environment;
 use crate::grenades::tick_grenades;
 use crate::map::reset_map;
@@ -326,27 +326,21 @@ pub struct ShotEvent {
     pub fired_at: Timestamp,
 }
 
-/// Physics detach event: blocks that lost structural support.
-#[table(accessor = detach_event, public)]
-pub struct DetachEvent {
+/// Structural settle event: unsupported blocks that are falling to a new resting
+/// position. The settle is purely vertical — each block keeps its `xs[i]`/`zs[i]`
+/// and drops from `from_ys[i]` down to `to_ys[i]`. Clients animate the descent;
+/// the server commits the authoritative landed blocks shortly after via the
+/// scheduled `SettleWrite` so the final world state is identical for everyone.
+#[table(accessor = block_settle_event, public)]
+pub struct BlockSettleEvent {
     #[primary_key]
     #[auto_inc]
     pub id: u64,
-    pub blocks_x: Vec<i32>,
-    pub blocks_y: Vec<i32>,
-    pub blocks_z: Vec<i32>,
+    pub xs: Vec<i32>,
+    pub zs: Vec<i32>,
+    pub from_ys: Vec<i32>,
+    pub to_ys: Vec<i32>,
     pub block_types: Vec<u8>,
-    pub motion_mode: u8,
-    pub pivot: Vec3,
-    pub axis: Vec3,
-    pub drift: Vec3,
-    pub fracture_origin: Vec3,
-    pub fracture_dir: Vec3,
-    pub ang_accel: f32,
-    pub initial_ang_vel: f32,
-    pub gravity_scale: f32,
-    pub fracture_speed: f32,
-    pub lifetime_ms: u32,
     pub created_at: Timestamp,
 }
 
@@ -462,12 +456,19 @@ pub struct GrenadeProjectile {
 
 // ── Scheduled Task Tables ──
 
-#[table(accessor = detach_cleanup, scheduled(cleanup_detach_events))]
-pub struct DetachCleanup {
+/// Deferred authoritative write of settled blocks, scheduled to fire when the
+/// falling animation lands. Carries the landing payload; the row auto-deletes
+/// after `apply_settle_write` runs.
+#[table(accessor = settle_write, scheduled(apply_settle_write))]
+pub struct SettleWrite {
     #[primary_key]
     #[auto_inc]
     pub scheduled_id: u64,
     pub scheduled_at: ScheduleAt,
+    pub xs: Vec<i32>,
+    pub ys: Vec<i32>,
+    pub zs: Vec<i32>,
+    pub block_types: Vec<u8>,
 }
 
 #[table(accessor = shot_cleanup, scheduled(cleanup_shots_scheduled))]

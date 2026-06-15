@@ -40,6 +40,18 @@ pub fn cleanup_shots_scheduled(ctx: &ReducerContext, _job: ShotCleanup) {
         ctx.db.explosion_event().id().delete(&id);
     }
 
+    // Clean stale block settle events (> 3s — clients consume them on insert)
+    let stale_settles: Vec<u64> = ctx
+        .db
+        .block_settle_event()
+        .iter()
+        .filter(|e| now_micros.saturating_sub(timestamp_micros(e.created_at)) > 3_000_000)
+        .map(|e| e.id)
+        .collect();
+    for id in stale_settles {
+        ctx.db.block_settle_event().id().delete(&id);
+    }
+
     // Clean stale vehicle destroy events (> 4s)
     let stale_vehicle_destroys: Vec<u64> = ctx
         .db
@@ -94,24 +106,23 @@ pub fn cleanup_shots_scheduled(ctx: &ReducerContext, _job: ShotCleanup) {
     });
 }
 
+/// Scheduled landing write for a settle batch: commit the unsupported blocks at
+/// their authoritative resting positions. The job row auto-deletes afterwards.
 #[reducer]
-pub fn cleanup_detach_events(ctx: &ReducerContext, _job: DetachCleanup) {
-    let now_micros = timestamp_micros(ctx.timestamp);
-    let stale: Vec<u64> = ctx
-        .db
-        .detach_event()
-        .iter()
-        .filter(|e| now_micros.saturating_sub(timestamp_micros(e.created_at)) > 5_000_000)
-        .map(|e| e.id)
-        .collect();
-    for id in stale {
-        ctx.db.detach_event().id().delete(&id);
+pub fn apply_settle_write(ctx: &ReducerContext, job: SettleWrite) {
+    let n = job
+        .xs
+        .len()
+        .min(job.ys.len())
+        .min(job.zs.len())
+        .min(job.block_types.len());
+
+    let mut placements = Vec::with_capacity(n);
+    for i in 0..n {
+        placements.push((job.xs[i], job.ys[i], job.zs[i], job.block_types[i]));
     }
 
-    ctx.db.detach_cleanup().insert(DetachCleanup {
-        scheduled_id: 0,
-        scheduled_at: ScheduleAt::Time(ctx.timestamp + Duration::from_secs(5)),
-    });
+    crate::chunks::place_blocks_in_world(ctx, &placements);
 }
 
 #[reducer]

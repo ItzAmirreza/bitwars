@@ -40,19 +40,13 @@ export interface FallingBlock {
   scale: number;
   weight: number;
   age: number;
-  activated: boolean;
   canSettle: boolean;
   settleLifetimeMs: number;
-  motionMode: number; // -1 dynamic, 0 shear, 1 topple
-  bornAtMs: number;
-  delaySec: number;
-  startX: number; startY: number; startZ: number;
-  pivotX: number; pivotY: number; pivotZ: number;
-  axisX: number; axisY: number; axisZ: number;
-  driftX: number; driftY: number; driftZ: number;
-  angAccel: number;
-  initialAngVel: number;
-  gravityScale: number;
+  // Server-authoritative vertical settle (sand/gravel collapse). When `settling`
+  // is true the block falls straight down to `targetY` — the cell the server has
+  // committed it to — then becomes a solid block again.
+  settling: boolean;
+  targetY: number;
   lifetimeMs: number;
   airDrag: number;
   restitution: number;
@@ -68,24 +62,15 @@ export interface SettledDebris {
   expiresAtMs: number;
 }
 
-export interface StructuralDetachParams {
-  eventId: number;
-  blocksX: ArrayLike<number>;
-  blocksY: ArrayLike<number>;
-  blocksZ: ArrayLike<number>;
+/// Server-authoritative settle batch: unsupported blocks falling to a new
+/// resting position. Each block keeps its `xs[i]`/`zs[i]` and drops from
+/// `fromYs[i]` to `toYs[i]`.
+export interface BlockSettleParams {
+  xs: ArrayLike<number>;
+  zs: ArrayLike<number>;
+  fromYs: ArrayLike<number>;
+  toYs: ArrayLike<number>;
   blockTypes: ArrayLike<number>;
-  motionMode: number;
-  pivot: { x: number; y: number; z: number };
-  axis: { x: number; y: number; z: number };
-  drift: { x: number; y: number; z: number };
-  fractureOrigin: { x: number; y: number; z: number };
-  fractureDir: { x: number; y: number; z: number };
-  angAccel: number;
-  initialAngVel: number;
-  gravityScale: number;
-  fractureSpeed: number;
-  lifetimeMs: number;
-  createdAtMs: number;
 }
 
 // ── Spatial Hash ──
@@ -130,19 +115,10 @@ export class FallingBlockPool {
     fb.scale = 1;
     fb.weight = getBlockMat(bt).weight;
     fb.age = 0;
-    fb.activated = true;
     fb.canSettle = false;
     fb.settleLifetimeMs = 0;
-    fb.motionMode = -1;
-    fb.bornAtMs = 0;
-    fb.delaySec = 0;
-    fb.startX = fb.x; fb.startY = fb.y; fb.startZ = fb.z;
-    fb.pivotX = fb.x; fb.pivotY = fb.y; fb.pivotZ = fb.z;
-    fb.axisX = 0; fb.axisY = 1; fb.axisZ = 0;
-    fb.driftX = 0; fb.driftY = 0; fb.driftZ = 0;
-    fb.angAccel = 0;
-    fb.initialAngVel = 0;
-    fb.gravityScale = 1;
+    fb.settling = false;
+    fb.targetY = 0;
     fb.lifetimeMs = 0;
     fb.airDrag = 0.988;
     fb.restitution = 0.14;
@@ -161,16 +137,4 @@ export const MAX_FALLING = 500;
 export const MAX_SETTLED = 350;
 export const MAX_DEBRIS_INSTANCES = MAX_FALLING + MAX_SETTLED;
 export const GRAVITY = -22;
-export const SCRIPTED_TOPPLE_TIME = 0.45;
-export const SCRIPTED_SHEAR_TIME = 0.25;
 export const SETTLED_DEBRIS_LIFETIME_MS = 10_000;
-
-// ── Deterministic Hash Unit ──
-
-export function hashUnit(seed: number): number {
-  let x = seed | 0;
-  x ^= x << 13;
-  x ^= x >>> 17;
-  x ^= x << 5;
-  return ((x >>> 0) & 0x00ffffff) / 0x00ffffff;
-}

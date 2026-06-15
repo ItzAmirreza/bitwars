@@ -33,12 +33,3 @@ pub const ZERO_VEL: Vec3 = Vec3 {
     y: 0.0,
     z: 0.0,
 };
-
-/// Convert a tuple to Vec3.
-pub fn vec3_from_tuple(v: (f32, f32, f32)) -> Vec3 {
-    Vec3 {
-        x: v.0,
-        y: v.1,
-        z: v.2,
-    }
-}

@@ -5,7 +5,7 @@ import { AudioSystem } from './AudioSystem';
 import {
   type FallingBlock,
   type SettledDebris,
-  type StructuralDetachParams,
+  type BlockSettleParams,
   getBlockMat,
   FallingBlockPool,
   SpatialHash,
@@ -17,14 +17,13 @@ import {
   SETTLED_DEBRIS_LIFETIME_MS,
 } from './PhysicsTypes';
 import {
-  spawnFromDetachEvent as doSpawnDetach,
+  spawnSettleBlocks as doSpawnSettle,
   spawnExplosionDebris as doSpawnExplosion,
   applyExplosionForce as doApplyExplosionForce,
-  updateStructuralBlock,
 } from './PhysicsSpawning';
 
 // Re-export for consumers that import the interface from here
-export type { StructuralDetachParams } from './PhysicsTypes';
+export type { BlockSettleParams } from './PhysicsTypes';
 
 // ── PhysicsSystem ──
 
@@ -67,8 +66,8 @@ export class PhysicsSystem {
 
   // ── Public API (delegates to PhysicsSpawning) ──
 
-  spawnFromDetachEvent(params: StructuralDetachParams): void {
-    doSpawnDetach(params, this.falling, this.pool, this.audio);
+  spawnSettleBlocks(params: BlockSettleParams): void {
+    doSpawnSettle(params, this.falling, this.pool, this.audio);
   }
 
   spawnExplosionDebris(
@@ -104,8 +103,13 @@ export class PhysicsSystem {
     for (let i = 0; i < this.falling.length; i++) {
       const fb = this.falling[i];
 
-      if (fb.motionMode >= 0 && !fb.activated) {
-        updateStructuralBlock(fb, nowMs, dt);
+      // Server-authoritative settle: fall straight down toward the committed
+      // target cell. No drag/lateral forces — the landing must match the server.
+      if (fb.settling) {
+        fb.vy += GRAVITY * dt;
+        fb.y += fb.vy * dt;
+        fb.rotX += fb.rotSpeedX * dt;
+        fb.rotZ += fb.rotSpeedZ * dt;
         continue;
       }
 
@@ -136,8 +140,22 @@ export class PhysicsSystem {
     for (let i = this.falling.length - 1; i >= 0; i--) {
       const fb = this.falling[i];
 
-      if (fb.motionMode >= 0 && !fb.activated) {
-        if ((nowMs - fb.bornAtMs) > fb.lifetimeMs || fb.y < -20) {
+      // Settling blocks land exactly on their server-committed target cell and
+      // become solid again (predicted; the server confirms via chunk update).
+      if (fb.settling) {
+        const restY = fb.targetY + 0.5;
+        if (fb.y <= restY) {
+          fb.y = restY;
+          this.world.setBlock(Math.floor(fb.x), fb.targetY, Math.floor(fb.z), fb.blockType);
+          landedX += fb.x;
+          landedY += fb.y;
+          landedZ += fb.z;
+          landedCount++;
+          this.vfx.emitImpact(fb.x - 0.5, Math.max(0, fb.y - 0.5), fb.z - 0.5);
+          this.pool.release(fb);
+          this.falling[i] = this.falling[this.falling.length - 1];
+          this.falling.pop();
+        } else if (fb.y < -20) {
           this.pool.release(fb);
           this.falling[i] = this.falling[this.falling.length - 1];
           this.falling.pop();
@@ -213,13 +231,13 @@ export class PhysicsSystem {
 
     for (let i = 0; i < this.falling.length; i++) {
       const fb = this.falling[i];
-      if (fb.motionMode >= 0) continue;
+      if (fb.settling) continue;
       hash.insert(fb.x, fb.y, fb.z, i);
     }
 
     for (let i = 0; i < this.falling.length; i++) {
       const fb = this.falling[i];
-      if (fb.motionMode >= 0) continue;
+      if (fb.settling) continue;
       const cx = Math.floor(fb.x);
       const cy = Math.floor(fb.y);
       const cz = Math.floor(fb.z);

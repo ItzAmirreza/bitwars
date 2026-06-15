@@ -1,12 +1,22 @@
-// ── Structural Integrity (Load + Topple Model) ──
-// Works on sparse chunk windows and produces deterministic collapse plans.
+// ── Structural Integrity (Unsupported-Block Settling) ──
+// Works on sparse chunk windows and produces deterministic, server-authoritative
+// settle moves. After blocks are destroyed, this finds connected components that
+// are no longer attached to any support (the ground or an external solid block)
+// and drops each unsupported block straight down — sand/gravel style — until it
+// rests on the first solid surface beneath it. The server owns every landing
+// position, so the final world state is identical for all clients.
 
 use super::*;
 use std::collections::{HashMap, HashSet};
 
 const MAX_BFS_NODES: usize = 20000;
 const MAX_BFS_RADIUS: i32 = 36;
-const MIN_COLLAPSE_BLOCKS: usize = 1;
+/// Hard cap on the number of blocks that can settle from a single destruction,
+/// bounding reducer work and event payload size. Excess unsupported blocks are
+/// left in place (still solid) rather than processed this pass.
+const MAX_SETTLE_MOVES: usize = 512;
+/// Deepest a single block may fall while settling, bounding the search.
+const MAX_SETTLE_DROP: i32 = 64;
 
 const N6: [(i32, i32, i32); 6] = [
     (1, 0, 0),
@@ -48,54 +58,19 @@ fn get_block_sparse(chunks: &HashMap<u32, [u8; 4096]>, x: i32, y: i32, z: i32) -
     }
 }
 
-pub struct StructuralCollapsePlan {
-    pub blocks: Vec<(i32, i32, i32, u8)>,
-    /// 0 = free-fall shear, 1 = rotational topple
-    pub motion_mode: u8,
-    pub pivot: (f32, f32, f32),
-    pub axis: (f32, f32, f32),
-    pub drift: (f32, f32, f32),
-    pub fracture_origin: (f32, f32, f32),
-    pub fracture_dir: (f32, f32, f32),
-    pub ang_accel: f32,
-    pub initial_ang_vel: f32,
-    pub gravity_scale: f32,
-    pub fracture_speed: f32,
-    pub lifetime_ms: u32,
+/// A single block's vertical relocation: it leaves `(x, from_y, z)` and comes to
+/// rest at `(x, to_y, z)`, with `to_y < from_y` always.
+pub struct SettleMove {
+    pub x: i32,
+    pub z: i32,
+    pub from_y: i32,
+    pub to_y: i32,
+    pub block_type: u8,
 }
 
 struct ComponentScan {
     blocks: Vec<(i32, i32, i32, u8)>,
     visited: Vec<u64>,
-}
-
-fn block_weight(bt: u8) -> f32 {
-    match bt {
-        CONCRETE => 3.0,
-        DARK_CONCRETE => 3.5,
-        ASPHALT => 2.5,
-        REBAR => 4.0,
-        BRICK => 2.0,
-        METAL => 5.0,
-        RUBBLE => 1.5,
-        DIRT => 1.2,
-        SAND => 1.0,
-        GRASS => 1.0,
-        WOOD => 1.6,
-        STONE => 3.2,
-        SNOW => 0.4,
-        LANTERN => 0.45,
-        _ => 2.0,
-    }
-}
-
-fn normalize2(x: f32, z: f32) -> (f32, f32) {
-    let len = (x * x + z * z).sqrt();
-    if len < 0.0001 {
-        (1.0, 0.0)
-    } else {
-        (x / len, z / len)
-    }
 }
 
 fn scan_component_sparse(
@@ -171,251 +146,57 @@ fn scan_component_sparse(
     }
 }
 
-fn analyze_component_for_collapse(
+/// True if the component rests on something solid: a block sitting on the world
+/// floor (`y == 0`), a solid block directly beneath a component block that is
+/// NOT itself part of the component, or an unloaded chunk below (treated
+/// conservatively as support so we never collapse across a streaming boundary).
+fn component_is_supported(
     chunks: &HashMap<u32, [u8; 4096]>,
     component: &ComponentScan,
-) -> Option<StructuralCollapsePlan> {
-    if component.blocks.len() < MIN_COLLAPSE_BLOCKS {
-        return None;
-    }
-
+) -> bool {
     let mut block_keys = HashSet::new();
     for &(x, y, z, _) in &component.blocks {
         block_keys.insert(pack_coord(x, y, z));
     }
 
-    let mut total_w = 0.0f32;
-    let mut com_x = 0.0f32;
-    let mut com_z = 0.0f32;
-
-    let mut min_x = i32::MAX;
-    let mut min_y = i32::MAX;
-    let mut min_z = i32::MAX;
-    let mut max_x = i32::MIN;
-    let mut max_y = i32::MIN;
-    let mut max_z = i32::MIN;
-
-    let mut support_points: Vec<(f32, f32, f32)> = Vec::new();
-    for &(x, y, z, bt) in &component.blocks {
-        min_x = min_x.min(x);
-        min_y = min_y.min(y);
-        min_z = min_z.min(z);
-        max_x = max_x.max(x);
-        max_y = max_y.max(y);
-        max_z = max_z.max(z);
-
-        let w = block_weight(bt);
-        total_w += w;
-        com_x += (x as f32 + 0.5) * w;
-        com_z += (z as f32 + 0.5) * w;
-
+    for &(x, y, z, _) in &component.blocks {
         if y == 0 {
-            support_points.push((x as f32 + 0.5, z as f32 + 0.5, y as f32 + 0.5));
-            continue;
+            return true;
         }
-
         let below_key = pack_coord(x, y - 1, z);
         if block_keys.contains(&below_key) {
-            continue;
+            continue; // supported by another block in the same component
         }
-
         match get_block_sparse(chunks, x, y - 1, z) {
-            Some(b) if b != AIR => {
-                support_points.push((x as f32 + 0.5, z as f32 + 0.5, y as f32 + 0.5));
-            }
-            None => {
-                support_points.push((x as f32 + 0.5, z as f32 + 0.5, y as f32 + 0.5));
-            }
+            Some(b) if b != AIR => return true, // rests on an external solid block
+            None => return true,                // unknown below → assume support
             Some(_) => {}
         }
     }
 
-    if total_w <= 0.0 {
-        return None;
-    }
-
-    com_x /= total_w;
-    com_z /= total_w;
-
-    let size = component.blocks.len() as f32;
-    let footprint_w = (max_x - min_x + 1).max(1) as f32;
-    let footprint_d = (max_z - min_z + 1).max(1) as f32;
-    let footprint_area = footprint_w * footprint_d;
-    let height = (max_y - min_y + 1).max(1) as f32;
-
-    if support_points.is_empty() {
-        let (dir_x, dir_z) = normalize2(
-            com_x - (min_x as f32 + max_x as f32) * 0.5,
-            com_z - (min_z as f32 + max_z as f32) * 0.5,
-        );
-        let fracture_origin = (
-            if dir_x >= 0.0 {
-                min_x as f32
-            } else {
-                (max_x + 1) as f32
-            },
-            min_y as f32,
-            if dir_z >= 0.0 {
-                min_z as f32
-            } else {
-                (max_z + 1) as f32
-            },
-        );
-        return Some(StructuralCollapsePlan {
-            blocks: component.blocks.clone(),
-            motion_mode: 0,
-            pivot: (com_x, min_y as f32 + 0.5, com_z),
-            axis: (0.0, 0.0, 1.0),
-            drift: (dir_x * 0.35, -0.8, dir_z * 0.35),
-            fracture_origin,
-            fracture_dir: (dir_x, 0.0, dir_z),
-            ang_accel: 0.0,
-            initial_ang_vel: 0.0,
-            gravity_scale: 1.0,
-            fracture_speed: 6.0,
-            lifetime_ms: 5600,
-        });
-    }
-
-    let mut support_x = 0.0f32;
-    let mut support_z = 0.0f32;
-    let mut support_y = 0.0f32;
-    for &(sx, sz, sy) in &support_points {
-        support_x += sx;
-        support_z += sz;
-        support_y += sy;
-    }
-    support_x /= support_points.len() as f32;
-    support_z /= support_points.len() as f32;
-    support_y /= support_points.len() as f32;
-
-    let mut support_radius = 0.0f32;
-    for &(sx, sz, _) in &support_points {
-        let dx = sx - support_x;
-        let dz = sz - support_z;
-        support_radius = support_radius.max((dx * dx + dz * dz).sqrt());
-    }
-    support_radius = support_radius.max(0.75);
-
-    let support_density = (support_points.len() as f32 / footprint_area).min(1.0);
-    let mass_per_support = total_w / support_points.len() as f32;
-    let slenderness = height / footprint_area.sqrt().max(1.0);
-
-    let load_dx = com_x - support_x;
-    let load_dz = com_z - support_z;
-    let overload_dist = (load_dx * load_dx + load_dz * load_dz).sqrt();
-    let overload_ratio = overload_dist / (support_radius + 0.25);
-
-    let instability = overload_ratio * 1.05
-        + (0.62 - support_density).max(0.0) * 0.95
-        + (mass_per_support * 0.017)
-        + (slenderness * 0.08);
-
-    if instability < 1.18 && overload_ratio < 1.02 {
-        return None;
-    }
-
-    let (load_dir_x, load_dir_z) = normalize2(load_dx, load_dz);
-    let fracture_dir_x = -load_dir_x;
-    let fracture_dir_z = -load_dir_z;
-    let axis_x = load_dir_z;
-    let axis_z = -load_dir_x;
-
-    // Pivot around the loaded outer edge of the remaining support footprint,
-    // not the centroid. This produces a more natural topple angle and avoids
-    // large structures appearing to "hinge in midair".
-    let mut pivot_x = support_x;
-    let mut pivot_z = support_z;
-    let mut pivot_y = support_y;
-    let mut pivot_proj = f32::NEG_INFINITY;
-    for &(sx, sz, sy) in &support_points {
-        let proj = sx * load_dir_x + sz * load_dir_z;
-        pivot_proj = pivot_proj.max(proj);
-        if sy < pivot_y {
-            pivot_y = sy;
-        }
-    }
-
-    let mut edge_count = 0usize;
-    let mut edge_x = 0.0f32;
-    let mut edge_z = 0.0f32;
-    let edge_threshold = 0.55f32;
-    for &(sx, sz, _) in &support_points {
-        let proj = sx * load_dir_x + sz * load_dir_z;
-        if pivot_proj - proj <= edge_threshold {
-            edge_x += sx;
-            edge_z += sz;
-            edge_count += 1;
-        }
-    }
-    if edge_count > 0 {
-        pivot_x = edge_x / edge_count as f32;
-        pivot_z = edge_z / edge_count as f32;
-    }
-
-    let collapse_strength = (instability - 0.95).max(0.0);
-    let ang_accel = (0.18 + collapse_strength * 0.85 + slenderness * 0.02).min(2.4);
-    let initial_ang_vel = (0.03 + overload_ratio * 0.2).min(0.5);
-    let lateral_drift = (0.10 + overload_ratio * 0.25).min(0.65);
-    let fracture_speed = (2.2 + support_density * 2.0 + (size / 150.0)).min(8.0);
-
-    let lifetime_ms =
-        (5200.0 + height * 55.0 + collapse_strength * 900.0).clamp(4200.0, 9800.0) as u32;
-
-    let fracture_origin = (
-        if fracture_dir_x >= 0.0 {
-            min_x as f32
-        } else {
-            (max_x + 1) as f32
-        },
-        min_y as f32,
-        if fracture_dir_z >= 0.0 {
-            min_z as f32
-        } else {
-            (max_z + 1) as f32
-        },
-    );
-
-    Some(StructuralCollapsePlan {
-        blocks: component.blocks.clone(),
-        motion_mode: 1,
-        pivot: (pivot_x, pivot_y, pivot_z),
-        axis: (axis_x, 0.0, axis_z),
-        drift: (
-            load_dir_x * lateral_drift,
-            -0.55,
-            load_dir_z * lateral_drift,
-        ),
-        fracture_origin,
-        fracture_dir: (fracture_dir_x, 0.0, fracture_dir_z),
-        ang_accel,
-        initial_ang_vel,
-        gravity_scale: 0.85,
-        fracture_speed,
-        lifetime_ms,
-    })
+    false
 }
 
-/// Check structural integrity using sparse chunk data.
-/// Takes a map of nearby decompressed chunks and positions of destroyed blocks.
-/// Returns deterministic collapse plans for unsupported/overloaded structures.
-pub fn check_structural_integrity_sparse(
+/// Find unsupported components near the destroyed cells and compute their
+/// deterministic vertical settle. Each returned `SettleMove` relocates one block
+/// straight down to where it comes to rest. Processing is fully deterministic
+/// (fixed scan order + bottom-up settle), so every client that replays these
+/// moves reaches the same final world state.
+pub fn compute_settle_moves(
     chunks: &HashMap<u32, [u8; 4096]>,
     destroyed_positions: &[(i32, i32, i32)],
-) -> Vec<StructuralCollapsePlan> {
-    let mut plans = Vec::new();
+) -> Vec<SettleMove> {
     let mut global_visited = HashSet::new();
+    let mut mobile: Vec<(i32, i32, i32, u8)> = Vec::new();
 
-    for &(px, py, pz) in destroyed_positions {
+    'outer: for &(px, py, pz) in destroyed_positions {
         for &(dx, dy, dz) in &N6 {
             let nx = px + dx;
             let ny = py + dy;
             let nz = pz + dz;
-
             if !block_in_world(nx, ny, nz) {
                 continue;
             }
-
             let bt = match get_block_sparse(chunks, nx, ny, nz) {
                 Some(b) => b,
                 None => continue,
@@ -423,22 +204,141 @@ pub fn check_structural_integrity_sparse(
             if bt == AIR {
                 continue;
             }
-
             let key = pack_coord(nx, ny, nz);
             if global_visited.contains(&key) {
                 continue;
             }
 
-            let result = scan_component_sparse(chunks, nx, ny, nz, &global_visited);
-            for &k in &result.visited {
+            let comp = scan_component_sparse(chunks, nx, ny, nz, &global_visited);
+            for &k in &comp.visited {
                 global_visited.insert(k);
             }
 
-            if let Some(plan) = analyze_component_for_collapse(chunks, &result) {
-                plans.push(plan);
+            if component_is_supported(chunks, &comp) {
+                continue;
+            }
+
+            for b in &comp.blocks {
+                mobile.push(*b);
+                if mobile.len() >= MAX_SETTLE_MOVES {
+                    break 'outer;
+                }
             }
         }
     }
 
-    plans
+    if mobile.is_empty() {
+        return Vec::new();
+    }
+
+    // Deterministic settle order: lowest blocks first so stacks resolve cleanly,
+    // then x/z for a stable tie-break.
+    mobile.sort_by(|a, b| {
+        a.1.cmp(&b.1)
+            .then_with(|| a.0.cmp(&b.0))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+
+    let mobile_set: HashSet<(i32, i32, i32)> =
+        mobile.iter().map(|&(x, y, z, _)| (x, y, z)).collect();
+
+    // Cells that stop a falling block: targets already claimed by earlier-settled
+    // blocks this pass.
+    let mut occupied: HashSet<(i32, i32, i32)> = HashSet::new();
+
+    let mut moves = Vec::with_capacity(mobile.len());
+    for &(x, from_y, z, bt) in &mobile {
+        let mut to_y = from_y;
+        let mut drop = 0;
+        while to_y > 0 && drop < MAX_SETTLE_DROP {
+            let below_y = to_y - 1;
+            let supported = occupied.contains(&(x, below_y, z))
+                || (!mobile_set.contains(&(x, below_y, z))
+                    && match get_block_sparse(chunks, x, below_y, z) {
+                        Some(b) => b != AIR,
+                        None => true, // unknown → solid floor for the fall
+                    });
+            if supported {
+                break;
+            }
+            to_y = below_y;
+            drop += 1;
+        }
+        occupied.insert((x, to_y, z));
+        if to_y != from_y {
+            moves.push(SettleMove {
+                x,
+                z,
+                from_y,
+                to_y,
+                block_type: bt,
+            });
+        }
+    }
+
+    moves
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a single-chunk window (chunk 0,0,0) from a list of solid blocks.
+    fn window(solids: &[(i32, i32, i32, u8)]) -> HashMap<u32, [u8; 4096]> {
+        let mut data = [AIR; 4096];
+        for &(x, y, z, bt) in solids {
+            let idx = (x as usize % CHUNK_SIZE)
+                + (y as usize % CHUNK_SIZE) * CHUNK_SIZE
+                + (z as usize % CHUNK_SIZE) * CHUNK_SIZE * CHUNK_SIZE;
+            data[idx] = bt;
+        }
+        let mut chunks = HashMap::new();
+        chunks.insert(pack_chunk_id(0, 0, 0), data);
+        chunks
+    }
+
+    #[test]
+    fn floating_block_settles_onto_the_floor() {
+        // A lone block at y=5 with a solid pad at y=0 directly below it, and a
+        // destroyed cell next to it to seed the scan.
+        let chunks = window(&[(5, 0, 5, CONCRETE), (5, 5, 5, BRICK)]);
+        let moves = compute_settle_moves(&chunks, &[(6, 5, 5)]);
+
+        assert_eq!(moves.len(), 1);
+        let m = &moves[0];
+        assert_eq!((m.x, m.z, m.from_y, m.to_y), (5, 5, 5, 1));
+        assert_eq!(m.block_type, BRICK);
+    }
+
+    #[test]
+    fn supported_block_does_not_settle() {
+        // A block resting directly on the floor is supported — nothing falls.
+        let chunks = window(&[(5, 0, 5, CONCRETE), (5, 1, 5, BRICK)]);
+        let moves = compute_settle_moves(&chunks, &[(6, 1, 5)]);
+        assert!(moves.is_empty());
+    }
+
+    #[test]
+    fn stacked_floating_blocks_settle_into_a_pile() {
+        // Two stacked floating blocks fall and stack back up on the floor.
+        let chunks = window(&[(5, 0, 5, CONCRETE), (5, 6, 5, BRICK), (5, 7, 5, STONE)]);
+        let mut moves = compute_settle_moves(&chunks, &[(6, 6, 5), (6, 7, 5)]);
+        moves.sort_by_key(|m| m.to_y);
+
+        assert_eq!(moves.len(), 2);
+        assert_eq!((moves[0].to_y, moves[0].block_type), (1, BRICK));
+        assert_eq!((moves[1].to_y, moves[1].block_type), (2, STONE));
+    }
+
+    #[test]
+    fn settling_is_deterministic() {
+        let chunks = window(&[(5, 0, 5, CONCRETE), (5, 6, 5, BRICK), (5, 7, 5, STONE)]);
+        let a = compute_settle_moves(&chunks, &[(6, 6, 5), (6, 7, 5)]);
+        let b = compute_settle_moves(&chunks, &[(6, 6, 5), (6, 7, 5)]);
+        let key = |m: &SettleMove| (m.x, m.z, m.from_y, m.to_y, m.block_type);
+        assert_eq!(
+            a.iter().map(key).collect::<Vec<_>>(),
+            b.iter().map(key).collect::<Vec<_>>()
+        );
+    }
 }
