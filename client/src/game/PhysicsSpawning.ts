@@ -51,6 +51,29 @@ export function applyBlastOcclusion(
   return { x: xDir / len, y: yDir / len, z: zDir / len };
 }
 
+// How exposed a block is to open air at the moment the blast hits. Blocks still
+// embedded in intact structure (lots of solid neighbours) resist the shockwave;
+// blocks floating in the freshly-blown cavity (all-air neighbours) fly free. This
+// is what makes sheltered blocks barely budge while exposed faces get hurled, and
+// lets tightly-packed groups shove off together instead of each block flying alike.
+const NEIGHBOR_OFFSETS: ReadonlyArray<readonly [number, number, number]> = [
+  [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
+];
+
+function blastExposure(world: VoxelWorld, x: number, y: number, z: number): number {
+  const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
+  let solid = 0;
+  for (let i = 0; i < NEIGHBOR_OFFSETS.length; i++) {
+    const o = NEIGHBOR_OFFSETS[i];
+    if (world.getBlock(bx + o[0], by + o[1], bz + o[2]) !== 0) solid++;
+  }
+  // 0 solid neighbours -> 1.0 (fully exposed); 6 solid -> 0.38 (buried/sheltered).
+  return 1 - (solid / NEIGHBOR_OFFSETS.length) * 0.62;
+}
+
+// Derive a block's launch direction from the blast geometry: it flies straight out
+// along the vector from the explosion origin (the hit point) through the block, so
+// debris radiates outward in 3D rather than all rising on a hidden uniform force.
 function shapeExplosionDirection(
   world: VoxelWorld,
   x: number,
@@ -61,23 +84,30 @@ function shapeExplosionDirection(
   dz: number,
   dist: number,
   radius: number,
-  shaped: number,
+  proximity: number,
+  exposure: number,
   scale: number,
 ): { x: number; y: number; z: number } {
   let radialX = dx / dist;
   let radialY = dy / dist;
   let radialZ = dz / dist;
 
+  // Modest upward bias so debris arcs instead of skidding along the ground. It is
+  // strongest for blocks at or below the blast height and fades to nothing for
+  // blocks already above it, so the cloud never launches uniformly straight up.
   const heightRatio = THREE.MathUtils.clamp(dy / Math.max(1, radius), -1, 1);
-  const lift = THREE.MathUtils.lerp(0.08, 0.22, shaped) * (1 - Math.max(0, heightRatio) * 0.7);
-  radialY = THREE.MathUtils.clamp(radialY * 0.65 + lift, -0.32, 0.5);
+  radialY += 0.16 * proximity * THREE.MathUtils.clamp(0.55 - heightRatio, 0, 1.1);
 
-  const dir = applyBlastOcclusion(world, x, y, z, radialX, radialY, radialZ, scale);
-  const cappedY = THREE.MathUtils.clamp(dir.y, -0.35, 0.5);
-  const len = Math.hypot(dir.x, cappedY, dir.z);
+  // Per-block angular jitter so no two fragments move identically. Exposed blocks
+  // scatter widely; clumped/buried blocks keep a tight cone and break off as a
+  // chunk. Close-in blocks punch cleaner; distant ones spray more.
+  const spread = THREE.MathUtils.lerp(0.12, 0.5, exposure) * (1.15 - proximity * 0.45);
+  radialX += (Math.random() - 0.5) * spread;
+  radialY += (Math.random() - 0.5) * spread * 0.8;
+  radialZ += (Math.random() - 0.5) * spread;
 
-  if (len < 0.001) return { x: 0, y: 0.12, z: 0 };
-  return { x: dir.x / len, y: cappedY / len, z: dir.z / len };
+  // Deflect along the surface if the blast would shove the block straight into rock.
+  return applyBlastOcclusion(world, x, y, z, radialX, radialY, radialZ, scale);
 }
 
 function sampleExplosionBlocks<T>(blocks: T[], maxSpawn: number): T[] {
@@ -201,12 +231,15 @@ export function spawnExplosionDebris(
 
     if (dist > 0.01) {
       const maxDist = Math.max(radius * 2.1, 2.5);
-      const proximity = Math.max(0, 1 - dist / maxDist);
-      const shaped = proximity * proximity;
+      const proximity = THREE.MathUtils.clamp(1 - dist / maxDist, 0, 1);
+      // Sharper falloff (~prox^2..prox^3) with a low floor so distant blocks barely
+      // move while close ones get hurled — no more uniform push across the radius.
+      const falloff = proximity * proximity * (0.35 + proximity * 0.65);
+      const exposure = blastExposure(world, fb.x, fb.y, fb.z);
       const mat = getBlockMat(fb.blockType);
       const resistance = Math.max(0.45, mat.pushResistance * 0.6);
-      impulse = (force * (0.32 + shaped * 1.45)) / (fb.weight * resistance);
-      const dir = shapeExplosionDirection(world, fb.x, fb.y, fb.z, dx, dy, dz, dist, radius, shaped, fb.scale);
+      impulse = (force * (0.14 + falloff * 1.7)) / (fb.weight * resistance) * exposure;
+      const dir = shapeExplosionDirection(world, fb.x, fb.y, fb.z, dx, dy, dz, dist, radius, proximity, exposure, fb.scale);
       radialX = dir.x;
       radialY = dir.y;
       radialZ = dir.z;
@@ -228,8 +261,10 @@ export function spawnExplosionDebris(
       fb.vz = radialZ * horiz;
     }
 
-    fb.rotSpeedX = (Math.random() - 0.5) * 11;
-    fb.rotSpeedZ = (Math.random() - 0.5) * 11;
+    // Faster debris tumbles harder; the random sign keeps every piece spinning differently.
+    const spin = THREE.MathUtils.clamp(impulse * 0.85, 6, 22);
+    fb.rotSpeedX = (Math.random() - 0.5) * spin;
+    fb.rotSpeedZ = (Math.random() - 0.5) * spin;
 
     falling.push(fb);
 
@@ -284,12 +319,13 @@ export function applyExplosionForce(
     const d2 = dx * dx + dy * dy + dz * dz;
     if (d2 < r2 && d2 > 0.01) {
       const dist = Math.sqrt(d2);
-      const proximity = 1 - dist / radius;
-      const shaped = proximity * proximity;
+      const proximity = THREE.MathUtils.clamp(1 - dist / radius, 0, 1);
+      const falloff = proximity * proximity * (0.35 + proximity * 0.65);
+      const exposure = blastExposure(world, fb.x, fb.y, fb.z);
       const mat = getBlockMat(fb.blockType);
       const resistance = Math.max(0.45, mat.pushResistance * 0.6);
-      const impulse = (force * (0.25 + shaped * 1.05)) / (fb.weight * resistance);
-      const dir = shapeExplosionDirection(world, fb.x, fb.y, fb.z, dx, dy, dz, dist, radius, shaped, fb.scale);
+      const impulse = (force * (0.12 + falloff * 1.25)) / (fb.weight * resistance) * exposure;
+      const dir = shapeExplosionDirection(world, fb.x, fb.y, fb.z, dx, dy, dz, dist, radius, proximity, exposure, fb.scale);
       const radialX = dir.x;
       const radialY = dir.y;
       const radialZ = dir.z;
@@ -311,18 +347,19 @@ export function applyExplosionForce(
     if (d2 >= r2) continue;
 
     const dist = Math.sqrt(Math.max(d2, 0.0001));
-    const proximity = 1 - dist / radius;
-    const shaped = proximity * proximity;
+    const proximity = THREE.MathUtils.clamp(1 - dist / radius, 0, 1);
+    const falloff = proximity * proximity * (0.35 + proximity * 0.65);
+    const exposure = blastExposure(world, s.x, s.y, s.z);
     const mat = getBlockMat(s.blockType);
     const resistance = Math.max(0.45, mat.pushResistance * 0.6);
     const baseWeight = mat.weight * (0.16 + s.scale * s.scale * s.scale * 0.9);
-    const impulse = (force * (0.25 + shaped * 1.05)) / (baseWeight * resistance);
+    const impulse = (force * (0.12 + falloff * 1.25)) / (baseWeight * resistance) * exposure;
 
     let radialX = 0;
     let radialY = 0;
     let radialZ = 0;
     if (dist > 0.01) {
-      const dir = shapeExplosionDirection(world, s.x, s.y, s.z, dx, dy, dz, dist, radius, shaped, s.scale);
+      const dir = shapeExplosionDirection(world, s.x, s.y, s.z, dx, dy, dz, dist, radius, proximity, exposure, s.scale);
       radialX = dir.x;
       radialY = dir.y;
       radialZ = dir.z;
