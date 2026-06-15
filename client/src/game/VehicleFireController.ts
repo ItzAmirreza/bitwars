@@ -327,10 +327,12 @@ export class VehicleFireController {
       }
     }
 
-    // Player hit detection
-    const hitPlayerIds = ctx.weapons.raycastPlayers(origin, dir, wep.maxRange);
+    // Player/vehicle hit detection — never past a solid block in the way
+    // (no shooting through walls; server enforces the authoritative check).
+    const losRange = hit ? Math.min(wep.maxRange, hit.dist) : wep.maxRange;
+    const hitPlayerIds = ctx.weapons.raycastPlayers(origin, dir, losRange);
     const hitVehicleIds = ctx.weapons
-      .raycastVehicles(origin, dir, wep.maxRange)
+      .raycastVehicles(origin, dir, losRange)
       .filter((id) => id !== ctx.mountedVehicleId);
 
     const isCram = resolvedIdx === 4;
