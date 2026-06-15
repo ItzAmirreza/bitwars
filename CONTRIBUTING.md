@@ -22,6 +22,19 @@ Contributors are on Windows, macOS, and Linux — all three work. You need three
 | [Rust](https://rustup.rs) (stable) | Building the SpacetimeDB server module to WASM | Install via rustup, then `rustup target add wasm32-unknown-unknown` |
 | [SpacetimeDB CLI](https://spacetimedb.com/install) | Running your own local game database | macOS/Linux: `curl -sSf https://install.spacetimedb.com \| sh` — Windows: see the install page |
 
+### Quick start (one command)
+
+With those three tools installed, you can skip the manual steps below — one script runs the entire local stack (local SpacetimeDB on a free port, module publish, binding regeneration, and the client) and stops all of it when you press **`Ctrl+C`**:
+
+```bash
+# from the repo root — pick the one for your OS
+./scripts/run-local.ps1          # Windows  (or: powershell -ExecutionPolicy Bypass -File scripts\run-local.ps1)
+./scripts/run-local.sh           # Linux
+./scripts/run-local-macos.sh     # macOS
+```
+
+The script injects the local connection settings as environment variables (Vite prioritizes these over `.env` files), so it works without a `.env.local` and never overwrites one you already have. The manual steps below explain what it does and are still the way to go when you only need one piece (e.g. just the client against an already-running server).
+
 ### 1. Clone and install client dependencies
 
 ```bash
