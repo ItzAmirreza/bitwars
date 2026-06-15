@@ -305,9 +305,12 @@ export class WeaponSystem {
       }
     }
 
-    // Player hit detection: AABB raycast against other players
-    const hitPlayerIds = this.raycastPlayers(origin, dir, this.weapon.range);
-    const hitVehicleIds = this.raycastVehicles(origin, dir, this.weapon.range);
+    // Player hit detection: AABB raycast against other players, but never past
+    // a solid block in the way (no shooting through walls — server enforces the
+    // authoritative version of this same check).
+    const losRange = hit ? Math.min(this.weapon.range, hit.dist) : this.weapon.range;
+    const hitPlayerIds = this.raycastPlayers(origin, dir, losRange);
+    const hitVehicleIds = this.raycastVehicles(origin, dir, losRange);
 
     return {
       weaponIndex: this.currentWeapon,
@@ -383,12 +386,16 @@ export class WeaponSystem {
         }
       }
 
+      // Pellets can't pass through a block they hit — clamp the entity scan to
+      // the block distance so pellets don't register hits through walls.
+      const pelletRange = hit ? Math.min(range, hit.dist) : range;
+
       // Player hits — duplicates are intentional (multi-pellet damage)
-      const playerHits = this.raycastPlayers(origin, pelletDir, range);
+      const playerHits = this.raycastPlayers(origin, pelletDir, pelletRange);
       allHitPlayerIds.push(...playerHits);
 
       // Vehicle hits — duplicates are intentional
-      const vehicleHits = this.raycastVehicles(origin, pelletDir, range);
+      const vehicleHits = this.raycastVehicles(origin, pelletDir, pelletRange);
       allHitVehicleIds.push(...vehicleHits);
     }
 
@@ -541,7 +548,7 @@ export class WeaponSystem {
     origin: THREE.Vector3,
     direction: THREE.Vector3,
     maxDist: number,
-  ): { x: number; y: number; z: number } | null {
+  ): { x: number; y: number; z: number; dist: number } | null {
     let x = Math.floor(origin.x);
     let y = Math.floor(origin.y);
     let z = Math.floor(origin.z);
@@ -562,7 +569,7 @@ export class WeaponSystem {
 
     while (dist < maxDist) {
       const block = this.world.getBlock(x, y, z);
-      if (block !== 0) return { x, y, z };
+      if (block !== 0) return { x, y, z, dist };
 
       if (tMaxX < tMaxY) {
         if (tMaxX < tMaxZ) { x += stepX; dist = tMaxX; tMaxX += tDeltaX; }

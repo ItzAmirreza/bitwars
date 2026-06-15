@@ -126,6 +126,7 @@ pub fn fire_weapon(
     // Vehicle hits (with extra direction check for infantry)
     let mut first_vehicle_hit_pos: Option<Vec3> = None;
     let mut seen_vehicle_hits = HashSet::new();
+    let mut vehicle_los_cache = LosChunkCache::new();
     for vehicle_id in &hit_vehicles {
         if !seen_vehicle_hits.insert(*vehicle_id) {
             continue;
@@ -166,6 +167,11 @@ pub fn fire_weapon(
             y: origin.y + normalized_dir.y * t,
             z: origin.z + normalized_dir.z * t,
         };
+
+        // Solid blocks between the muzzle and the vehicle surface stop the shot.
+        if !segment_unobstructed(ctx, &origin, &hit_pos, &mut vehicle_los_cache) {
+            continue;
+        }
 
         if first_vehicle_hit_pos.is_none() {
             first_vehicle_hit_pos = Some(hit_pos.clone());

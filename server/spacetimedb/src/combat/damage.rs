@@ -1,7 +1,7 @@
 // ── Damage Resolution ──
 // Shared combat helpers: hitscan, splash, kill tracking, block destruction.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use spacetimedb::{Identity, ReducerContext, Table};
 
@@ -9,6 +9,134 @@ use crate::constants::*;
 use crate::helpers::*;
 use crate::tables::*;
 use crate::types::*;
+
+/// Decoded-chunk cache used by line-of-sight raycasts to avoid re-decoding the
+/// same chunk for every voxel/sample along a shot.
+pub type LosChunkCache = HashMap<u32, [u8; 4096]>;
+
+/// Voxel DDA line-of-sight test, mirroring the client's `raycastVoxels` walk.
+/// Returns `true` when the straight segment `from`→`to` is not interrupted by a
+/// solid (non-AIR) voxel. The voxels containing the two endpoints are not
+/// counted, so the shooter's own cell and the target's cell never spuriously
+/// block the shot.
+pub fn segment_unobstructed(
+    ctx: &ReducerContext,
+    from: &Vec3,
+    to: &Vec3,
+    chunk_cache: &mut LosChunkCache,
+) -> bool {
+    use crate::chunks::get_block_type_generated_cached;
+    use crate::worldgen::AIR;
+
+    let dx = to.x - from.x;
+    let dy = to.y - from.y;
+    let dz = to.z - from.z;
+    let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+    if dist < 1e-4 {
+        return true;
+    }
+
+    let nx = dx / dist;
+    let ny = dy / dist;
+    let nz = dz / dist;
+
+    let mut vx = from.x.floor() as i32;
+    let mut vy = from.y.floor() as i32;
+    let mut vz = from.z.floor() as i32;
+
+    let tvx = to.x.floor() as i32;
+    let tvy = to.y.floor() as i32;
+    let tvz = to.z.floor() as i32;
+
+    let step_x = if nx >= 0.0 { 1 } else { -1 };
+    let step_y = if ny >= 0.0 { 1 } else { -1 };
+    let step_z = if nz >= 0.0 { 1 } else { -1 };
+
+    let t_delta_x = if nx != 0.0 { (1.0 / nx).abs() } else { f32::INFINITY };
+    let t_delta_y = if ny != 0.0 { (1.0 / ny).abs() } else { f32::INFINITY };
+    let t_delta_z = if nz != 0.0 { (1.0 / nz).abs() } else { f32::INFINITY };
+
+    let mut t_max_x = if nx != 0.0 {
+        (if step_x > 0 { vx as f32 + 1.0 - from.x } else { from.x - vx as f32 }) / nx.abs()
+    } else {
+        f32::INFINITY
+    };
+    let mut t_max_y = if ny != 0.0 {
+        (if step_y > 0 { vy as f32 + 1.0 - from.y } else { from.y - vy as f32 }) / ny.abs()
+    } else {
+        f32::INFINITY
+    };
+    let mut t_max_z = if nz != 0.0 {
+        (if step_z > 0 { vz as f32 + 1.0 - from.z } else { from.z - vz as f32 }) / nz.abs()
+    } else {
+        f32::INFINITY
+    };
+
+    // Upper bound on voxels a straight segment of this length can cross
+    // (manhattan worst case ≈ dist·√3); padded for float slop.
+    let max_steps = (dist as i32 + 2) * 3 + 3;
+    for _ in 0..max_steps {
+        // Advance to the next voxel along the nearest axis boundary.
+        let t_enter = if t_max_x < t_max_y {
+            if t_max_x < t_max_z {
+                vx += step_x;
+                let t = t_max_x;
+                t_max_x += t_delta_x;
+                t
+            } else {
+                vz += step_z;
+                let t = t_max_z;
+                t_max_z += t_delta_z;
+                t
+            }
+        } else if t_max_y < t_max_z {
+            vy += step_y;
+            let t = t_max_y;
+            t_max_y += t_delta_y;
+            t
+        } else {
+            vz += step_z;
+            let t = t_max_z;
+            t_max_z += t_delta_z;
+            t
+        };
+
+        // Reached the target point or its voxel — the rest of the path is clear.
+        if t_enter >= dist || (vx == tvx && vy == tvy && vz == tvz) {
+            return true;
+        }
+
+        if matches!(
+            get_block_type_generated_cached(ctx, vx, vy, vz, chunk_cache),
+            Some(bt) if bt != AIR
+        ) {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// True if a straight ray from `origin` reaches any of a player's body sample
+/// points without passing through a solid voxel. `player_pos.y` is the eye
+/// level; sampling the eye, torso and lower legs lets a partially-exposed
+/// target still be hit while a fully-walled-off one is rejected.
+pub fn player_has_line_of_sight(
+    ctx: &ReducerContext,
+    origin: &Vec3,
+    player_pos: &Vec3,
+    chunk_cache: &mut LosChunkCache,
+) -> bool {
+    const SAMPLE_Y_OFFSETS: [f32; 3] = [0.0, -0.8, -1.5];
+    SAMPLE_Y_OFFSETS.iter().any(|dy| {
+        let sample = Vec3 {
+            x: player_pos.x,
+            y: player_pos.y + dy,
+            z: player_pos.z,
+        };
+        segment_unobstructed(ctx, origin, &sample, chunk_cache)
+    })
+}
 
 /// Apply hitscan damage to players (direction-validated).
 pub fn apply_hitscan_player_damage(
@@ -22,6 +150,7 @@ pub fn apply_hitscan_player_damage(
     max_range: f32,
     weapon: u8,
 ) {
+    let mut los_cache = LosChunkCache::new();
     for target_id in hit_players {
         if *target_id == sender {
             continue;
@@ -56,6 +185,13 @@ pub fn apply_hitscan_player_damage(
                         continue;
                     }
                 }
+            }
+
+            // Reject shots that have to pass through solid blocks to reach the
+            // target — the world is server-authoritative, so a wall stops a
+            // bullet regardless of what the client reported.
+            if !player_has_line_of_sight(ctx, origin, &target.pos, &mut los_cache) {
+                continue;
             }
 
             let attack_mult = crate::abilities::damage_multiplier(ctx, sender);
@@ -162,6 +298,7 @@ pub fn apply_hitscan_vehicle_damage(
 ) -> Option<Vec3> {
     let mut first_hit_pos: Option<Vec3> = None;
     let mut seen = HashSet::new();
+    let mut los_cache = LosChunkCache::new();
 
     for &target_vehicle_id in hit_vehicles {
         if target_vehicle_id == self_vehicle_id {
@@ -193,6 +330,11 @@ pub fn apply_hitscan_vehicle_damage(
             y: origin.y + normalized_dir.y * t,
             z: origin.z + normalized_dir.z * t,
         };
+
+        // Solid blocks between the muzzle and the vehicle surface stop the shot.
+        if !segment_unobstructed(ctx, origin, &hit_pos, &mut los_cache) {
+            continue;
+        }
 
         if first_hit_pos.is_none() {
             first_hit_pos = Some(hit_pos.clone());
