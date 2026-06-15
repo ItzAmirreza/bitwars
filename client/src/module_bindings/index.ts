@@ -349,10 +349,8 @@ const tablesSchema = __schema({
       { accessor: 'chunk_id', name: 'world_chunk_chunk_id_idx_btree', algorithm: 'btree', columns: [
         'chunkId',
       ] },
-      { accessor: 'idx_world_chunk_cx', name: 'world_chunk_cx_idx_btree', algorithm: 'btree', columns: [
+      { accessor: 'idx_world_chunk_cx_cz', name: 'world_chunk_cx_cz_idx_btree', algorithm: 'btree', columns: [
         'cx',
-      ] },
-      { accessor: 'idx_world_chunk_cz', name: 'world_chunk_cz_idx_btree', algorithm: 'btree', columns: [
         'cz',
       ] },
     ],
