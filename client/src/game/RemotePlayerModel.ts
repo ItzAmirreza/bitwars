@@ -98,28 +98,55 @@ export function drawNametag(
 
   const w = canvas.width;
   const h = canvas.height;
-  const displayName = username.length > 16 ? `${username.slice(0, 16)}...` : username;
   ctx2d.clearRect(0, 0, w, h);
   ctx2d.imageSmoothingEnabled = false;
-
-  const bgX = 16;
-  const bgY = 6;
-  const bgW = w - 32;
-  const bgH = h - 12;
-  ctx2d.fillStyle = 'rgba(6, 12, 22, 0.9)';
-  ctx2d.fillRect(bgX, bgY, bgW, bgH);
-
-  ctx2d.strokeStyle = '#76ff03';
-  ctx2d.lineWidth = 3;
-  ctx2d.strokeRect(bgX, bgY, bgW, bgH);
-
-  ctx2d.font = 'bold 24px "Press Start 2P", monospace';
   ctx2d.textAlign = 'center';
   ctx2d.textBaseline = 'middle';
-  ctx2d.fillStyle = '#000000';
-  ctx2d.fillText(displayName, w / 2 + 2, h / 2 + 2);
+  ctx2d.lineJoin = 'round';
+  ctx2d.miterLimit = 2;
+
+  const trimmed = username.trim();
+  const displayName = (trimmed.length > 16 ? `${trimmed.slice(0, 16)}…` : trimmed || 'PLAYER').toUpperCase();
+
+  // Auto-fit the pixel font to the available width so long names stay on one line.
+  const maxTextW = w - h * 0.9;
+  let fontSize = Math.round(h * 0.4);
+  for (; fontSize > 12; fontSize -= 2) {
+    ctx2d.font = `${fontSize}px "Press Start 2P", monospace`;
+    if (ctx2d.measureText(displayName).width <= maxTextW) break;
+  }
+
+  const textW = ctx2d.measureText(displayName).width;
+  const plateH = Math.round(fontSize * 1.7);
+  const plateW = Math.min(w - 8, textW + fontSize * 1.6);
+  const plateX = Math.round((w - plateW) / 2);
+  const plateY = Math.round((h - plateH) / 2);
+  const cx = w / 2;
+  const cy = h / 2 + Math.round(fontSize * 0.04);
+
+  // Clean dark plate — hard square corners, design-compliant (no blur, no radius).
+  ctx2d.fillStyle = 'rgba(8, 11, 18, 0.72)';
+  ctx2d.fillRect(plateX, plateY, plateW, plateH);
+  // Hard border.
+  ctx2d.strokeStyle = 'rgba(20, 26, 38, 1)';
+  ctx2d.lineWidth = Math.max(4, Math.round(h * 0.03));
+  ctx2d.strokeRect(
+    plateX + ctx2d.lineWidth / 2,
+    plateY + ctx2d.lineWidth / 2,
+    plateW - ctx2d.lineWidth,
+    plateH - ctx2d.lineWidth,
+  );
+  // Lime accent strip along the top edge for identity.
   ctx2d.fillStyle = '#76ff03';
-  ctx2d.fillText(displayName, w / 2, h / 2);
+  ctx2d.fillRect(plateX, plateY, plateW, Math.max(3, Math.round(h * 0.025)));
+
+  // Name: thick black outline for readability against any backdrop, lime fill.
+  ctx2d.font = `${fontSize}px "Press Start 2P", monospace`;
+  ctx2d.strokeStyle = '#000000';
+  ctx2d.lineWidth = Math.max(4, Math.round(fontSize * 0.36));
+  ctx2d.strokeText(displayName, cx, cy);
+  ctx2d.fillStyle = '#caffa0';
+  ctx2d.fillText(displayName, cx, cy);
 
   texture.needsUpdate = true;
 }
@@ -152,99 +179,110 @@ export function createRemotePlayerModel(presetValue: number): RemotePlayerRig {
   const model = new THREE.Group();
   model.scale.setScalar(REMOTE_PLAYER_MODEL_SCALE);
 
-  const bodyMat = new THREE.MeshLambertMaterial({ color: preset.bodyColor });
-  const vestMat = new THREE.MeshLambertMaterial({ color: preset.vestColor });
-  const headMat = new THREE.MeshLambertMaterial({ color: preset.headColor });
+  // Material set — distinct shades give the silhouette depth under Lambert lighting.
+  // Every decorative box below is deliberately kept PROUD of its parent surface
+  // (never coplanar) so adjacent faces don't z-fight ("two things overlayed").
+  const skinMat = new THREE.MeshLambertMaterial({ color: preset.headColor });
+  const clothMat = new THREE.MeshLambertMaterial({ color: preset.bodyColor });
+  const armorMat = new THREE.MeshLambertMaterial({ color: preset.vestColor });
+  const helmetMat = new THREE.MeshLambertMaterial({
+    color: new THREE.Color(preset.vestColor).multiplyScalar(1.2).getHex(),
+  });
   const visorMat = new THREE.MeshLambertMaterial({
     color: preset.visorColor,
     emissive: preset.visorColor,
-    emissiveIntensity: 0.4,
+    emissiveIntensity: 0.55,
   });
   const accentMat = new THREE.MeshLambertMaterial({
     color: preset.accentColor,
     emissive: preset.accentColor,
-    emissiveIntensity: 0.2,
+    emissiveIntensity: 0.18,
   });
-  const eyeWhiteMat = new THREE.MeshLambertMaterial({ color: 0xf2f4ff });
-  const eyeDarkMat = new THREE.MeshLambertMaterial({ color: 0x10131c });
-  const browMat = new THREE.MeshLambertMaterial({
-    color: new THREE.Color(preset.headColor).multiplyScalar(0.72).getHex(),
+  const pantsMat = new THREE.MeshLambertMaterial({
+    color: new THREE.Color(preset.bodyColor).multiplyScalar(0.62).getHex(),
   });
-  const legMat = new THREE.MeshLambertMaterial({
-    color: new THREE.Color(preset.bodyColor).multiplyScalar(0.68).getHex(),
+  const pouchMat = new THREE.MeshLambertMaterial({
+    color: new THREE.Color(preset.vestColor).multiplyScalar(0.7).getHex(),
   });
   const bootMat = new THREE.MeshLambertMaterial({
-    color: new THREE.Color(preset.vestColor).multiplyScalar(0.82).getHex(),
+    color: new THREE.Color(preset.vestColor).multiplyScalar(0.85).getHex(),
   });
+  const gloveMat = new THREE.MeshLambertMaterial({ color: 0x14161f });
 
   const root = new THREE.Group();
   root.name = 'remote-player-root';
   model.add(root);
 
-  // Pelvis / hips
-  addBox(root, [0.74, 0.26, 0.4], vestMat, [0, 0.96, 0]);
-  addBox(root, [0.78, 0.1, 0.42], accentMat, [0, 1.06, 0]);
+  // ---- Pelvis / hips ----
+  addBox(root, [0.7, 0.3, 0.42], armorMat, [0, 0.95, 0]);
+  addBox(root, [0.76, 0.12, 0.46], accentMat, [0, 1.07, 0]);        // belt (wider → proud sides)
+  addBox(root, [0.16, 0.1, 0.14], accentMat, [0, 1.07, -0.27]);     // buckle, proud of belt front
 
   const upperBody = new THREE.Group();
   upperBody.position.set(0, 1.22, 0);
   root.add(upperBody);
-  // Broad blocky chest + body armour
-  addBox(upperBody, [0.86, 0.72, 0.46], vestMat, [0, 0.04, 0]);
-  addBox(upperBody, [0.9, 0.18, 0.48], accentMat, [0, 0.22, 0.01]);
-  addBox(upperBody, [0.78, 0.2, 0.42], bodyMat, [0, -0.34, 0]);
-  // Chunky shoulder pads
-  addBox(upperBody, [0.26, 0.24, 0.38], bodyMat, [-0.46, 0.28, 0]);
-  addBox(upperBody, [0.26, 0.24, 0.38], bodyMat, [0.46, 0.28, 0]);
+  // ---- Torso: chest plate + abdomen ----
+  addBox(upperBody, [0.84, 0.66, 0.46], armorMat, [0, 0.08, 0]);
+  addBox(upperBody, [0.7, 0.2, 0.42], clothMat, [0, -0.3, 0]);
+  // Collar / neck guard — protrudes forward of the chest face
+  addBox(upperBody, [0.5, 0.14, 0.06], accentMat, [0, 0.36, -0.25]);
+  // Sternum strap down the centre
+  addBox(upperBody, [0.08, 0.4, 0.06], accentMat, [0, 0.06, -0.25]);
+  // Vest pouches — clearly standing off the chest
+  addBox(upperBody, [0.2, 0.22, 0.1], pouchMat, [-0.17, -0.04, -0.26]);
+  addBox(upperBody, [0.2, 0.22, 0.1], pouchMat, [0.17, -0.04, -0.26]);
+  // Chunky shoulder pads sitting above the arm sockets
+  addBox(upperBody, [0.32, 0.2, 0.42], armorMat, [-0.46, 0.32, 0]);
+  addBox(upperBody, [0.32, 0.2, 0.42], armorMat, [0.46, 0.32, 0]);
   // Neck linking chest to head
-  addBox(upperBody, [0.3, 0.2, 0.3], headMat, [0, 0.52, 0]);
+  addBox(upperBody, [0.28, 0.18, 0.28], skinMat, [0, 0.5, 0]);
 
   const head = new THREE.Group();
   head.position.set(0, 0.74, 0);
   upperBody.add(head);
-  // Big readable blocky head (skin)
-  addBox(head, [0.66, 0.66, 0.66], headMat, [0, 0.02, 0]);
-  // Helmet shell over the top + back of the head
-  addBox(head, [0.72, 0.26, 0.72], vestMat, [0, 0.32, 0.03]);
-  addBox(head, [0.74, 0.14, 0.24], vestMat, [0, 0.16, -0.36]); // front brim
-  // Goggles pushed up on the helmet (keeps a little sci-fi accent, off the face)
-  addBox(head, [0.5, 0.1, 0.08], visorMat, [0, 0.2, -0.36]);
-  // Face: brow, two eyes (whites + pupils), chin strap
-  addBox(head, [0.5, 0.06, 0.06], browMat, [0, 0.16, -0.34]);
-  addBox(head, [0.15, 0.15, 0.07], eyeWhiteMat, [-0.16, 0.04, -0.34]);
-  addBox(head, [0.15, 0.15, 0.07], eyeWhiteMat, [0.16, 0.04, -0.34]);
-  addBox(head, [0.08, 0.1, 0.06], eyeDarkMat, [-0.16, 0.02, -0.36]);
-  addBox(head, [0.08, 0.1, 0.06], eyeDarkMat, [0.16, 0.02, -0.36]);
-  addBox(head, [0.4, 0.07, 0.06], accentMat, [0, -0.22, -0.33]); // chin strap
+  // Skull (skin) + jaw
+  addBox(head, [0.6, 0.56, 0.58], skinMat, [0, 0.0, 0]);
+  addBox(head, [0.48, 0.16, 0.5], skinMat, [0, -0.32, 0.02]);
+  // Combat helmet: dome (wider than head → clean overhang) + forward peak
+  addBox(head, [0.7, 0.32, 0.7], helmetMat, [0, 0.28, 0.01]);
+  addBox(head, [0.66, 0.1, 0.2], helmetMat, [0, 0.1, -0.34]);       // brim peak over the eyes
+  // Ear / side protection — protrudes past the head sides
+  addBox(head, [0.12, 0.3, 0.42], armorMat, [-0.34, 0.04, 0.02]);
+  addBox(head, [0.12, 0.3, 0.42], armorMat, [0.34, 0.04, 0.02]);
+  // Single clean glowing visor band, sitting proud of the face (no overlapping eye boxes)
+  addBox(head, [0.5, 0.16, 0.06], visorMat, [0, -0.02, -0.31]);
+  // Breather / chin guard, proud of the jaw
+  addBox(head, [0.22, 0.12, 0.1], accentMat, [0, -0.27, -0.22]);
 
   const leftArm = new THREE.Group();
-  leftArm.position.set(-0.5, 0.26, 0.02);
+  leftArm.position.set(-0.5, 0.28, 0.02);
   upperBody.add(leftArm);
-  addBox(leftArm, [0.3, 0.18, 0.32], bodyMat, [0, -0.02, 0]);
-  addBox(leftArm, [0.28, 0.46, 0.28], bodyMat, [0, -0.32, 0]);
-  addBox(leftArm, [0.26, 0.36, 0.26], vestMat, [0, -0.7, 0.02]);
-  addBox(leftArm, [0.18, 0.18, 0.22], bootMat, [0, -0.96, -0.02]);
+  addBox(leftArm, [0.26, 0.42, 0.3], clothMat, [0, -0.22, 0]);      // upper arm
+  addBox(leftArm, [0.24, 0.36, 0.26], armorMat, [0, -0.58, 0.02]);  // forearm guard
+  addBox(leftArm, [0.2, 0.18, 0.24], gloveMat, [0, -0.8, 0.0]);     // glove
 
   const rightArm = new THREE.Group();
-  rightArm.position.set(0.5, 0.26, 0.02);
+  rightArm.position.set(0.5, 0.28, 0.02);
   upperBody.add(rightArm);
-  addBox(rightArm, [0.3, 0.18, 0.32], bodyMat, [0, -0.02, 0]);
-  addBox(rightArm, [0.28, 0.46, 0.28], bodyMat, [0, -0.32, 0]);
-  addBox(rightArm, [0.26, 0.36, 0.26], vestMat, [0, -0.7, 0.02]);
-  addBox(rightArm, [0.18, 0.18, 0.22], bootMat, [0, -0.96, -0.02]);
+  addBox(rightArm, [0.26, 0.42, 0.3], clothMat, [0, -0.22, 0]);
+  addBox(rightArm, [0.24, 0.36, 0.26], armorMat, [0, -0.58, 0.02]);
+  addBox(rightArm, [0.2, 0.18, 0.24], gloveMat, [0, -0.8, 0.0]);
 
   const leftLeg = new THREE.Group();
-  leftLeg.position.set(-0.22, 0.96, 0);
+  leftLeg.position.set(-0.2, 0.96, 0);
   root.add(leftLeg);
-  addBox(leftLeg, [0.34, 0.46, 0.34], legMat, [0, -0.23, 0]);
-  addBox(leftLeg, [0.32, 0.42, 0.32], legMat, [0, -0.66, 0]);
-  addBox(leftLeg, [0.38, 0.18, 0.48], bootMat, [0, -0.88, -0.03]);
+  addBox(leftLeg, [0.32, 0.46, 0.36], pantsMat, [0, -0.24, 0]);     // thigh
+  addBox(leftLeg, [0.28, 0.1, 0.12], accentMat, [0, -0.46, -0.2]);  // knee pad, proud of shin front
+  addBox(leftLeg, [0.3, 0.42, 0.32], pantsMat, [0, -0.66, 0]);      // shin
+  addBox(leftLeg, [0.36, 0.2, 0.5], bootMat, [0, -0.88, -0.05]);    // boot
 
   const rightLeg = new THREE.Group();
-  rightLeg.position.set(0.22, 0.96, 0);
+  rightLeg.position.set(0.2, 0.96, 0);
   root.add(rightLeg);
-  addBox(rightLeg, [0.34, 0.46, 0.34], legMat, [0, -0.23, 0]);
-  addBox(rightLeg, [0.32, 0.42, 0.32], legMat, [0, -0.66, 0]);
-  addBox(rightLeg, [0.38, 0.18, 0.48], bootMat, [0, -0.88, -0.03]);
+  addBox(rightLeg, [0.32, 0.46, 0.36], pantsMat, [0, -0.24, 0]);
+  addBox(rightLeg, [0.28, 0.1, 0.12], accentMat, [0, -0.46, -0.2]);
+  addBox(rightLeg, [0.3, 0.42, 0.32], pantsMat, [0, -0.66, 0]);
+  addBox(rightLeg, [0.36, 0.2, 0.5], bootMat, [0, -0.88, -0.05]);
 
   const gunMount = new THREE.Group();
   const defaultHoldPose = getRemoteWeaponHoldPose(0);

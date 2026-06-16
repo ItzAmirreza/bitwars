@@ -298,8 +298,8 @@ export class RemotePlayerManager {
       setRemoteWeaponModel(group, normalizedWeapon, normalizedPreset);
 
       const canvas = document.createElement('canvas');
-      canvas.width = 512;
-      canvas.height = 128;
+      canvas.width = 1024;
+      canvas.height = 256;
       const texture = new THREE.CanvasTexture(canvas);
       texture.minFilter = THREE.LinearFilter;
       texture.magFilter = THREE.LinearFilter;
@@ -308,10 +308,11 @@ export class RemotePlayerManager {
         map: texture,
         transparent: true,
         depthTest: false,
+        depthWrite: false,
       }));
       sprite.name = 'remote-player-nametag';
       sprite.position.y = REMOTE_PLAYER_NAMETAG_Y;
-      sprite.scale.set(2.8, 0.7, 1);
+      sprite.scale.set(3.0, 0.75, 1);
       group.add(sprite);
 
       const runtime = this.getRuntime(group);
