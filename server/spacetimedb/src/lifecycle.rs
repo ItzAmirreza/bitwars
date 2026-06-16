@@ -12,7 +12,7 @@ use crate::matchmaking::{schedule_next_match_tick, set_waiting_match_state};
 use crate::tables::*;
 use crate::types::*;
 use crate::vehicles::{
-    spawn_aa_at_outposts, spawn_apcs_on_flat_ground, spawn_jets_at_airstrips,
+    spawn_aa_at_outposts, spawn_hovers_on_flat_ground, spawn_jets_at_airstrips,
     spawn_sandbox_helicopters,
 };
 
@@ -115,7 +115,7 @@ pub fn init(ctx: &ReducerContext) {
     spawn_sandbox_helicopters(ctx);
     spawn_jets_at_airstrips(ctx, seed);
     spawn_aa_at_outposts(ctx, seed);
-    spawn_apcs_on_flat_ground(ctx);
+    spawn_hovers_on_flat_ground(ctx);
 
     abilities::spawning::spawn_initial_ability_pickups(ctx, seed);
     ctx.db.ability_tick().insert(AbilityTick {

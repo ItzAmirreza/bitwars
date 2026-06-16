@@ -52,7 +52,7 @@
     "Helicopter": 0,
     "FighterJet": 1,
     "AntiAir": 2,
-    "APC": 3
+    "Hover": 3
   },
 
   "vehicleTickIntervalMs": 33,
@@ -362,31 +362,34 @@
     }
   },
 
-  "apc": {
-    "healthMax": 1800,
-    "scale": 2.5,
-    "mountRange": 6.0,
-    "minAltitude": 0.0,
+  "hover": {
+    "healthMax": 480,
+    "scale": 1.0,
+    "mountRange": 5.0,
+    "hoverHeight": 1.7,
+    "minClearance": 0.7,
     "maxAltitude": 60.0,
-    "cruiseSpeed": 32.0,
-    "strafeSpeed": 0.0,
-    "liftSpeed": 0.0,
-    "maxYawRate": 2.5,
-    "pilotSeatHeight": 2.8,
-    "dragPiloted": 0.985,
-    "dragUnpiloted": 0.92,
-    "horizBlend": 0.15,
-    "gravity": 28.0,
-    "collisionSpeedRetain": 0.97,
+    "cruiseSpeed": 46.0,
+    "strafeSpeed": 20.0,
+    "maxYawRate": 3.2,
+    "pilotSeatHeight": 1.35,
+    "dragPiloted": 0.9,
+    "dragUnpiloted": 0.86,
+    "horizBlend": 0.22,
+    "hoverStiffness": 9.0,
+    "hoverDamping": 0.8,
+    "roughnessProbe": 4.0,
+    "roughnessPenalty": 0.05,
+    "minSpeedFactor": 0.55,
     "hitbox": {
-      "centerY": 1.8,
-      "halfX": 3.5,
-      "halfY": 1.6,
-      "halfZ": 5.5
+      "centerY": 1.0,
+      "halfX": 1.4,
+      "halfY": 0.9,
+      "halfZ": 2.6
     },
     "camera": {
-      "distance": 18,
-      "height": 6.0,
+      "distance": 12,
+      "height": 4.2,
       "pitchMin": -0.5,
       "pitchMax": 0.4
     }

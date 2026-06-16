@@ -4,6 +4,9 @@ export interface CrosshairProps {
   hitMarker: boolean;
   hitMarkerType: string;
   mountedVehicleName: string | null;
+  /** Which reticle to draw: the vehicle weapon reticle, the infantry crosshair,
+   *  or nothing (e.g. the hover bike driver, who has no weapon). */
+  reticle: 'vehicle' | 'infantry' | 'none';
   vehicleWeapon: number;
   vehicleWeaponColor?: string;
   damageIndicators: DamageIndicatorState[];
@@ -98,6 +101,7 @@ export function Crosshair({
   hitMarker,
   hitMarkerType,
   mountedVehicleName,
+  reticle,
   vehicleWeapon,
   vehicleWeaponColor,
   damageIndicators,
@@ -106,7 +110,9 @@ export function Crosshair({
 }: CrosshairProps) {
   // Dynamic accuracy bloom: bars push outward from center while firing/moving.
   const gap = Math.max(0, Math.min(1, crosshairSpread)) * 9;
-  const isAirMissile = mountedVehicleName === 'Fighter Jet' && vehicleWeapon === 2;
+  const showVehicleReticle = reticle === 'vehicle';
+  const showInfantryCrosshair = reticle === 'infantry';
+  const isAirMissile = showVehicleReticle && mountedVehicleName === 'Fighter Jet' && vehicleWeapon === 2;
   const missileColor = '#00e5ff';
 
   if (sniperScoped) {
@@ -198,7 +204,7 @@ export function Crosshair({
         );
       })}
 
-      {mountedVehicleName && isAirMissile ? (
+      {isAirMissile ? (
         /* Air Missile targeting reticle - pixel style */
         <div className="relative" style={{ width: '160px', height: '160px' }}>
           <svg width="160" height="160" viewBox="0 0 160 160" fill="none" style={{ position: 'absolute', top: 0, left: 0 }}>
@@ -235,7 +241,7 @@ export function Crosshair({
             </div>
           )}
         </div>
-      ) : mountedVehicleName ? (
+      ) : showVehicleReticle ? (
         /* Vehicle reticle - pixel style */
         <div className="relative" style={{ width: '64px', height: '64px' }}>
           <svg width="64" height="64" viewBox="0 0 64 64" fill="none" style={{ position: 'absolute', top: 0, left: 0 }}>
@@ -249,7 +255,7 @@ export function Crosshair({
           </svg>
           {hitMarker && <HitMarkerX type={hitMarkerType} />}
         </div>
-      ) : (
+      ) : showInfantryCrosshair ? (
         /* Infantry crosshair - chunky pixel style (bars bloom outward with spread) */
         <div className="relative" style={{ width: '32px', height: '32px' }}>
           {/* Top */}
@@ -283,7 +289,7 @@ export function Crosshair({
           }} />
           {hitMarker && <HitMarkerX type={hitMarkerType} />}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

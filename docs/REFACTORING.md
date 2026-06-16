@@ -90,7 +90,6 @@ The hand-written codebase is **66,569 lines of TS/TSX/Rust across 209 files** (`
 | 516 | `client/src/screens/PerfPanel.tsx` | Exception (debug tooling) |
 | 510 | `client/src/game/SkyColors.ts` | P1.4 (data tables otherwise OK) |
 | 506 | `client/src/game/audio/CombatAudio.ts` | Watch (split if it grows) |
-| 504 | `client/src/game/vehicles/APCType.ts` | P2.6 |
 | 502 | `client/src/game/audio/VehicleAudio.ts` | Watch (split if it grows) |
 
 Other measured debts that don't show up as line counts:
@@ -113,7 +112,7 @@ Other measured debts that don't show up as line counts:
 
 ### P0.2 — Sync `CLAUDE.md` with reality
 - **Files:** `CLAUDE.md` (root)
-- **Why:** it's the architecture map every contributor (human or AI) reads first, and it has drifted: Engine.ts documented as 2,981 lines (actual 5,008), GameScreen.tsx as 769 (actual 1,048), file counts stale, and it references `combat/bunker_buster.rs` and `hud/BunkerBusterDepthView.tsx`, which no longer exist (replaced by the kinetic penetrator). It also omits whole subsystems: `server/.../abilities/`, `matchmaking.rs`, the APC/Anti-Air vehicles, `TacticalMap`, and the entire `bots/` and `training/` trees.
+- **Why:** it's the architecture map every contributor (human or AI) reads first, and it has drifted: Engine.ts documented as 2,981 lines (actual 5,008), GameScreen.tsx as 769 (actual 1,048), file counts stale, and it references `combat/bunker_buster.rs` and `hud/BunkerBusterDepthView.tsx`, which no longer exist (replaced by the kinetic penetrator). It also omits whole subsystems: `server/.../abilities/`, `matchmaking.rs`, the Hover/Anti-Air vehicles, `TacticalMap`, and the entire `bots/` and `training/` trees.
 - **Target end-state:** layout section matches `git ls-files`, line counts removed or corrected, dead references deleted, `bots/` + `training/` summarized.
 - **Effort:** S · **Risk:** low · **GFI:** **yes**
 
@@ -217,7 +216,7 @@ Each row is a single extraction PR. Pattern reference: managers per `CLAUDE.md`'
 | P2.3 | `client/src/game/VoxelWorld.ts` (726) | Extract chunk-mesh bookkeeping into `ChunkMeshStore.ts`; palette goes to shared config via P1.4 | M | med | no |
 | P2.4 | `client/src/game/FPSControls.ts` (715) | Extract `FlyControls.ts` (fly-mode state + update); sandbox input overrides move with P1.1a | S | low | yes |
 | P2.5 | `client/src/game/audio/AudioCore.ts` (674) | Extract `SpatialBus.ts` (panner + legacy Web Audio compat) and `ReverbBus.ts` (delay-tap reverb) | M | med | no |
-| P2.6 | `vehicles/HelicopterType.ts` (636), `FighterJetType.ts` (567), `AntiAirType.ts` (558), `APCType.ts` (504) | Extract shared breakup logic into `vehicles/VehicleBreakup.ts`; all four registry entries drop under 500 | M | low | no |
+| P2.6 | `vehicles/HelicopterType.ts` (636), `FighterJetType.ts` (567), `AntiAirType.ts` (558), `HoverType.ts` (461) | Extract shared breakup logic into `vehicles/VehicleBreakup.ts`; all registry entries drop under 500 | M | low | no |
 | P2.7 | `client/src/game/LanternSystem.ts` (589) | Extract glow-sprite atlas/material creation into `LanternSprites.ts` | S | low | yes |
 | P2.8 | `client/src/game/VFX.ts` (582) | Split effect presets (explosion/muzzle/debris emitters) into `vfx/presets.ts`; instanced-pool engine stays | S | low | yes |
 | P2.9 | `client/src/game/Weapons.ts` (575) | Extract `WeaponRaycast.ts` (hit-scan vs players/vehicles/blocks) from loadout/ammo state | M | med | no |

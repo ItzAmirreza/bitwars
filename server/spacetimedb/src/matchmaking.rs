@@ -291,7 +291,7 @@ pub fn reset_players_for_new_round(ctx: &ReducerContext) {
             Some(jet_weapon_slot0())
         } else if vehicle.vehicle_type == vehicle_type_anti_air() {
             Some(aa_weapon_slot0())
-        } else if vehicle.vehicle_type == vehicle_type_apc() {
+        } else if vehicle.vehicle_type == vehicle_type_hover() {
             None
         } else {
             Some(0)
@@ -300,7 +300,7 @@ pub fn reset_players_for_new_round(ctx: &ReducerContext) {
             Some(jet_weapon_slot1())
         } else if vehicle.vehicle_type == vehicle_type_anti_air() {
             None
-        } else if vehicle.vehicle_type == vehicle_type_apc() {
+        } else if vehicle.vehicle_type == vehicle_type_hover() {
             None
         } else {
             Some(1)

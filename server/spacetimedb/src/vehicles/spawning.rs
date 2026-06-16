@@ -194,28 +194,28 @@ pub fn spawn_fighter_jet(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
     entity.id
 }
 
-/// Spawn a single APC entity + vehicle row.
-pub fn spawn_apc(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
+/// Spawn a single hover vehicle entity + vehicle row.
+pub fn spawn_hover(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
     let entity = ctx.db.entity().insert(Entity {
         id: 0,
         kind: entity_kind_vehicle(),
-        subtype: vehicle_type_apc(),
+        subtype: vehicle_type_hover(),
         pos,
         vel: ZERO_VEL,
         rot: Rotation { yaw, pitch: 0.0 },
-        scale: apc_scale(),
+        scale: hover_scale(),
         active: true,
         sim_tick: 0,
         created_at: ctx.timestamp,
         updated_at: ctx.timestamp,
     });
 
-    // APC has no vehicle weapons — driver cannot fire.
+    // The hover bike has no vehicle weapons — driver cannot fire.
     ctx.db.vehicle().insert(Vehicle {
         entity_id: entity.id,
-        vehicle_type: vehicle_type_apc(),
+        vehicle_type: vehicle_type_hover(),
         pilot_identity: None,
-        seat_count: 4,
+        seat_count: 2,
         input_forward: 0.0,
         input_strafe: 0.0,
         input_lift: 0.0,
@@ -226,7 +226,7 @@ pub fn spawn_apc(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
         sim_tick: 0,
         sim_updated_at: ctx.timestamp,
         rotor_spin: 0.0,
-        health: apc_health_max(),
+        health: hover_health_max(),
         weapon_type: 0,
         weapon_ammo_primary: 0,
         weapon_ammo_secondary: 0,
@@ -239,17 +239,17 @@ pub fn spawn_apc(ctx: &ReducerContext, pos: Vec3, yaw: f32) -> u64 {
     entity.id
 }
 
-/// Spawn APCs at random flat locations across the map.
-pub fn spawn_apcs_on_flat_ground(ctx: &ReducerContext) {
+/// Spawn hover vehicles at random open locations across the map.
+pub fn spawn_hovers_on_flat_ground(ctx: &ReducerContext) {
     let seed = timestamp_micros(ctx.timestamp) ^ 0xb7e151628aed2a6b;
-    let margin = (APC_SPAWN_CLEARANCE_RADIUS + 12).max(10);
+    let margin = (HOVER_SPAWN_CLEARANCE_RADIUS + 12).max(10);
     let span_x = (WORLD_SIZE_X as i32 - margin * 2).max(8);
     let span_z = (WORLD_SIZE_Z as i32 - margin * 2).max(8);
     let mut chunk_cache: HashMap<u32, [u8; 4096]> = HashMap::new();
 
     let mut spawned = 0usize;
     for attempt in 0..320u64 {
-        if spawned >= SANDBOX_APC_COUNT {
+        if spawned >= SANDBOX_HOVER_COUNT {
             break;
         }
 
@@ -262,20 +262,21 @@ pub fn spawn_apcs_on_flat_ground(ctx: &ReducerContext) {
             ctx,
             x,
             z,
-            APC_SPAWN_CLEARANCE_RADIUS,
-            APC_SPAWN_CLEARANCE_HEIGHT,
-            APC_SPAWN_MIN_SEPARATION,
+            HOVER_SPAWN_CLEARANCE_RADIUS,
+            HOVER_SPAWN_CLEARANCE_HEIGHT,
+            HOVER_SPAWN_MIN_SEPARATION,
             &mut chunk_cache,
         ) else {
             continue;
         };
 
         let yaw = unit_from_seed(seed ^ attempt.wrapping_mul(0x94d049bb133111eb)) * TAU;
-        spawn_apc(
+        // Spawn slightly above the surface so the craft settles into its hover.
+        spawn_hover(
             ctx,
             Vec3 {
                 x: x as f32 + 0.5,
-                y,
+                y: y + hover_height(),
                 z: z as f32 + 0.5,
             },
             yaw,
@@ -283,7 +284,7 @@ pub fn spawn_apcs_on_flat_ground(ctx: &ReducerContext) {
         spawned += 1;
     }
 
-    log::info!("Spawned {} APCs on flat ground", spawned);
+    log::info!("Spawned {} hover vehicles", spawned);
 }
 
 /// Spawn fighter jets at the START of each Airport biome runway.

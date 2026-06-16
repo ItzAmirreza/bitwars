@@ -178,51 +178,33 @@ const AA_HITBOXES: [LocalHitbox; 5] = [
     },
 ];
 
-const APC_HITBOXES: [LocalHitbox; 5] = [
-    // Lower armored hull
+const HOVER_HITBOXES: [LocalHitbox; 3] = [
+    // Hover board / chassis
     LocalHitbox {
         cx: 0.0,
-        cy: 1.25,
+        cy: 0.55,
         cz: 0.0,
-        hx: 2.20,
-        hy: 1.00,
-        hz: 4.40,
+        hx: 1.05,
+        hy: 0.40,
+        hz: 2.40,
     },
-    // Upper troop compartment
+    // Rider + handlebar column
     LocalHitbox {
         cx: 0.0,
-        cy: 2.40,
-        cz: -0.35,
-        hx: 1.90,
-        hy: 0.80,
-        hz: 3.30,
+        cy: 1.35,
+        cz: 0.20,
+        hx: 0.55,
+        hy: 0.70,
+        hz: 0.90,
     },
-    // Front glacis / driver section
+    // Front cowl / nose
     LocalHitbox {
         cx: 0.0,
-        cy: 2.25,
-        cz: -4.15,
-        hx: 1.75,
-        hy: 0.75,
-        hz: 0.75,
-    },
-    // Left tread / side skirt
-    LocalHitbox {
-        cx: -2.0,
-        cy: 0.8,
-        cz: 0.0,
-        hx: 0.50,
-        hy: 0.75,
-        hz: 4.45,
-    },
-    // Right tread / side skirt
-    LocalHitbox {
-        cx: 2.0,
-        cy: 0.8,
-        cz: 0.0,
-        hx: 0.50,
-        hy: 0.75,
-        hz: 4.45,
+        cy: 0.90,
+        cz: -1.90,
+        hx: 0.70,
+        hy: 0.50,
+        hz: 0.70,
     },
 ];
 
@@ -237,10 +219,10 @@ fn vehicle_hitbox_profile(entity: &Entity) -> HitboxProfile {
             center_y: 2.20,
             boxes: &AA_HITBOXES,
         }
-    } else if entity.subtype == vehicle_type_apc() {
+    } else if entity.subtype == vehicle_type_hover() {
         HitboxProfile {
-            center_y: 1.85,
-            boxes: &APC_HITBOXES,
+            center_y: 1.0,
+            boxes: &HOVER_HITBOXES,
         }
     } else {
         HitboxProfile {
@@ -478,7 +460,7 @@ pub fn dismount_player_internal(
                     acked_input_seq: 0,
                     sim_tick: 0,
                     sim_updated_at: ctx.timestamp,
-                    weapon_type: if vehicle.vehicle_type == vehicle_type_apc() {
+                    weapon_type: if vehicle.vehicle_type == vehicle_type_hover() {
                         0
                     } else {
                         vehicle.weapon_type

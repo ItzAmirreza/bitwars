@@ -22,6 +22,11 @@ export interface InfantryFireContext {
   health: number;
   spawnProtected: boolean;
   mountedVehicleId: number;
+  /** True when mounted as a passenger gunner (may fire infantry weapon). */
+  isMountedPassengerGunner: boolean;
+  /** Server-authoritative seat eye for a passenger gunner's shot origin, or
+   *  null when on foot. Keeps the origin within shot-origin validation range. */
+  getMountedFireOrigin(): { x: number; y: number; z: number } | null;
   hitMarkerTimer: number;
   hitMarkerType: 'block' | 'player' | 'vehicle' | 'none';
   weapons: WeaponSystem;
@@ -60,7 +65,8 @@ export class InfantryFireController {
 
   tryFire(): void {
     const ctx = this.ctx;
-    if (ctx.mountedVehicleId !== 0) return;
+    // On foot, or riding as a passenger gunner. Pilots can't fire infantry.
+    if (ctx.mountedVehicleId !== 0 && !ctx.isMountedPassengerGunner) return;
     if (ctx.health <= 0) return; // Dead — cannot fire
     if (ctx.spawnProtected) return; // Spawn protected — cannot fire yet
     if (ctx.weapons.getAmmo() <= 0) {
@@ -70,6 +76,15 @@ export class InfantryFireController {
 
     const result = ctx.weapons.fire();
     if (!result) return;
+
+    // Passenger gunner: the FP camera follows the smoothed vehicle mesh, which
+    // can lag the server seat at speed. Re-origin the shot to the server-
+    // authoritative seat so it passes shot-origin validation (mirrors the
+    // vehicle-fire rule). Hits/direction stay camera-relative.
+    if (ctx.isMountedPassengerGunner) {
+      const seat = ctx.getMountedFireOrigin();
+      if (seat) result.origin.set(seat.x, seat.y, seat.z);
+    }
 
     const isRifle = result.weaponIndex === 0;
     const isShotgun = result.weaponIndex === 1;

@@ -6,26 +6,26 @@
 //   4. Add a new VEHICLE_TYPE_* constant in constants.rs
 
 pub mod anti_air;
-pub mod apc;
 pub mod collision;
 pub mod fighter_jet;
 pub mod helicopter;
+pub mod hover;
 pub mod interaction;
 pub mod spawning;
 pub mod weapons;
 
 // Re-export for convenience
 pub use anti_air::tick_anti_air;
-pub use apc::tick_apc;
 pub use fighter_jet::tick_fighter_jet;
 pub use helicopter::tick_helicopter;
+pub use hover::tick_hover;
 pub use interaction::{interact_vehicle, update_vehicle_input};
 pub use spawning::spawn_aa_at_outposts;
 pub use spawning::spawn_anti_air;
-pub use spawning::spawn_apc;
-pub use spawning::spawn_apcs_on_flat_ground;
 pub use spawning::spawn_fighter_jet;
 pub use spawning::spawn_helicopter;
+pub use spawning::spawn_hover;
+pub use spawning::spawn_hovers_on_flat_ground;
 pub use spawning::spawn_jets_at_airstrips;
 pub use spawning::spawn_sandbox_helicopters;
 pub use weapons::{
@@ -76,8 +76,8 @@ pub fn tick_vehicles(ctx: &ReducerContext, job: VehicleTick) {
             tick_fighter_jet(ctx, vehicle, entity, &mut mounted_updates, &mut terrain);
         } else if vehicle.vehicle_type == vehicle_type_anti_air() {
             tick_anti_air(ctx, vehicle, entity, &mut mounted_updates, &mut terrain);
-        } else if vehicle.vehicle_type == vehicle_type_apc() {
-            tick_apc(ctx, vehicle, entity, &mut mounted_updates, &mut terrain);
+        } else if vehicle.vehicle_type == vehicle_type_hover() {
+            tick_hover(ctx, vehicle, entity, &mut mounted_updates, &mut terrain);
         }
     }
 

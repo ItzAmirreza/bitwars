@@ -45,7 +45,7 @@ const RESPAWN_DELAY_MS = 3200;
 const MAX_TURN_RATE = Math.PI * 1.35;
 const MAX_PITCH_RATE = Math.PI * 1.1;
 
-// ── Vehicle piloting tuning (indexed by vehicleType: 0=heli,1=jet,2=AA,3=APC) ──
+// ── Vehicle piloting tuning (indexed by vehicleType: 0=heli,1=jet,2=AA,3=hover) ──
 const VEHICLE_SEEK_RANGE = 150; // consider grabbing an unoccupied vehicle within this (m)
 const VEHICLE_LOW_HP = [180, 140, 220, 320]; // dismount below this health
 const VEHICLE_FIRE_INTERVAL = [90, 180, 70, 1000]; // ms between vehicle weapon shots (jet: bomb strings)
@@ -2160,8 +2160,8 @@ export class HeadlessBitBot {
     switch (vehicleType) {
       case VEHICLE_TYPE.HELICOPTER:
         return 8.0;
-      case VEHICLE_TYPE.APC:
-        return 5.5;
+      case VEHICLE_TYPE.HOVER:
+        return 5.0;
       default:
         return 6.5; // jet, anti-air
     }

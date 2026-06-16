@@ -38,8 +38,8 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
             jet_mount_range()
         } else if v.vehicle_type == vehicle_type_anti_air() {
             aa_mount_range()
-        } else if v.vehicle_type == vehicle_type_apc() {
-            apc_mount_range()
+        } else if v.vehicle_type == vehicle_type_hover() {
+            hover_mount_range()
         } else {
             continue; // unknown vehicle type
         };

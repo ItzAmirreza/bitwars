@@ -41,26 +41,18 @@ const AA_SEAT_POSITIONS: [Vec3; 1] = [Vec3 {
     z: 0.0,
 }];
 
-const APC_SEAT_POSITIONS: [Vec3; 4] = [
+const HOVER_SEAT_POSITIONS: [Vec3; 2] = [
+    // Driver — forward saddle
     Vec3 {
-        x: -0.75,
-        y: 2.8,
-        z: -2.1,
+        x: 0.0,
+        y: 1.35,
+        z: -0.5,
     },
+    // Passenger — rear saddle
     Vec3 {
-        x: 0.75,
-        y: 2.75,
-        z: -1.4,
-    },
-    Vec3 {
-        x: -0.8,
-        y: 2.45,
-        z: 0.4,
-    },
-    Vec3 {
-        x: 0.8,
-        y: 2.45,
-        z: 2.1,
+        x: 0.0,
+        y: 1.3,
+        z: 0.95,
     },
 ];
 
@@ -69,8 +61,8 @@ fn seat_positions_for_vehicle(vehicle_type: u8) -> &'static [Vec3] {
         &JET_SEAT_POSITIONS
     } else if vehicle_type == vehicle_type_anti_air() {
         &AA_SEAT_POSITIONS
-    } else if vehicle_type == vehicle_type_apc() {
-        &APC_SEAT_POSITIONS
+    } else if vehicle_type == vehicle_type_hover() {
+        &HOVER_SEAT_POSITIONS
     } else {
         &HELI_SEAT_POSITIONS
     }

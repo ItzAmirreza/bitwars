@@ -1,7 +1,6 @@
 /**
  * Vehicle minigun — procedural fire sound (louder, heavier than infantry).
- * Shared by the helicopter minigun (weapon index 100) and the APC autocannon
- * (weapon index 104).
+ * Used by the helicopter minigun.
  */
 
 import type { AudioCore, SpatialSoundOptions, SpatialBusOptions } from '../AudioCore';

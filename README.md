@@ -23,7 +23,7 @@ The repo also ships the tooling used to build the game: a headless bot runner wh
 ## Features
 
 - **6 infantry weapons** — Rifle, Shotgun, RPG, Machine Gun, Grenade Launcher, Sniper — plus throwable grenades
-- **4 vehicles** — Helicopter, Fighter Jet, Anti-Air, APC — with **7 vehicle weapons** (Minigun, Rockets, Kinetic Penetrator, Carpet Bomb, CRAM, SAM Missile, Air Missile)
+- **4 vehicles** — Helicopter, Fighter Jet, Anti-Air, Hover Bike — with **7 vehicle weapons** (Minigun, Rockets, Kinetic Penetrator, Carpet Bomb, CRAM, SAM Missile, Air Missile)
 - **Fully destructible terrain** — 750 × 48 × 750 voxels, 16 block types, RLE-compressed chunks, server-authoritative destruction with falling-block physics
 - **Procedural world generation** — biomes, road networks, and structures, generated server-side from a seed
 - **4 ability pickups** — Health Regen, Double Damage, Speed Boost, Shield

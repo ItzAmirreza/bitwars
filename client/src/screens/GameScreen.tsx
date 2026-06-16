@@ -92,6 +92,7 @@ export function GameScreen({ active }: GameScreenProps) {
     vehicleReloading: false,
     vehicleWeaponSlots: [{ name: 'MINIGUN', color: '#ffaa00' }, { name: 'ROCKETS', color: '#ff4400' }],
     isVehiclePilot: false,
+    crosshairReticle: 'infantry',
     aaTargets: [],
     nearVehicle: false,
     nearVehicleName: null,
@@ -810,6 +811,7 @@ export function GameScreen({ active }: GameScreenProps) {
             hitMarker={state.hitMarker}
             hitMarkerType={state.hitMarkerType}
             mountedVehicleName={state.mountedVehicleName}
+            reticle={state.crosshairReticle}
             vehicleWeapon={state.vehicleWeapon}
             vehicleWeaponColor={state.vehicleWeaponSlots[state.vehicleWeapon]?.color}
             damageIndicators={state.damageIndicators}
@@ -916,10 +918,11 @@ export function GameScreen({ active }: GameScreenProps) {
                   {' '}<span style={{ color: '#e8e8f0' }}>SHIFT</span> PUSH DOWN
                   {' '}<span style={{ color: '#e8e8f0' }}>1/2</span> WEAPONS
                 </div>
-              </>) : state.mountedVehicleName === 'APC' ? (<>
+              </>) : state.mountedVehicleName === 'Hover' ? (<>
                 <div>
                   <span style={{ color: '#e8e8f0' }}>W/S</span> FWD/BACK
                   {' '}<span style={{ color: '#e8e8f0' }}>A/D</span> YAW
+                  {' '}<span style={{ color: '#e8e8f0' }}>Q/E</span> STRAFE
                 </div>
               </>) : (<>
                 <div>
