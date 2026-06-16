@@ -479,6 +479,21 @@ pub fn vehicle_collision_hitbox_scale() -> f32 {
         .collision_hitbox_scale
 }
 
+// ── Vehicle Destruction ──
+// Sourced from shared/game-constants.json → vehicleDestruction
+
+/// Blast radius of the explosion when a vehicle is destroyed (block
+/// destruction + splash). Much larger than a grenade for a "huge" blast.
+pub fn vehicle_destruction_explosion_radius() -> f32 {
+    shared_config::config()
+        .vehicle_destruction
+        .explosion_radius
+}
+/// Splash damage dealt to players/vehicles caught in a vehicle's death blast.
+pub fn vehicle_destruction_splash_damage() -> i32 {
+    shared_config::config().vehicle_destruction.splash_damage
+}
+
 // ── Combat Validation ──
 // Sourced from shared/game-constants.json → combat + player.godModeHealth
 

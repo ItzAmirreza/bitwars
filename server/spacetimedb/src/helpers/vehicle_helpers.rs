@@ -532,7 +532,6 @@ pub fn apply_vehicle_damage(
     vehicle_id: u64,
     damage: i32,
     hit_weapon: u8,
-    impact_pos: Vec3,
 ) {
     let Some(vehicle) = ctx.db.vehicle().entity_id().find(&vehicle_id) else {
         return;
@@ -581,18 +580,11 @@ pub fn apply_vehicle_damage(
         ..vehicle
     });
 
-    dismount_all_vehicle_occupants(ctx, vehicle_id, true);
-
-    ctx.db.explosion_event().insert(ExplosionEvent {
-        id: 0,
-        origin: attacker,
-        pos: impact_pos.clone(),
-        radius: 6.0,
-        weapon: 4,
-        destroyed_blocks: Vec::new(),
-        created_at: ctx.timestamp,
-    });
-    crate::grenades::push_grenades_from_explosion(ctx, &impact_pos, 6.0, 0);
+    // Huge blast: carve surrounding blocks + splash nearby players/vehicles.
+    // Run before dismounting so the crew is shielded from their own wreck, then
+    // eject them at the vehicle's current position (including altitude).
+    crate::combat::emit_vehicle_destruction_explosion(ctx, attacker, vehicle_id, &vehicle_center);
+    dismount_all_vehicle_occupants(ctx, vehicle_id, false);
 
     ctx.db.vehicle_destroy_event().insert(VehicleDestroyEvent {
         id: 0,

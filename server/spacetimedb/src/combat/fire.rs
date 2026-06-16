@@ -176,7 +176,7 @@ pub fn fire_weapon(
         if first_vehicle_hit_pos.is_none() {
             first_vehicle_hit_pos = Some(hit_pos.clone());
         }
-        apply_vehicle_damage(ctx, sender, *vehicle_id, def.damage, weapon, hit_pos);
+        apply_vehicle_damage(ctx, sender, *vehicle_id, def.damage, weapon);
     }
 
     let actually_destroyed =
