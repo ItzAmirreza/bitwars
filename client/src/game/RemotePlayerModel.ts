@@ -138,9 +138,19 @@ function addBox(
   return mesh;
 }
 
+/**
+ * Uniform scale applied to the whole remote-player rig so other players read
+ * as larger / easier to spot during fast-paced play. The rig is built around
+ * the same joint anchors the animator drives, so scaling the root model keeps
+ * every animation correct — it just renders bigger. Feet stay planted at the
+ * model origin, so the foot offset is unaffected.
+ */
+export const REMOTE_PLAYER_MODEL_SCALE = 1.18;
+
 export function createRemotePlayerModel(presetValue: number): RemotePlayerRig {
   const preset = getCharacterPreset(presetValue);
   const model = new THREE.Group();
+  model.scale.setScalar(REMOTE_PLAYER_MODEL_SCALE);
 
   const bodyMat = new THREE.MeshLambertMaterial({ color: preset.bodyColor });
   const vestMat = new THREE.MeshLambertMaterial({ color: preset.vestColor });
@@ -148,12 +158,17 @@ export function createRemotePlayerModel(presetValue: number): RemotePlayerRig {
   const visorMat = new THREE.MeshLambertMaterial({
     color: preset.visorColor,
     emissive: preset.visorColor,
-    emissiveIntensity: 0.45,
+    emissiveIntensity: 0.4,
   });
   const accentMat = new THREE.MeshLambertMaterial({
     color: preset.accentColor,
     emissive: preset.accentColor,
     emissiveIntensity: 0.2,
+  });
+  const eyeWhiteMat = new THREE.MeshLambertMaterial({ color: 0xf2f4ff });
+  const eyeDarkMat = new THREE.MeshLambertMaterial({ color: 0x10131c });
+  const browMat = new THREE.MeshLambertMaterial({
+    color: new THREE.Color(preset.headColor).multiplyScalar(0.72).getHex(),
   });
   const legMat = new THREE.MeshLambertMaterial({
     color: new THREE.Color(preset.bodyColor).multiplyScalar(0.68).getHex(),
@@ -166,55 +181,70 @@ export function createRemotePlayerModel(presetValue: number): RemotePlayerRig {
   root.name = 'remote-player-root';
   model.add(root);
 
-  addBox(root, [0.68, 0.2, 0.34], vestMat, [0, 0.96, 0]);
-  addBox(root, [0.58, 0.08, 0.34], accentMat, [0, 1.04, 0]);
+  // Pelvis / hips
+  addBox(root, [0.74, 0.26, 0.4], vestMat, [0, 0.96, 0]);
+  addBox(root, [0.78, 0.1, 0.42], accentMat, [0, 1.06, 0]);
 
   const upperBody = new THREE.Group();
   upperBody.position.set(0, 1.22, 0);
   root.add(upperBody);
-  addBox(upperBody, [0.82, 0.82, 0.4], vestMat, [0, 0, 0]);
-  addBox(upperBody, [0.88, 0.16, 0.44], accentMat, [0, 0.12, 0.02]);
-  addBox(upperBody, [0.74, 0.16, 0.34], bodyMat, [0, -0.32, 0]);
-  addBox(upperBody, [0.22, 0.18, 0.24], bodyMat, [-0.44, 0.24, 0]);
-  addBox(upperBody, [0.22, 0.18, 0.24], bodyMat, [0.44, 0.24, 0]);
+  // Broad blocky chest + body armour
+  addBox(upperBody, [0.86, 0.72, 0.46], vestMat, [0, 0.04, 0]);
+  addBox(upperBody, [0.9, 0.18, 0.48], accentMat, [0, 0.22, 0.01]);
+  addBox(upperBody, [0.78, 0.2, 0.42], bodyMat, [0, -0.34, 0]);
+  // Chunky shoulder pads
+  addBox(upperBody, [0.26, 0.24, 0.38], bodyMat, [-0.46, 0.28, 0]);
+  addBox(upperBody, [0.26, 0.24, 0.38], bodyMat, [0.46, 0.28, 0]);
+  // Neck linking chest to head
+  addBox(upperBody, [0.3, 0.2, 0.3], headMat, [0, 0.52, 0]);
 
   const head = new THREE.Group();
-  head.position.set(0, 0.72, 0);
+  head.position.set(0, 0.74, 0);
   upperBody.add(head);
-  addBox(head, [0.58, 0.58, 0.58], headMat, [0, 0, 0]);
-  addBox(head, [0.64, 0.12, 0.64], bodyMat, [0, 0.27, 0]);
-  addBox(head, [0.5, 0.18, 0.08], visorMat, [0, 0.04, -0.29]);
-  addBox(head, [0.34, 0.06, 0.08], accentMat, [0, -0.14, -0.29]);
+  // Big readable blocky head (skin)
+  addBox(head, [0.66, 0.66, 0.66], headMat, [0, 0.02, 0]);
+  // Helmet shell over the top + back of the head
+  addBox(head, [0.72, 0.26, 0.72], vestMat, [0, 0.32, 0.03]);
+  addBox(head, [0.74, 0.14, 0.24], vestMat, [0, 0.16, -0.36]); // front brim
+  // Goggles pushed up on the helmet (keeps a little sci-fi accent, off the face)
+  addBox(head, [0.5, 0.1, 0.08], visorMat, [0, 0.2, -0.36]);
+  // Face: brow, two eyes (whites + pupils), chin strap
+  addBox(head, [0.5, 0.06, 0.06], browMat, [0, 0.16, -0.34]);
+  addBox(head, [0.15, 0.15, 0.07], eyeWhiteMat, [-0.16, 0.04, -0.34]);
+  addBox(head, [0.15, 0.15, 0.07], eyeWhiteMat, [0.16, 0.04, -0.34]);
+  addBox(head, [0.08, 0.1, 0.06], eyeDarkMat, [-0.16, 0.02, -0.36]);
+  addBox(head, [0.08, 0.1, 0.06], eyeDarkMat, [0.16, 0.02, -0.36]);
+  addBox(head, [0.4, 0.07, 0.06], accentMat, [0, -0.22, -0.33]); // chin strap
 
   const leftArm = new THREE.Group();
-  leftArm.position.set(-0.48, 0.24, 0.02);
+  leftArm.position.set(-0.5, 0.26, 0.02);
   upperBody.add(leftArm);
-  addBox(leftArm, [0.28, 0.16, 0.28], bodyMat, [0, -0.02, 0]);
-  addBox(leftArm, [0.26, 0.42, 0.26], bodyMat, [0, -0.3, 0]);
-  addBox(leftArm, [0.24, 0.34, 0.24], vestMat, [0, -0.66, 0.02]);
-  addBox(leftArm, [0.16, 0.16, 0.2], headMat, [0, -0.9, -0.02]);
+  addBox(leftArm, [0.3, 0.18, 0.32], bodyMat, [0, -0.02, 0]);
+  addBox(leftArm, [0.28, 0.46, 0.28], bodyMat, [0, -0.32, 0]);
+  addBox(leftArm, [0.26, 0.36, 0.26], vestMat, [0, -0.7, 0.02]);
+  addBox(leftArm, [0.18, 0.18, 0.22], bootMat, [0, -0.96, -0.02]);
 
   const rightArm = new THREE.Group();
-  rightArm.position.set(0.48, 0.24, 0.02);
+  rightArm.position.set(0.5, 0.26, 0.02);
   upperBody.add(rightArm);
-  addBox(rightArm, [0.28, 0.16, 0.28], bodyMat, [0, -0.02, 0]);
-  addBox(rightArm, [0.26, 0.42, 0.26], bodyMat, [0, -0.3, 0]);
-  addBox(rightArm, [0.24, 0.34, 0.24], vestMat, [0, -0.66, 0.02]);
-  addBox(rightArm, [0.16, 0.16, 0.2], headMat, [0, -0.9, -0.02]);
+  addBox(rightArm, [0.3, 0.18, 0.32], bodyMat, [0, -0.02, 0]);
+  addBox(rightArm, [0.28, 0.46, 0.28], bodyMat, [0, -0.32, 0]);
+  addBox(rightArm, [0.26, 0.36, 0.26], vestMat, [0, -0.7, 0.02]);
+  addBox(rightArm, [0.18, 0.18, 0.22], bootMat, [0, -0.96, -0.02]);
 
   const leftLeg = new THREE.Group();
-  leftLeg.position.set(-0.21, 0.96, 0);
+  leftLeg.position.set(-0.22, 0.96, 0);
   root.add(leftLeg);
-  addBox(leftLeg, [0.3, 0.46, 0.3], legMat, [0, -0.23, 0]);
-  addBox(leftLeg, [0.28, 0.42, 0.28], legMat, [0, -0.66, 0]);
-  addBox(leftLeg, [0.34, 0.16, 0.42], bootMat, [0, -0.87, -0.02]);
+  addBox(leftLeg, [0.34, 0.46, 0.34], legMat, [0, -0.23, 0]);
+  addBox(leftLeg, [0.32, 0.42, 0.32], legMat, [0, -0.66, 0]);
+  addBox(leftLeg, [0.38, 0.18, 0.48], bootMat, [0, -0.88, -0.03]);
 
   const rightLeg = new THREE.Group();
-  rightLeg.position.set(0.21, 0.96, 0);
+  rightLeg.position.set(0.22, 0.96, 0);
   root.add(rightLeg);
-  addBox(rightLeg, [0.3, 0.46, 0.3], legMat, [0, -0.23, 0]);
-  addBox(rightLeg, [0.28, 0.42, 0.28], legMat, [0, -0.66, 0]);
-  addBox(rightLeg, [0.34, 0.16, 0.42], bootMat, [0, -0.87, -0.02]);
+  addBox(rightLeg, [0.34, 0.46, 0.34], legMat, [0, -0.23, 0]);
+  addBox(rightLeg, [0.32, 0.42, 0.32], legMat, [0, -0.66, 0]);
+  addBox(rightLeg, [0.38, 0.18, 0.48], bootMat, [0, -0.88, -0.03]);
 
   const gunMount = new THREE.Group();
   const defaultHoldPose = getRemoteWeaponHoldPose(0);

@@ -78,6 +78,22 @@ export function getCharacterPreset(value: unknown): CharacterPreset {
   return CHARACTER_PRESETS[normalizeCharacterPreset(value)];
 }
 
+/**
+ * Deterministically pick a character appearance from a player's name.
+ *
+ * Character selection was removed in favour of getting straight into the game,
+ * so each player is auto-assigned a stable variant derived from their call sign.
+ * Same name always maps to the same look, and players stay visually distinct
+ * from each other (in-world models + tactical map dots).
+ */
+export function characterPresetForName(name: string): number {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return hash % CHARACTER_PRESETS.length;
+}
+
 export function colorHex(color: number): string {
   return `#${(color & 0xffffff).toString(16).padStart(6, '0')}`;
 }

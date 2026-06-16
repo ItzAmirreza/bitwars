@@ -49,8 +49,8 @@ const GLINT_MAX_DIST = 200;
 const GLINT_MIN_DIST = 8;
 const GLINT_PULSE_SPEED = 4;
 const REMOTE_PLAYER_FOOT_OFFSET = 1.7;
-const REMOTE_PLAYER_EYE_HEIGHT = 1.72;
-const REMOTE_PLAYER_NAMETAG_Y = 2.48;
+const REMOTE_PLAYER_EYE_HEIGHT = 2.05;
+const REMOTE_PLAYER_NAMETAG_Y = 3.05;
 
 function damp(current: number, target: number, lambda: number, delta: number): number {
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-lambda * delta));
@@ -311,7 +311,7 @@ export class RemotePlayerManager {
       }));
       sprite.name = 'remote-player-nametag';
       sprite.position.y = REMOTE_PLAYER_NAMETAG_Y;
-      sprite.scale.set(2.4, 0.6, 1);
+      sprite.scale.set(2.8, 0.7, 1);
       group.add(sprite);
 
       const runtime = this.getRuntime(group);

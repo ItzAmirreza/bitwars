@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useGameStore } from "../store";
 import { CLIENT_BUILD_HASH } from "../versionCheck";
 import { menuAudio } from "../menuAudio";
-import { CHARACTER_PRESETS, colorHex } from "../characterPresets";
+import { characterPresetForName } from "../characterPresets";
 import { PixelArtBg } from "./PixelArtBg";
 import {
   getActiveProvider,
@@ -13,68 +13,6 @@ import {
 } from "../auth";
 import { resetConnection } from "../db";
 import { PrivacyPolicy, PixelDiscordIcon } from "./PrivacyPolicy";
-
-// 5x7 pixel soldier template
-// H=head, V=visor, B=body, W=vest, G=gun, L=leg(darker body)
-const SOLDIER_TEMPLATE = [
-  ".HHH.",
-  "HHVHH",
-  ".BBB.",
-  "BWWWB",
-  "BWWWG",
-  ".BBB.",
-  ".B.B.",
-];
-
-function PixelSoldier({
-  headColor,
-  visorColor,
-  bodyColor,
-  vestColor,
-  gunColor,
-  size = 6,
-  selected,
-}: {
-  headColor: string;
-  visorColor: string;
-  bodyColor: string;
-  vestColor: string;
-  gunColor: string;
-  size?: number;
-  selected?: boolean;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d")!;
-    const w = 5,
-      h = 7;
-    canvas.width = w * size;
-    canvas.height = h * size;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const colorMap: Record<string, string> = {
-      H: headColor,
-      V: visorColor,
-      B: bodyColor,
-      W: vestColor,
-      G: gunColor,
-    };
-
-    for (let row = 0; row < h; row++) {
-      for (let col = 0; col < w; col++) {
-        const ch = SOLDIER_TEMPLATE[row][col];
-        if (ch === ".") continue;
-        ctx.fillStyle = colorMap[ch] || bodyColor;
-        ctx.fillRect(col * size, row * size, size - 0.5, size - 0.5);
-      }
-    }
-  }, [headColor, visorColor, bodyColor, vestColor, gunColor, size, selected]);
-
-  return <canvas ref={canvasRef} style={{ imageRendering: "pixelated" }} />;
-}
 
 // Decorative pixel blocks flanking the title
 function TitleDecor({ side }: { side: "left" | "right" }) {
@@ -193,8 +131,6 @@ export function LoginScreen() {
     setScreen,
     setError,
     resetSession,
-    selectedCharacterPreset,
-    setSelectedCharacterPreset,
   } = useGameStore();
   const error = useGameStore((s) => s.error);
   const settings = useGameStore((s) => s.settings);
@@ -229,7 +165,7 @@ export function LoginScreen() {
       try {
         await connection.reducers.setUsername({
           username: name,
-          characterPreset: selectedCharacterPreset,
+          characterPreset: characterPresetForName(name),
         });
         setUsername(name);
         setScreen("lobby");
@@ -246,7 +182,6 @@ export function LoginScreen() {
       input,
       connection,
       submitting,
-      selectedCharacterPreset,
       setUsername,
       setScreen,
       setError,
@@ -448,89 +383,6 @@ export function LoginScreen() {
               >
                 {input.length}/20
               </span>
-            </div>
-          </div>
-
-          {/* Character presets */}
-          <div
-            className="anim-fade-up"
-            style={{ animationDelay: "0.4s", width: "100%" }}
-          >
-            <label
-              style={{
-                fontFamily: "var(--font-pixel)",
-                fontSize: "10px",
-                color: accentCyan,
-                letterSpacing: "0.15em",
-                display: "block",
-                marginBottom: "12px",
-                textAlign: "center",
-              }}
-            >
-              CHOOSE YOUR SOLDIER
-            </label>
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                justifyContent: "center",
-                gap: "10px",
-              }}
-            >
-              {CHARACTER_PRESETS.map((preset) => {
-                const sel = preset.id === selectedCharacterPreset;
-                const borderColor = sel
-                  ? colorHex(preset.visorColor)
-                  : "#2a2e3e";
-                return (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => {
-                      menuAudio.playUIClick();
-                      setSelectedCharacterPreset(preset.id);
-                    }}
-                    onMouseEnter={() => menuAudio.playUIHover()}
-                    style={{
-                      border: `3px solid ${borderColor}`,
-                      background: sel
-                        ? `${colorHex(preset.visorColor)}15`
-                        : "#12161e",
-                      color: sel ? "#fff" : "#a0a4b0",
-                      minWidth: "100px",
-                      padding: "14px 12px 10px",
-                      cursor: "pointer",
-                      transition: "all 0.1s",
-                      boxShadow: sel
-                        ? `4px 4px 0 ${colorHex(preset.visorColor)}44`
-                        : "3px 3px 0 #0005",
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      gap: "8px",
-                    }}
-                  >
-                    <PixelSoldier
-                      headColor={colorHex(preset.headColor)}
-                      visorColor={colorHex(preset.visorColor)}
-                      bodyColor={colorHex(preset.bodyColor)}
-                      vestColor={colorHex(preset.vestColor)}
-                      gunColor={colorHex(preset.gunColor)}
-                      size={sel ? 7 : 6}
-                      selected={sel}
-                    />
-                    <span
-                      style={{
-                        fontFamily: "var(--font-pixel)",
-                        fontSize: "8px",
-                        letterSpacing: "0.05em",
-                      }}
-                    >
-                      {preset.name.toUpperCase()}
-                    </span>
-                  </button>
-                );
-              })}
             </div>
           </div>
 
