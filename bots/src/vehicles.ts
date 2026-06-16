@@ -11,7 +11,7 @@
  *   Helicopter: forward=cruise, strafe=sideways, lift=up/down, yaw=turn
  *   FighterJet: forward=throttle/brake, lift=pitch(nose), yaw=turn, strafe=roll(visual)
  *   AntiAir:    yaw=turret yaw, lift=turret pitch, forward/strafe ignored (stationary)
- *   APC:        forward=drive, yaw=steer, strafe/lift ignored
+ *   Hover:      forward=drive, strafe=sideways, yaw=steer (terrain-aware float)
  */
 
 import type { BotVec3 } from './world.ts';
@@ -20,7 +20,7 @@ export const VEHICLE_TYPE = {
   HELICOPTER: 0,
   FIGHTER_JET: 1,
   ANTI_AIR: 2,
-  APC: 3,
+  HOVER: 3,
 } as const;
 
 // ── Control-axis sign conventions ───────────────────────────────────────────
@@ -90,8 +90,8 @@ export function computeVehicleControl(inp: VehicleControlInput): VehicleControl 
       return helicopterControl(inp);
     case VEHICLE_TYPE.FIGHTER_JET:
       return jetControl(inp);
-    case VEHICLE_TYPE.APC:
-      return apcControl(inp);
+    case VEHICLE_TYPE.HOVER:
+      return hoverControl(inp);
     default:
       return { ...ZERO };
   }
@@ -246,8 +246,8 @@ function jetControl(inp: VehicleControlInput): VehicleControl {
   return { forward, strafe: 0, lift, yaw, boosting: false, fire, weaponSlot, aimDir };
 }
 
-// ── APC: ground transport — drive/steer toward goal (no weapons) ──
-function apcControl(inp: VehicleControlInput): VehicleControl {
+// ── Hover: fast ground transport — drive/steer toward goal (no weapons) ──
+function hoverControl(inp: VehicleControlInput): VehicleControl {
   if (!inp.target) return { ...ZERO };
   const dx = inp.target.x - inp.pos.x;
   const dz = inp.target.z - inp.pos.z;

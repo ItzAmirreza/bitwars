@@ -29,7 +29,7 @@ import {
   HELICOPTER,
   FIGHTER_JET,
   ANTI_AIR,
-  APC,
+  HOVER,
   WORLD,
   VEHICLE_BLOCK_COLLISION,
 } from '../../shared-config';
@@ -361,48 +361,60 @@ export function tickAntiAir(
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch: 0 };
 }
 
-// ── APC physics (mirrors server/vehicles/apc.rs) ──
+// ── Hover physics (mirrors server/vehicles/hover.rs) ──
+//
+// Terrain-aware hoverbike: a vertical spring-damper holds it a fixed clearance
+// above whatever surface is below it, sampled with a short forward look-ahead so
+// it climbs ahead of rising ground and slows over rough terrain. There is no
+// gravity and no block collision — terrain can never destroy it.
 
-export function tickAPC(
+export function tickHover(
   s: PhysicsState,
   input: PhysicsInput,
   gnd: GroundHeightFn,
-  blockQuery?: BlockQueryFn,
-  collisionOut?: BlockCollisionResult,
 ): PhysicsState {
   let { px, py, pz, vx, vy, vz, yaw } = s;
 
   const fwd = clamp(input.forward, -1, 1);
+  const str = clamp(input.strafe, -1, 1);
   const ywIn = clamp(input.yaw, -1, 1);
 
-  // Rotation (treads steer)
-  const yawStep = ywIn * APC.maxYawRate * TICK_DT;
-  yaw += yawStep;
+  // Steering
+  yaw += ywIn * HOVER.maxYawRate * TICK_DT;
   if (yaw > PI) yaw -= TAU;
   if (yaw < -PI) yaw += TAU;
 
-  // Velocity (tread-driven, forward/backward only)
-  const fwdSpeed = fwd * APC.cruiseSpeed;
-
   const fx = -Math.sin(yaw);
   const fz = -Math.cos(yaw);
+  const rx = Math.cos(yaw);
+  const rz = -Math.sin(yaw);
 
-  const targetVx = fx * fwdSpeed;
-  const targetVz = fz * fwdSpeed;
+  // Terrain-aware hover sampling (anticipatory). Sampled at the current XZ and a
+  // short distance ahead in the travel direction; max(here, ahead) lifts the
+  // craft before rising ground, the difference drives the rough-terrain slowdown.
+  const probe = HOVER.roughnessProbe;
+  const gndHere = gnd(px, pz, py);
+  const gndAhead = gnd(px + fx * probe, pz + fz * probe, py + probe);
+  const targetSurface = Math.max(gndHere, gndAhead);
+  const roughness = Math.abs(gndAhead - gndHere);
+  const speedFactor = clamp(1 - roughness * HOVER.roughnessPenalty, HOVER.minSpeedFactor, 1);
 
-  const hb = APC.horizBlend;
+  // Horizontal velocity (drive + strafe, scaled by terrain roughness)
+  const fwdSpeed = fwd * HOVER.cruiseSpeed * speedFactor;
+  const strSpeed = str * HOVER.strafeSpeed * speedFactor;
+  const targetVx = fx * fwdSpeed + rx * strSpeed;
+  const targetVz = fz * fwdSpeed + rz * strSpeed;
+
+  const hb = HOVER.horizBlend;
   vx += (targetVx - vx) * hb;
   vz += (targetVz - vz) * hb;
 
-  // Gravity
-  vy -= APC.gravity * TICK_DT;
-
-  const drag = APC.dragPiloted;
+  const drag = HOVER.dragPiloted;
   vx *= drag;
   vz *= drag;
 
+  // Horizontal integration
   let nx = px + vx * TICK_DT;
-  let ny = py + vy * TICK_DT;
   let nz = pz + vz * TICK_DT;
 
   // World bounds
@@ -411,38 +423,23 @@ export function tickAPC(
   if (nz < WORLD_MIN_Z) { nz = WORLD_MIN_Z; vz = Math.abs(vz) * BOUNDS_BOUNCE; }
   if (nz > WORLD_MAX_Z) { nz = WORLD_MAX_Z; vz = -Math.abs(vz) * BOUNDS_BOUNCE; }
 
-  // Block collision (BEFORE ground clamping)
-  if (blockQuery) {
-    const col = checkBlockCollision(
-      nx, ny, nz,
-      APC.hitbox.halfX, APC.hitbox.halfY, APC.hitbox.halfZ,
-      APC.hitbox.centerY,
-      vx, vy, vz,
-      blockQuery,
-    );
-    if (col.count > 0) {
-      // APC has stronger collision resistance — uses its own speed retain
-      const f = Math.pow(APC.collisionSpeedRetain, col.count);
-      vx *= f; vy *= f; vz *= f;
-      if (collisionOut) {
-        collisionOut.count += col.count;
-        collisionOut.cx = col.cx; collisionOut.cy = col.cy; collisionOut.cz = col.cz;
-      }
-    }
-  }
+  // Vertical hover (spring-damper toward the target float height)
+  const targetY = targetSurface + HOVER.hoverHeight;
+  vy += (targetY - py) * HOVER.hoverStiffness * TICK_DT;
+  vy *= HOVER.hoverDamping;
+  let ny = py + vy * TICK_DT;
 
-  // Ground collision
-  const ground = gnd(nx, nz, ny);
-  const minAlt = ground + APC.minAltitude;
-  if (ny < minAlt) {
-    ny = minAlt;
+  const floor = targetSurface + HOVER.minClearance;
+  if (ny < floor) {
+    ny = floor;
     if (vy < 0) vy = 0;
   }
-  if (ny > APC.maxAltitude) {
-    ny = APC.maxAltitude;
+  if (ny > HOVER.maxAltitude) {
+    ny = HOVER.maxAltitude;
+    if (vy > 0) vy = 0;
   }
 
-  // pitch stays 0 (ground vehicle)
+  // pitch stays 0 (the craft self-levels over terrain)
   return { px: nx, py: ny, pz: nz, vx, vy, vz, yaw, pitch: 0 };
 }
 
@@ -661,8 +658,8 @@ export class VehiclePrediction {
     if (this.vehicleType === VEHICLE_TYPES.AntiAir) {
       return tickAntiAir(s, input, this.groundFn);
     }
-    if (this.vehicleType === VEHICLE_TYPES.APC) {
-      return tickAPC(s, input, this.groundFn, this.blockQueryFn, collisionOut);
+    if (this.vehicleType === VEHICLE_TYPES.Hover) {
+      return tickHover(s, input, this.groundFn);
     }
     return tickHelicopter(s, input, this.groundFn, this.blockQueryFn, collisionOut);
   }

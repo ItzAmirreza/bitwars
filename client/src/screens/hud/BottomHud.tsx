@@ -540,7 +540,7 @@ export function BottomHud({
                     </div>
                   </div>
 
-                  {/* Vehicle Weapon + Ammo Panel (hidden for APC / passengers with no weapons) */}
+                  {/* Vehicle Weapon + Ammo Panel (hidden for the hover bike / passengers with no weapons) */}
                   {vehicleWeaponSlots.length > 0 && (
                   <div style={{
                     background: 'rgba(12,16,24,0.88)',

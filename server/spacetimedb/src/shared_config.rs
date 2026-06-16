@@ -24,7 +24,7 @@ pub struct GameConfig {
     pub helicopter: HelicopterConfig,
     pub fighter_jet: FighterJetConfig,
     pub anti_air: AntiAirConfig,
-    pub apc: ApcConfig,
+    pub hover: HoverConfig,
     pub grenade: GrenadeConfig,
     pub vehicle_block_collision: VehicleBlockCollisionConfig,
     pub combat: CombatConfig,
@@ -77,8 +77,7 @@ pub struct VehicleTypes {
     pub helicopter: u8,
     pub fighter_jet: u8,
     pub anti_air: u8,
-    #[serde(rename = "APC")]
-    pub apc: u8,
+    pub hover: u8,
 }
 
 #[derive(Deserialize, Debug)]
@@ -278,29 +277,32 @@ pub struct AntiAirCamera {
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct ApcConfig {
+pub struct HoverConfig {
     pub health_max: i32,
     pub scale: f32,
     pub mount_range: f32,
-    pub min_altitude: f32,
+    pub hover_height: f32,
+    pub min_clearance: f32,
     pub max_altitude: f32,
     pub cruise_speed: f32,
     pub strafe_speed: f32,
-    pub lift_speed: f32,
     pub max_yaw_rate: f32,
     pub pilot_seat_height: f32,
     pub drag_piloted: f32,
     pub drag_unpiloted: f32,
     pub horiz_blend: f32,
-    pub gravity: f32,
-    pub collision_speed_retain: f32,
-    pub hitbox: ApcHitbox,
-    pub camera: ApcCamera,
+    pub hover_stiffness: f32,
+    pub hover_damping: f32,
+    pub roughness_probe: f32,
+    pub roughness_penalty: f32,
+    pub min_speed_factor: f32,
+    pub hitbox: HoverHitbox,
+    pub camera: HoverCamera,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct ApcHitbox {
+pub struct HoverHitbox {
     pub center_y: f32,
     pub half_x: f32,
     pub half_y: f32,
@@ -309,7 +311,7 @@ pub struct ApcHitbox {
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct ApcCamera {
+pub struct HoverCamera {
     pub distance: f32,
     pub height: f32,
     pub pitch_min: f32,

@@ -32,7 +32,7 @@ import type {
 import { HelicopterType } from './HelicopterType';
 import { FighterJetType } from './FighterJetType';
 import { AntiAirType } from './AntiAirType';
-import { APCType } from './APCType';
+import { HoverType } from './HoverType';
 import { VehiclePrediction } from './VehiclePhysics';
 import type { PhysicsInput } from './VehiclePhysics';
 
@@ -164,7 +164,7 @@ export default class VehicleManager {
     this.registerVehicleType(new HelicopterType());
     this.registerVehicleType(new FighterJetType());
     this.registerVehicleType(new AntiAirType());
-    this.registerVehicleType(new APCType());
+    this.registerVehicleType(new HoverType());
   }
 
   // ── Registry ──
@@ -254,7 +254,7 @@ export default class VehicleManager {
   }
 
   getWeaponSlotCountForType(typeId: number | undefined): number {
-    if (typeId === VEHICLE_TYPES.APC) return 0;
+    if (typeId === VEHICLE_TYPES.Hover) return 0;
     if (typeId === VEHICLE_TYPES.FighterJet) return 3;
     if (typeId === VEHICLE_TYPES.AntiAir) return 1;
     if (typeId === VEHICLE_TYPES.Helicopter) return 2;
@@ -273,8 +273,8 @@ export default class VehicleManager {
    */
   getResolvedVehicleWeaponIndex(): number {
     const vt = this.getMountedVehicleType();
-    if (vt && vt.typeId === VEHICLE_TYPES.APC) {
-      // APC has no weapons — driver cannot fire
+    if (vt && vt.typeId === VEHICLE_TYPES.Hover) {
+      // Hover bike has no weapons — driver cannot fire
       return -1;
     }
     if (vt && vt.typeId === VEHICLE_TYPES.FighterJet) {
@@ -295,8 +295,8 @@ export default class VehicleManager {
    */
   getResolvedWeaponIndexForSlot(slot: number): number {
     const vt = this.getMountedVehicleType();
-    if (vt && vt.typeId === VEHICLE_TYPES.APC) {
-      return -1; // APC has no weapons
+    if (vt && vt.typeId === VEHICLE_TYPES.Hover) {
+      return -1; // Hover bike has no weapons
     }
     if (vt && vt.typeId === VEHICLE_TYPES.FighterJet) {
       if (slot === 2) return 6; // Air Missile
@@ -513,7 +513,12 @@ export default class VehicleManager {
     this.ensureLightRig(entityId, mesh);
     if (typeId === VEHICLE_TYPES.Helicopter) {
       this.engine.audio.startHelicopterSound(entityId);
-    } else if (typeId === VEHICLE_TYPES.FighterJet || typeId === VEHICLE_TYPES.AntiAir) {
+    } else if (
+      typeId === VEHICLE_TYPES.FighterJet
+      || typeId === VEHICLE_TYPES.AntiAir
+      || typeId === VEHICLE_TYPES.Hover
+    ) {
+      // Hover bike uses the turbine-whine engine loop.
       this.engine.audio.startJetEngineSound(entityId);
     }
     return mesh;
@@ -595,8 +600,10 @@ export default class VehicleManager {
     }
     this.removeLightRig(entityId);
     const inst = this.vehicleInstances.get(entityId);
-    const isJetOrAA = inst?.type === VEHICLE_TYPES.FighterJet || inst?.type === VEHICLE_TYPES.AntiAir;
-    if (isJetOrAA) {
+    const isTurbineEngine = inst?.type === VEHICLE_TYPES.FighterJet
+      || inst?.type === VEHICLE_TYPES.AntiAir
+      || inst?.type === VEHICLE_TYPES.Hover;
+    if (isTurbineEngine) {
       this.engine.audio.stopJetEngineSound(entityId, destroyed);
     } else {
       this.engine.audio.stopHelicopterSound(entityId, destroyed);

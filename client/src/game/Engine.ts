@@ -4579,8 +4579,8 @@ export class Engine {
       const mountedType = this.vehicleManager.getMountedVehicleType();
       const isJet = mountedType?.name === "Fighter Jet";
       const isAA = mountedType?.typeId === VEHICLE_TYPES.AntiAir;
-      const isAPC = mountedType?.typeId === VEHICLE_TYPES.APC;
-      if (isAPC) {
+      const isHover = mountedType?.typeId === VEHICLE_TYPES.Hover;
+      if (isHover) {
         return [];
       }
       if (isAA) {

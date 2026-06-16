@@ -362,75 +362,87 @@ pub fn aa_horiz_blend() -> f32 {
     shared_config::config().anti_air.horiz_blend
 }
 
-// ── APC (Armored Personnel Carrier) ──
-// Sourced from shared/game-constants.json → apc + vehicleTypes
+// ── Hover Vehicle (terrain-aware hoverbike) ──
+// Sourced from shared/game-constants.json → hover + vehicleTypes
 
-pub fn vehicle_type_apc() -> u8 {
-    shared_config::config().vehicle_types.apc
+pub fn vehicle_type_hover() -> u8 {
+    shared_config::config().vehicle_types.hover
 }
 
 /// Not in shared JSON — server-only spawn config.
-pub const SANDBOX_APC_COUNT: usize = 2;
+pub const SANDBOX_HOVER_COUNT: usize = 3;
 /// Not in shared JSON — server-only spawn config.
-pub const APC_SPAWN_CLEARANCE_RADIUS: i32 = 5;
+pub const HOVER_SPAWN_CLEARANCE_RADIUS: i32 = 4;
 /// Not in shared JSON — server-only spawn config.
-pub const APC_SPAWN_CLEARANCE_HEIGHT: i32 = 5;
+pub const HOVER_SPAWN_CLEARANCE_HEIGHT: i32 = 5;
 /// Not in shared JSON — server-only spawn config.
-pub const APC_SPAWN_MIN_SEPARATION: f32 = 32.0;
+pub const HOVER_SPAWN_MIN_SEPARATION: f32 = 28.0;
 
-pub fn apc_scale() -> f32 {
-    shared_config::config().apc.scale
+pub fn hover_scale() -> f32 {
+    shared_config::config().hover.scale
 }
-pub fn apc_mount_range() -> f32 {
-    shared_config::config().apc.mount_range
+pub fn hover_mount_range() -> f32 {
+    shared_config::config().hover.mount_range
 }
-pub fn apc_min_altitude() -> f32 {
-    shared_config::config().apc.min_altitude
+pub fn hover_height() -> f32 {
+    shared_config::config().hover.hover_height
 }
-pub fn apc_max_altitude() -> f32 {
-    shared_config::config().apc.max_altitude
+pub fn hover_min_clearance() -> f32 {
+    shared_config::config().hover.min_clearance
 }
-pub fn apc_cruise_speed() -> f32 {
-    shared_config::config().apc.cruise_speed
+pub fn hover_max_altitude() -> f32 {
+    shared_config::config().hover.max_altitude
 }
-pub fn apc_strafe_speed() -> f32 {
-    shared_config::config().apc.strafe_speed
+pub fn hover_cruise_speed() -> f32 {
+    shared_config::config().hover.cruise_speed
 }
-pub fn apc_max_yaw_rate() -> f32 {
-    shared_config::config().apc.max_yaw_rate
+pub fn hover_strafe_speed() -> f32 {
+    shared_config::config().hover.strafe_speed
 }
-pub fn apc_pilot_seat_height() -> f32 {
-    shared_config::config().apc.pilot_seat_height
+pub fn hover_max_yaw_rate() -> f32 {
+    shared_config::config().hover.max_yaw_rate
 }
-pub fn apc_health_max() -> i32 {
-    shared_config::config().apc.health_max
+pub fn hover_pilot_seat_height() -> f32 {
+    shared_config::config().hover.pilot_seat_height
 }
-pub fn apc_hitbox_center_y() -> f32 {
-    shared_config::config().apc.hitbox.center_y
+pub fn hover_health_max() -> i32 {
+    shared_config::config().hover.health_max
 }
-pub fn apc_hitbox_half_x() -> f32 {
-    shared_config::config().apc.hitbox.half_x
+pub fn hover_hitbox_center_y() -> f32 {
+    shared_config::config().hover.hitbox.center_y
 }
-pub fn apc_hitbox_half_y() -> f32 {
-    shared_config::config().apc.hitbox.half_y
+pub fn hover_hitbox_half_x() -> f32 {
+    shared_config::config().hover.hitbox.half_x
 }
-pub fn apc_hitbox_half_z() -> f32 {
-    shared_config::config().apc.hitbox.half_z
+pub fn hover_hitbox_half_y() -> f32 {
+    shared_config::config().hover.hitbox.half_y
 }
-pub fn apc_drag_piloted() -> f32 {
-    shared_config::config().apc.drag_piloted
+pub fn hover_hitbox_half_z() -> f32 {
+    shared_config::config().hover.hitbox.half_z
 }
-pub fn apc_drag_unpiloted() -> f32 {
-    shared_config::config().apc.drag_unpiloted
+pub fn hover_drag_piloted() -> f32 {
+    shared_config::config().hover.drag_piloted
 }
-pub fn apc_horiz_blend() -> f32 {
-    shared_config::config().apc.horiz_blend
+pub fn hover_drag_unpiloted() -> f32 {
+    shared_config::config().hover.drag_unpiloted
 }
-pub fn apc_gravity() -> f32 {
-    shared_config::config().apc.gravity
+pub fn hover_horiz_blend() -> f32 {
+    shared_config::config().hover.horiz_blend
 }
-pub fn apc_collision_speed_retain() -> f32 {
-    shared_config::config().apc.collision_speed_retain
+pub fn hover_stiffness() -> f32 {
+    shared_config::config().hover.hover_stiffness
+}
+pub fn hover_damping() -> f32 {
+    shared_config::config().hover.hover_damping
+}
+pub fn hover_roughness_probe() -> f32 {
+    shared_config::config().hover.roughness_probe
+}
+pub fn hover_roughness_penalty() -> f32 {
+    shared_config::config().hover.roughness_penalty
+}
+pub fn hover_min_speed_factor() -> f32 {
+    shared_config::config().hover.min_speed_factor
 }
 
 // ── Vehicle Block Collision ──
