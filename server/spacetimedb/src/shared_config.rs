@@ -27,6 +27,7 @@ pub struct GameConfig {
     pub apc: ApcConfig,
     pub grenade: GrenadeConfig,
     pub vehicle_block_collision: VehicleBlockCollisionConfig,
+    pub vehicle_destruction: VehicleDestructionConfig,
     pub combat: CombatConfig,
     pub r#match: MatchConfig,
     pub weather: Vec<WeatherConfig>,
@@ -340,6 +341,13 @@ pub struct VehicleBlockCollisionConfig {
     pub min_destroy_fraction: f32,
     pub max_blocks_per_tick: usize,
     pub collision_hitbox_scale: f32,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct VehicleDestructionConfig {
+    pub explosion_radius: f32,
+    pub splash_damage: i32,
 }
 
 #[derive(Deserialize, Debug)]

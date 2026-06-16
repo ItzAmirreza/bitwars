@@ -414,6 +414,11 @@
     "collisionHitboxScale": 0.5
   },
 
+  "vehicleDestruction": {
+    "explosionRadius": 8.0,
+    "splashDamage": 120
+  },
+
   "combat": {
     "fireRateToleranceUs": 150000,
     "maxShotOriginDistSq": 25.0,

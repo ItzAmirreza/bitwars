@@ -116,19 +116,14 @@ fn destroy_vehicle_from_collision(ctx: &ReducerContext, vehicle: &Vehicle, entit
     let vehicle_id = vehicle.entity_id;
 
     clear_vehicle_input_queue(ctx, vehicle_id);
-    dismount_all_vehicle_occupants(ctx, vehicle_id, true);
 
-    // Emit explosion at vehicle position
-    ctx.db.explosion_event().insert(ExplosionEvent {
-        id: 0,
-        origin: vehicle.pilot_identity.unwrap_or(ctx.sender()),
-        pos: entity.pos.clone(),
-        radius: 6.0,
-        weapon: 4,
-        destroyed_blocks: Vec::new(),
-        created_at: ctx.timestamp,
-    });
-    crate::grenades::push_grenades_from_explosion(ctx, &entity.pos, 6.0, 0);
+    // Huge blast: carve surrounding blocks + splash nearby players/vehicles.
+    // Run before dismounting so the crew is shielded from their own wreck, then
+    // eject them at the vehicle's current position (including altitude).
+    let origin = vehicle.pilot_identity.unwrap_or(ctx.sender());
+    let center = vehicle_hitbox_center(entity);
+    crate::combat::emit_vehicle_destruction_explosion(ctx, origin, vehicle_id, &center);
+    dismount_all_vehicle_occupants(ctx, vehicle_id, false);
 
     // Emit destroy event for client VFX
     ctx.db.vehicle_destroy_event().insert(VehicleDestroyEvent {

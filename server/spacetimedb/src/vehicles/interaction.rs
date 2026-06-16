@@ -18,9 +18,11 @@ pub fn interact_vehicle(ctx: &ReducerContext) -> Result<(), String> {
         .find(sender)
         .ok_or("Not registered")?;
 
-    // Dismount if already mounted
+    // Dismount if already mounted. Eject at the vehicle's current position
+    // (including altitude) so bailing out of a flying vehicle drops the player
+    // from where it actually was, rather than teleporting them to the ground.
     if player.mounted_vehicle_id != 0 {
-        let dismounted = dismount_player_internal(ctx, player, true);
+        let dismounted = dismount_player_internal(ctx, player, false);
         ctx.db.player().identity().update(dismounted.clone());
         init_movement_state(ctx, sender, &dismounted.pos);
         sync_player_entity(ctx, &dismounted);
