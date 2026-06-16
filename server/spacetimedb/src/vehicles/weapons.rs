@@ -24,8 +24,8 @@ fn resolve_vehicle_weapon_index(vehicle_type: u8, slot: u8) -> u8 {
     } else if vehicle_type == constants::vehicle_type_anti_air() {
         // AA has only 1 weapon slot (CRAM)
         constants::aa_weapon_slot0()
-    } else if vehicle_type == constants::vehicle_type_apc() {
-        // APC has no weapons — driver cannot fire
+    } else if vehicle_type == constants::vehicle_type_hover() {
+        // Hover bike has no weapons — driver cannot fire
         u8::MAX
     } else {
         // Helicopter: slot == index
@@ -85,8 +85,8 @@ pub fn switch_vehicle_weapon(ctx: &ReducerContext, weapon_index: u8) -> Result<(
     if vehicle.pilot_identity != Some(sender) {
         return Err("Not the pilot".to_string());
     }
-    // Max slots: 0 for APC, 1 for AA, 2 for helicopter, 3 for jet
-    let max_slots: u8 = if vehicle.vehicle_type == constants::vehicle_type_apc() {
+    // Max slots: 0 for hover, 1 for AA, 2 for helicopter, 3 for jet
+    let max_slots: u8 = if vehicle.vehicle_type == constants::vehicle_type_hover() {
         0
     } else if vehicle.vehicle_type == constants::vehicle_type_fighter_jet() {
         3

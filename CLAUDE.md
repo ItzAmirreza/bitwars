@@ -46,7 +46,7 @@ bitwars/
 │   │   ├── mod.rs                 tick_vehicles dispatcher
 │   │   ├── helicopter.rs          Helicopter physics
 │   │   ├── fighter_jet.rs         Fighter jet physics
-│   │   ├── apc.rs                 APC physics
+│   │   ├── hover.rs               Hover vehicle physics (terrain-aware float)
 │   │   ├── anti_air.rs            Anti-Air physics
 │   │   ├── collision.rs           Vehicle collision
 │   │   ├── interaction.rs         Mount/dismount
@@ -81,7 +81,7 @@ bitwars/
 │   │   │   ├── VehiclePhysics.ts  Vehicle physics simulation
 │   │   │   ├── HelicopterType.ts  Helicopter model + animation + breakup
 │   │   │   ├── FighterJetType.ts  Fighter jet model + animation + breakup
-│   │   │   ├── APCType.ts         APC model + animation + breakup
+│   │   │   ├── HoverType.ts       Hover bike model + animation + breakup
 │   │   │   └── AntiAirType.ts     Anti-Air model + animation + breakup
 │   │   ├── audio/                 Ray-traced procedural audio system
 │   │   │   ├── AudioCore.ts       Submix buses, dynamic reverb, spatial bus, voice mgmt

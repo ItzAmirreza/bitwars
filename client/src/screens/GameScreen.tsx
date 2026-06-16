@@ -916,10 +916,11 @@ export function GameScreen({ active }: GameScreenProps) {
                   {' '}<span style={{ color: '#e8e8f0' }}>SHIFT</span> PUSH DOWN
                   {' '}<span style={{ color: '#e8e8f0' }}>1/2</span> WEAPONS
                 </div>
-              </>) : state.mountedVehicleName === 'APC' ? (<>
+              </>) : state.mountedVehicleName === 'Hover' ? (<>
                 <div>
                   <span style={{ color: '#e8e8f0' }}>W/S</span> FWD/BACK
                   {' '}<span style={{ color: '#e8e8f0' }}>A/D</span> YAW
+                  {' '}<span style={{ color: '#e8e8f0' }}>Q/E</span> STRAFE
                 </div>
               </>) : (<>
                 <div>
