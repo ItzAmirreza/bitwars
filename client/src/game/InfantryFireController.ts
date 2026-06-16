@@ -23,7 +23,7 @@ export interface InfantryFireContext {
   spawnProtected: boolean;
   mountedVehicleId: number;
   hitMarkerTimer: number;
-  hitMarkerType: 'block' | 'player' | 'none';
+  hitMarkerType: 'block' | 'player' | 'vehicle' | 'none';
   weapons: WeaponSystem;
   audio: AudioSystem;
   vfx: VFX;
@@ -199,6 +199,16 @@ export class InfantryFireController {
       if (pos) ctx.vfx.emitHitSpark(pos.x, pos.y + 1.2, pos.z);
       // hitPlayerIds may contain duplicates (one per shotgun pellet that hit).
       ctx.spawnDamageNumber(WEAPONS[result.weaponIndex].damage * result.hitPlayerIds.length);
+    } else if (result.hitVehicleIds.length > 0) {
+      // Vehicle hit: amber marker + metal spark + predicted damage number.
+      // Server applies the weapon's raw damage per hit (no armour multiplier).
+      ctx.hitMarkerTimer = 0.2;
+      ctx.hitMarkerType = 'vehicle';
+      ctx.audio.playHitMarker('player');
+      const vpos = ctx.weapons.getVehiclePosition(result.hitVehicleIds[0]);
+      if (vpos) ctx.vfx.emitMetalSpark(vpos.x, vpos.y, vpos.z);
+      // hitVehicleIds may contain duplicates (one per shotgun pellet that hit).
+      ctx.spawnDamageNumber(WEAPONS[result.weaponIndex].damage * result.hitVehicleIds.length);
     }
 
     // Server sync: unified fire_weapon reducer with hit players and blocks
@@ -250,12 +260,19 @@ export class InfantryFireController {
       }), 80);
     }
 
-    // Hit marker
+    // Hit marker (hitVehicleIds = splash caught a vehicle; isVehicle = fired from one)
     if (impact.hitPlayerIds.length > 0) {
       ctx.hitMarkerTimer = 0.2;
       ctx.hitMarkerType = 'player';
       ctx.audio.playHitMarker('player');
       ctx.vfx.emitHitSpark(impact.hitPos.x, impact.hitPos.y + 0.5, impact.hitPos.z);
+      ctx.spawnDamageNumber(w.damage);
+    } else if (impact.hitVehicleIds.length > 0) {
+      ctx.hitMarkerTimer = 0.2;
+      ctx.hitMarkerType = 'vehicle';
+      ctx.audio.playHitMarker('player');
+      const vpos = ctx.weapons.getVehiclePosition(impact.hitVehicleIds[0]);
+      if (vpos) ctx.vfx.emitMetalSpark(vpos.x, vpos.y, vpos.z);
       ctx.spawnDamageNumber(w.damage);
     } else if (impact.destroyedBlocks.length > 0) {
       ctx.hitMarkerTimer = 0.2;

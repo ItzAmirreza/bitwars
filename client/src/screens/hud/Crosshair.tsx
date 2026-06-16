@@ -13,14 +13,18 @@ export interface CrosshairProps {
 
 function HitMarkerX({ type }: { type: string }) {
   // 'kill' = server-confirmed kill: bigger, thicker, bright red.
+  // 'vehicle' = round struck a vehicle: amber, to read as metal-on-metal.
   const isKill = type === 'kill';
   const isPlayer = type === 'player';
-  const color = isKill ? '#ff2030' : isPlayer ? '#ff2d78' : 'rgba(255,255,255,0.95)';
-  const sizePx = isKill ? 26 : isPlayer ? 18 : 14;
+  const isVehicle = type === 'vehicle';
+  const color = isKill ? '#ff2030' : isPlayer ? '#ff2d78' : isVehicle ? '#ffae34' : 'rgba(255,255,255,0.95)';
+  const sizePx = isKill ? 26 : isPlayer ? 18 : isVehicle ? 17 : 14;
   const thick = isKill ? 3 : 2;
   const size = `${sizePx}px`;
   const offset = `${-sizePx / 2}px`;
-  const glow = isKill ? 'drop-shadow(0 0 5px rgba(255,32,48,0.9))' : 'none';
+  const glow = isKill
+    ? 'drop-shadow(0 0 5px rgba(255,32,48,0.9))'
+    : isVehicle ? 'drop-shadow(0 0 4px rgba(255,174,52,0.85))' : 'none';
   return (
     <div style={{ animation: 'hitmarker-flash 0.2s ease-out', filter: glow }}>
       <div style={{

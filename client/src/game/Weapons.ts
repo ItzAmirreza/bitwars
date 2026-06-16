@@ -128,6 +128,14 @@ export class WeaponSystem {
     return g ? g.position.clone() : null;
   }
 
+  /** Hitbox-center world position of a vehicle by entity id (for hit-spark VFX). */
+  getVehiclePosition(id: number): THREE.Vector3 | null {
+    const g = this.vehicles.get(id);
+    if (!g) return null;
+    const hb = this.getVehicleBroadPhase(g);
+    return new THREE.Vector3(g.position.x, g.position.y + hb.centerY, g.position.z);
+  }
+
   setVehicles(vehicles: Map<number, THREE.Group>): void {
     this.vehicles = vehicles;
   }

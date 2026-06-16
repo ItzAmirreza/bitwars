@@ -21,7 +21,7 @@ export interface VehicleFireContext {
   health: number;
   mountedVehicleId: number;
   hitMarkerTimer: number;
-  hitMarkerType: 'block' | 'player' | 'none';
+  hitMarkerType: 'block' | 'player' | 'vehicle' | 'none';
   weapons: WeaponSystem;
   audio: AudioSystem;
   vfx: VFX;
@@ -370,10 +370,10 @@ export class VehicleFireController {
       }
     }
 
-    // Player / vehicle hit marker
+    // Player / vehicle hit marker (amber when only a vehicle was struck)
     if (hitPlayerIds.length > 0 || hitVehicleIds.length > 0) {
       ctx.hitMarkerTimer = 0.2;
-      ctx.hitMarkerType = 'player';
+      ctx.hitMarkerType = hitPlayerIds.length > 0 ? 'player' : 'vehicle';
       ctx.audio.playHitMarker('player');
     }
 

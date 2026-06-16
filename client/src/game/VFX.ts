@@ -291,6 +291,28 @@ export class VFX {
     }
   }
 
+  // ── Vehicle hit spark (metal-on-metal burst) ──
+  // Hot orange/yellow cube burst at a world-space point. Distinguishes rounds
+  // landing on a vehicle's armour from the red blood spark used for body hits.
+  emitMetalSpark(x: number, y: number, z: number): void {
+    for (let i = 0; i < 11 && this.particles.length < MAX_PARTICLES; i++) {
+      const hot = Math.random() < 0.5;
+      this.particles.push({
+        x, y, z,
+        vx: (Math.random() - 0.5) * 7.5,
+        vy: Math.random() * 5 + 1.5,
+        vz: (Math.random() - 0.5) * 7.5,
+        r: 1,
+        g: hot ? 0.82 : 0.5,
+        b: hot ? 0.32 : 0.05,
+        life: 0,
+        maxLife: 0.14 + Math.random() * 0.2,
+        size: 3 + Math.random() * 4,
+        gravity: true,
+      });
+    }
+  }
+
   // ── Projectile trail ──
   emitProjectileTrail(x: number, y: number, z: number, colorHex: number): void {
     const col = new THREE.Color(colorHex);

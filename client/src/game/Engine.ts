@@ -95,7 +95,7 @@ export interface EngineState {
   kills: number;
   deaths: number;
   hitMarker: boolean;
-  hitMarkerType: "block" | "player" | "kill" | "none";
+  hitMarkerType: "block" | "player" | "vehicle" | "kill" | "none";
   crosshairSpread: number; // 0..1 dynamic accuracy bloom
   combatTexts: CombatTextState[];
   timeOfDay: string;
@@ -372,7 +372,7 @@ export class Engine {
   private kills = 0;
   private deaths = 0;
   private hitMarkerTimer = 0;
-  private hitMarkerType: "block" | "player" | "kill" | "none" = "none";
+  private hitMarkerType: "block" | "player" | "vehicle" | "kill" | "none" = "none";
   private combatTexts: Array<{
     id: number;
     amount: number;
