@@ -49,8 +49,8 @@ const GLINT_MAX_DIST = 200;
 const GLINT_MIN_DIST = 8;
 const GLINT_PULSE_SPEED = 4;
 const REMOTE_PLAYER_FOOT_OFFSET = 1.7;
-const REMOTE_PLAYER_EYE_HEIGHT = 2.05;
-const REMOTE_PLAYER_NAMETAG_Y = 3.05;
+const REMOTE_PLAYER_EYE_HEIGHT = 2.5;
+const REMOTE_PLAYER_NAMETAG_Y = 3.4;
 
 function damp(current: number, target: number, lambda: number, delta: number): number {
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-lambda * delta));
@@ -175,13 +175,13 @@ export class RemotePlayerManager {
     rig.root.position.set(0, bobY - crouchDrop, 0);
     rig.root.rotation.set(0, bodyTwist, 0);
 
-    const upperBodyY = 1.22 - crouchAlpha * 0.08 - slideAlpha * 0.06;
+    const upperBodyY = 1.125 - crouchAlpha * 0.08 - slideAlpha * 0.06;
     rig.upperBody.position.set(0, upperBodyY, 0.01);
     rig.upperBody.rotation.x = upperAimX + forwardLean;
     rig.upperBody.rotation.y = bodyTwist * 0.25;
     rig.upperBody.rotation.z = bodyLeanZ;
 
-    rig.head.position.y = 0.72 - crouchAlpha * 0.06 - slideAlpha * 0.03;
+    rig.head.position.y = 1.125 - crouchAlpha * 0.06 - slideAlpha * 0.03;
     rig.head.rotation.x = -upperAimX * 0.2 - sprintAlpha * 0.06 + climbAlpha * 0.06;
     rig.head.rotation.y = -bodyTwist * 0.35;
     rig.head.rotation.z = -bodyLeanZ * 0.5;
@@ -248,8 +248,8 @@ export class RemotePlayerManager {
     rig.rightArm.rotation.y = rightArmY;
     rig.rightArm.rotation.z = rightArmZ;
 
-    rig.leftLeg.position.y = 0.96 - crouchAlpha * 0.18 - slideAlpha * 0.14;
-    rig.rightLeg.position.y = 0.96 - crouchAlpha * 0.18 - slideAlpha * 0.14;
+    rig.leftLeg.position.y = 1.125 - crouchAlpha * 0.18 - slideAlpha * 0.14;
+    rig.rightLeg.position.y = 1.125 - crouchAlpha * 0.18 - slideAlpha * 0.14;
     rig.leftLeg.rotation.x = leftLegX;
     rig.leftLeg.rotation.z = leftLegZ;
     rig.rightLeg.rotation.x = rightLegX;

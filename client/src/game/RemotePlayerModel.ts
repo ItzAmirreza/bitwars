@@ -34,46 +34,50 @@ export interface RemoteWeaponHoldPose {
   rightArmRotation: [number, number, number];
 }
 
+// Mount positions are in upper-body-local space. The rig now uses true
+// Minecraft proportions where the arms pivot at the shoulder (top of the
+// torso), so the hands sit high and forward when aiming — the gun mount is
+// placed to land in those hands.
 export function getRemoteWeaponHoldPose(weaponIndex: number): RemoteWeaponHoldPose {
   switch (weaponIndex) {
     case 1:
       return {
-        mountPosition: [0.35, -0.22, -0.48],
+        mountPosition: [0.35, 0.69, -0.9],
         mountRotation: [0.22, -0.08, -0.1],
         leftArmRotation: [1.04, 0.18, 0.46],
         rightArmRotation: [1.12, -0.16, -0.18],
       };
     case 2:
       return {
-        mountPosition: [0.31, -0.19, -0.46],
+        mountPosition: [0.31, 0.72, -0.88],
         mountRotation: [0.12, -0.07, -0.03],
         leftArmRotation: [0.92, 0.1, 0.18],
         rightArmRotation: [1.0, -0.12, -0.1],
       };
     case 3:
       return {
-        mountPosition: [0.34, -0.24, -0.53],
+        mountPosition: [0.34, 0.67, -0.95],
         mountRotation: [0.28, -0.1, -0.14],
         leftArmRotation: [1.14, 0.18, 0.5],
         rightArmRotation: [1.22, -0.16, -0.22],
       };
     case 4:
       return {
-        mountPosition: [0.34, -0.23, -0.49],
+        mountPosition: [0.34, 0.68, -0.91],
         mountRotation: [0.24, -0.08, -0.1],
         leftArmRotation: [1.08, 0.16, 0.44],
         rightArmRotation: [1.16, -0.14, -0.18],
       };
     case 5:
       return {
-        mountPosition: [0.36, -0.19, -0.62],
+        mountPosition: [0.36, 0.72, -1.04],
         mountRotation: [0.18, -0.05, -0.08],
         leftArmRotation: [1.0, 0.14, 0.36],
         rightArmRotation: [1.08, -0.12, -0.14],
       };
     default:
       return {
-        mountPosition: [0.34, -0.21, -0.54],
+        mountPosition: [0.34, 0.7, -0.96],
         mountRotation: [0.24, -0.09, -0.12],
         leftArmRotation: [1.08, 0.18, 0.42],
         rightArmRotation: [1.16, -0.14, -0.2],
@@ -166,123 +170,98 @@ function addBox(
 }
 
 /**
- * Uniform scale applied to the whole remote-player rig so other players read
- * as larger / easier to spot during fast-paced play. The rig is built around
- * the same joint anchors the animator drives, so scaling the root model keeps
- * every animation correct — it just renders bigger. Feet stay planted at the
- * model origin, so the foot offset is unaffected.
+ * The rig is authored at true world scale — its geometry is exactly 3 blocks
+ * tall (feet at the model origin, head crown at y = 3). Keeping the scale at 1
+ * means the model reads as the same size at every distance (no arbitrary
+ * multiplier that made it look 3 blocks far away but ~2 up close).
  */
-export const REMOTE_PLAYER_MODEL_SCALE = 1.18;
+export const REMOTE_PLAYER_MODEL_SCALE = 1.0;
 
+/**
+ * Builds a clean, Minecraft-proportioned soldier — balanced thirds:
+ *   legs  0.000 → 1.125   (37.5%)
+ *   torso 1.125 → 2.250   (37.5%)
+ *   head  2.250 → 3.000   (25%)
+ * -Z is forward (the face side). Decorative boxes are kept proud of (never
+ * coplanar with) the surface beneath them so adjacent faces never z-fight.
+ */
 export function createRemotePlayerModel(presetValue: number): RemotePlayerRig {
   const preset = getCharacterPreset(presetValue);
   const model = new THREE.Group();
   model.scale.setScalar(REMOTE_PLAYER_MODEL_SCALE);
 
-  // Material set — distinct shades give the silhouette depth under Lambert lighting.
-  // Every decorative box below is deliberately kept PROUD of its parent surface
-  // (never coplanar) so adjacent faces don't z-fight ("two things overlayed").
+  // Material set — flat, saturated voxel colours that read clearly in 3D.
   const skinMat = new THREE.MeshLambertMaterial({ color: preset.headColor });
-  const clothMat = new THREE.MeshLambertMaterial({ color: preset.bodyColor });
-  const armorMat = new THREE.MeshLambertMaterial({ color: preset.vestColor });
-  const helmetMat = new THREE.MeshLambertMaterial({
-    color: new THREE.Color(preset.vestColor).multiplyScalar(1.2).getHex(),
+  const shirtMat = new THREE.MeshLambertMaterial({ color: preset.bodyColor });
+  const pantsMat = new THREE.MeshLambertMaterial({ color: preset.vestColor });
+  const hairMat = new THREE.MeshLambertMaterial({
+    color: new THREE.Color(preset.gunColor).multiplyScalar(0.9).getHex(),
   });
-  const visorMat = new THREE.MeshLambertMaterial({
-    color: preset.visorColor,
-    emissive: preset.visorColor,
-    emissiveIntensity: 0.55,
-  });
+  const bootMat = new THREE.MeshLambertMaterial({ color: 0x14161c });
   const accentMat = new THREE.MeshLambertMaterial({
     color: preset.accentColor,
     emissive: preset.accentColor,
-    emissiveIntensity: 0.18,
+    emissiveIntensity: 0.16,
   });
-  const pantsMat = new THREE.MeshLambertMaterial({
-    color: new THREE.Color(preset.bodyColor).multiplyScalar(0.62).getHex(),
+  const eyeWhiteMat = new THREE.MeshLambertMaterial({ color: 0xeef1ff });
+  const eyeMat = new THREE.MeshLambertMaterial({
+    color: preset.visorColor,
+    emissive: preset.visorColor,
+    emissiveIntensity: 0.5,
   });
-  const pouchMat = new THREE.MeshLambertMaterial({
-    color: new THREE.Color(preset.vestColor).multiplyScalar(0.7).getHex(),
-  });
-  const bootMat = new THREE.MeshLambertMaterial({
-    color: new THREE.Color(preset.vestColor).multiplyScalar(0.85).getHex(),
-  });
-  const gloveMat = new THREE.MeshLambertMaterial({ color: 0x14161f });
 
   const root = new THREE.Group();
   root.name = 'remote-player-root';
   model.add(root);
 
-  // ---- Pelvis / hips ----
-  addBox(root, [0.7, 0.3, 0.42], armorMat, [0, 0.95, 0]);
-  addBox(root, [0.76, 0.12, 0.46], accentMat, [0, 1.07, 0]);        // belt (wider → proud sides)
-  addBox(root, [0.16, 0.1, 0.14], accentMat, [0, 1.07, -0.27]);     // buckle, proud of belt front
-
+  // ---- Torso (pivots at the waist, y = 1.125) ----
   const upperBody = new THREE.Group();
-  upperBody.position.set(0, 1.22, 0);
+  upperBody.position.set(0, 1.125, 0);
   root.add(upperBody);
-  // ---- Torso: chest plate + abdomen ----
-  addBox(upperBody, [0.84, 0.66, 0.46], armorMat, [0, 0.08, 0]);
-  addBox(upperBody, [0.7, 0.2, 0.42], clothMat, [0, -0.3, 0]);
-  // Collar / neck guard — protrudes forward of the chest face
-  addBox(upperBody, [0.5, 0.14, 0.06], accentMat, [0, 0.36, -0.25]);
-  // Sternum strap down the centre
-  addBox(upperBody, [0.08, 0.4, 0.06], accentMat, [0, 0.06, -0.25]);
-  // Vest pouches — clearly standing off the chest
-  addBox(upperBody, [0.2, 0.22, 0.1], pouchMat, [-0.17, -0.04, -0.26]);
-  addBox(upperBody, [0.2, 0.22, 0.1], pouchMat, [0.17, -0.04, -0.26]);
-  // Chunky shoulder pads sitting above the arm sockets
-  addBox(upperBody, [0.32, 0.2, 0.42], armorMat, [-0.46, 0.32, 0]);
-  addBox(upperBody, [0.32, 0.2, 0.42], armorMat, [0.46, 0.32, 0]);
-  // Neck linking chest to head
-  addBox(upperBody, [0.28, 0.18, 0.28], skinMat, [0, 0.5, 0]);
+  addBox(upperBody, [0.75, 1.125, 0.4], shirtMat, [0, 0.5625, 0]);     // chest + abdomen
+  addBox(upperBody, [0.8, 0.16, 0.44], accentMat, [0, 0.06, 0]);       // belt (proud sides)
+  addBox(upperBody, [0.12, 0.78, 0.05], accentMat, [0, 0.6, -0.215]);  // front zip strip (proud of chest)
+  addBox(upperBody, [0.46, 0.14, 0.06], skinMat, [0, 1.05, -0.2]);     // collar / neck base
 
+  // ---- Head (pivots at the neck, top of torso) ----
   const head = new THREE.Group();
-  head.position.set(0, 0.74, 0);
+  head.position.set(0, 1.125, 0);
   upperBody.add(head);
-  // Skull (skin) + jaw
-  addBox(head, [0.6, 0.56, 0.58], skinMat, [0, 0.0, 0]);
-  addBox(head, [0.48, 0.16, 0.5], skinMat, [0, -0.32, 0.02]);
-  // Combat helmet: dome (wider than head → clean overhang) + forward peak
-  addBox(head, [0.7, 0.32, 0.7], helmetMat, [0, 0.28, 0.01]);
-  addBox(head, [0.66, 0.1, 0.2], helmetMat, [0, 0.1, -0.34]);       // brim peak over the eyes
-  // Ear / side protection — protrudes past the head sides
-  addBox(head, [0.12, 0.3, 0.42], armorMat, [-0.34, 0.04, 0.02]);
-  addBox(head, [0.12, 0.3, 0.42], armorMat, [0.34, 0.04, 0.02]);
-  // Single clean glowing visor band, sitting proud of the face (no overlapping eye boxes)
-  addBox(head, [0.5, 0.16, 0.06], visorMat, [0, -0.02, -0.31]);
-  // Breather / chin guard, proud of the jaw
-  addBox(head, [0.22, 0.12, 0.1], accentMat, [0, -0.27, -0.22]);
+  addBox(head, [0.75, 0.75, 0.75], skinMat, [0, 0.375, 0]);            // skull / face
+  // Hair cap — wider & set back so the lower front stays skin (a real face).
+  addBox(head, [0.81, 0.5, 0.81], hairMat, [0, 0.55, 0.04]);
+  // Eyes: whites + glowing iris (per-player identity colour), proud of the face.
+  addBox(head, [0.15, 0.16, 0.05], eyeWhiteMat, [-0.16, 0.42, -0.39]);
+  addBox(head, [0.15, 0.16, 0.05], eyeWhiteMat, [0.16, 0.42, -0.39]);
+  addBox(head, [0.08, 0.1, 0.05], eyeMat, [-0.17, 0.42, -0.41]);
+  addBox(head, [0.08, 0.1, 0.05], eyeMat, [0.17, 0.42, -0.41]);
+  addBox(head, [0.26, 0.05, 0.05], hairMat, [0, 0.21, -0.39]);        // mouth line
 
+  // ---- Arms (pivot at the shoulders, top of torso) ----
   const leftArm = new THREE.Group();
-  leftArm.position.set(-0.5, 0.28, 0.02);
+  leftArm.position.set(-0.5625, 1.125, 0);
   upperBody.add(leftArm);
-  addBox(leftArm, [0.26, 0.42, 0.3], clothMat, [0, -0.22, 0]);      // upper arm
-  addBox(leftArm, [0.24, 0.36, 0.26], armorMat, [0, -0.58, 0.02]);  // forearm guard
-  addBox(leftArm, [0.2, 0.18, 0.24], gloveMat, [0, -0.8, 0.0]);     // glove
+  addBox(leftArm, [0.375, 0.78, 0.375], shirtMat, [0, -0.39, 0]);      // sleeve
+  addBox(leftArm, [0.375, 0.36, 0.375], skinMat, [0, -0.96, 0]);       // forearm / hand
 
   const rightArm = new THREE.Group();
-  rightArm.position.set(0.5, 0.28, 0.02);
+  rightArm.position.set(0.5625, 1.125, 0);
   upperBody.add(rightArm);
-  addBox(rightArm, [0.26, 0.42, 0.3], clothMat, [0, -0.22, 0]);
-  addBox(rightArm, [0.24, 0.36, 0.26], armorMat, [0, -0.58, 0.02]);
-  addBox(rightArm, [0.2, 0.18, 0.24], gloveMat, [0, -0.8, 0.0]);
+  addBox(rightArm, [0.375, 0.78, 0.375], shirtMat, [0, -0.39, 0]);
+  addBox(rightArm, [0.375, 0.36, 0.375], skinMat, [0, -0.96, 0]);
 
+  // ---- Legs (pivot at the hips, y = 1.125) ----
   const leftLeg = new THREE.Group();
-  leftLeg.position.set(-0.2, 0.96, 0);
+  leftLeg.position.set(-0.1875, 1.125, 0);
   root.add(leftLeg);
-  addBox(leftLeg, [0.32, 0.46, 0.36], pantsMat, [0, -0.24, 0]);     // thigh
-  addBox(leftLeg, [0.28, 0.1, 0.12], accentMat, [0, -0.46, -0.2]);  // knee pad, proud of shin front
-  addBox(leftLeg, [0.3, 0.42, 0.32], pantsMat, [0, -0.66, 0]);      // shin
-  addBox(leftLeg, [0.36, 0.2, 0.5], bootMat, [0, -0.88, -0.05]);    // boot
+  addBox(leftLeg, [0.375, 0.95, 0.375], pantsMat, [0, -0.475, 0]);     // leg
+  addBox(leftLeg, [0.4, 0.18, 0.46], bootMat, [0, -1.04, -0.04]);      // boot (proud, toe forward)
 
   const rightLeg = new THREE.Group();
-  rightLeg.position.set(0.2, 0.96, 0);
+  rightLeg.position.set(0.1875, 1.125, 0);
   root.add(rightLeg);
-  addBox(rightLeg, [0.32, 0.46, 0.36], pantsMat, [0, -0.24, 0]);
-  addBox(rightLeg, [0.28, 0.1, 0.12], accentMat, [0, -0.46, -0.2]);
-  addBox(rightLeg, [0.3, 0.42, 0.32], pantsMat, [0, -0.66, 0]);
-  addBox(rightLeg, [0.36, 0.2, 0.5], bootMat, [0, -0.88, -0.05]);
+  addBox(rightLeg, [0.375, 0.95, 0.375], pantsMat, [0, -0.475, 0]);
+  addBox(rightLeg, [0.4, 0.18, 0.46], bootMat, [0, -1.04, -0.04]);
 
   const gunMount = new THREE.Group();
   const defaultHoldPose = getRemoteWeaponHoldPose(0);
