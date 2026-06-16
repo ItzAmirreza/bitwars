@@ -227,6 +227,25 @@ export default class VehicleManager {
     return this.isLocalPilot(this.engine.mountedVehicleId);
   }
 
+  /** True when the local player is mounted but is NOT the pilot (a passenger). */
+  isMountedVehiclePassenger(): boolean {
+    return this.engine.mountedVehicleId !== 0 && !this.isMountedVehiclePilot();
+  }
+
+  /** Passenger first-person seat offset for the mounted vehicle, or null when
+   *  the vehicle has no gunner seat / the local player is the pilot. */
+  getPassengerCameraOffset(): { x: number; y: number; z: number } | null {
+    if (!this.isMountedVehiclePassenger()) return null;
+    const vt = this.getMountedVehicleType();
+    return vt?.getPassengerCameraOffset?.() ?? null;
+  }
+
+  /** True when the local player should ride first-person as a gunner (passenger
+   *  seat that supports infantry fire). */
+  isFirstPersonPassenger(): boolean {
+    return this.getPassengerCameraOffset() !== null;
+  }
+
   getVehicleOccupantCount(vehicleId: number): number {
     if (!this.engine.conn || vehicleId === 0) return 0;
     const table =
@@ -513,12 +532,13 @@ export default class VehicleManager {
     this.ensureLightRig(entityId, mesh);
     if (typeId === VEHICLE_TYPES.Helicopter) {
       this.engine.audio.startHelicopterSound(entityId);
+    } else if (typeId === VEHICLE_TYPES.Hover) {
+      // Hover bike uses its own anti-grav hum loop.
+      this.engine.audio.startHoverSound(entityId);
     } else if (
       typeId === VEHICLE_TYPES.FighterJet
       || typeId === VEHICLE_TYPES.AntiAir
-      || typeId === VEHICLE_TYPES.Hover
     ) {
-      // Hover bike uses the turbine-whine engine loop.
       this.engine.audio.startJetEngineSound(entityId);
     }
     return mesh;
@@ -601,9 +621,10 @@ export default class VehicleManager {
     this.removeLightRig(entityId);
     const inst = this.vehicleInstances.get(entityId);
     const isTurbineEngine = inst?.type === VEHICLE_TYPES.FighterJet
-      || inst?.type === VEHICLE_TYPES.AntiAir
-      || inst?.type === VEHICLE_TYPES.Hover;
-    if (isTurbineEngine) {
+      || inst?.type === VEHICLE_TYPES.AntiAir;
+    if (inst?.type === VEHICLE_TYPES.Hover) {
+      this.engine.audio.stopHoverSound(entityId, destroyed);
+    } else if (isTurbineEngine) {
       this.engine.audio.stopJetEngineSound(entityId, destroyed);
     } else {
       this.engine.audio.stopHelicopterSound(entityId, destroyed);
@@ -965,6 +986,62 @@ export default class VehicleManager {
     this.engine.controls.resetVelocity();
 
     this.updateMountedVehicleOpacity(pose, camDist);
+  }
+
+  /**
+   * First-person camera for a passenger gunner. Sits at the seat eye derived
+   * from the (smooth, interpolated) vehicle mesh + the type's passenger offset,
+   * and looks along the pilot-look yaw/pitch (mouse). Used instead of the chase
+   * camera so the passenger can aim and fire their infantry weapon naturally.
+   */
+  syncPassengerFirstPersonCamera(): void {
+    const offset = this.getPassengerCameraOffset();
+    if (!offset) return;
+    const mesh = this.vehicles.get(this.engine.mountedVehicleId);
+    if (!mesh) return;
+
+    // Local → world using the rendered (interpolated) yaw; pitch stays level
+    // for the hover, matching the server seat transform.
+    const yaw = mesh.rotation.y;
+    const siny = Math.sin(yaw);
+    const cosy = Math.cos(yaw);
+    const eyeX = mesh.position.x + offset.x * cosy + offset.z * siny;
+    const eyeY = mesh.position.y + offset.y;
+    const eyeZ = mesh.position.z - offset.x * siny + offset.z * cosy;
+
+    const lookYaw = this.vehiclePilotYaw;
+    const lookPitch = this.vehiclePilotPitch;
+    const cosPitch = Math.cos(lookPitch);
+    const fx = -Math.sin(lookYaw) * cosPitch;
+    const fy = Math.sin(lookPitch);
+    const fz = -Math.cos(lookYaw) * cosPitch;
+
+    this.engine.camera.position.set(eyeX, eyeY, eyeZ);
+    this.engine.camera.lookAt(eyeX + fx * 18, eyeY + fy * 18, eyeZ + fz * 18);
+    this.engine.controls.resetVelocity();
+
+    // The rider sits on the bike — keep it fully opaque (no chase-cam fade).
+    this.setVehicleOpacity(mesh, 1.0);
+  }
+
+  /**
+   * Server-authoritative seat eye position for a passenger gunner's shots.
+   * Mirrors the server seat transform from the raw (un-interpolated) vehicle
+   * entity pose so the fire origin stays within shot-origin validation range
+   * even at speed (the rendered FP camera uses the smoothed mesh instead).
+   */
+  getPassengerFireOrigin(): { x: number; y: number; z: number } | null {
+    const offset = this.getPassengerCameraOffset();
+    if (!offset) return null;
+    const pose = this.getMountedVehiclePoseRaw();
+    if (!pose) return null;
+    const siny = Math.sin(pose.yaw);
+    const cosy = Math.cos(pose.yaw);
+    return {
+      x: pose.x + offset.x * cosy + offset.z * siny,
+      y: pose.y + offset.y,
+      z: pose.z - offset.x * siny + offset.z * cosy,
+    };
   }
 
   private updateMountedVehicleOpacity(

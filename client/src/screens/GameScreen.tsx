@@ -92,6 +92,7 @@ export function GameScreen({ active }: GameScreenProps) {
     vehicleReloading: false,
     vehicleWeaponSlots: [{ name: 'MINIGUN', color: '#ffaa00' }, { name: 'ROCKETS', color: '#ff4400' }],
     isVehiclePilot: false,
+    crosshairReticle: 'infantry',
     aaTargets: [],
     nearVehicle: false,
     nearVehicleName: null,
@@ -810,6 +811,7 @@ export function GameScreen({ active }: GameScreenProps) {
             hitMarker={state.hitMarker}
             hitMarkerType={state.hitMarkerType}
             mountedVehicleName={state.mountedVehicleName}
+            reticle={state.crosshairReticle}
             vehicleWeapon={state.vehicleWeapon}
             vehicleWeaponColor={state.vehicleWeaponSlots[state.vehicleWeapon]?.color}
             damageIndicators={state.damageIndicators}

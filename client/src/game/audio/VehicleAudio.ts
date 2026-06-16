@@ -500,3 +500,246 @@ export function disposeAllJetSounds(): void {
   jetSounds.clear();
   jetNoiseBuffer = null;
 }
+
+// ══════════════════════════════════════════════════════════════
+//  HOVER BIKE ENGINE SOUND
+// ══════════════════════════════════════════════════════════════
+// A smooth anti-grav hum: a low repulsor drone, an airy filtered-noise rush
+// that opens up with speed, and a subtle electric whine shimmer. Distinct from
+// the jet's broadband roar so the hover bike reads as a sleek hovercraft.
+
+interface HoverSoundNodes {
+  droneOsc1: OscillatorNode;
+  droneOsc2: OscillatorNode;
+  droneGain: GainNode;
+  rushSrc: AudioBufferSourceNode;
+  rushBp: BiquadFilterNode;
+  rushGain: GainNode;
+  whineOsc: OscillatorNode;
+  whineGain: GainNode;
+  mixGain: GainNode;
+  outputFilter: BiquadFilterNode;
+  panner: PannerNode;
+  allSources: (AudioBufferSourceNode | OscillatorNode)[];
+  wasLocal: boolean;
+  stopping: boolean;
+  stopTimer: ReturnType<typeof setTimeout> | null;
+}
+
+const hoverSounds = new Map<number, HoverSoundNodes>();
+
+export function startHoverSound(core: AudioCore, id: number): void {
+  const existing = hoverSounds.get(id);
+  if (existing) {
+    if (!existing.stopping) return;
+    if (existing.stopTimer) clearTimeout(existing.stopTimer);
+    cleanupHoverSound(id);
+  }
+  const ctx = core.ensure();
+  const t = ctx.currentTime;
+  const noiseBuf = getOrCreateJetNoiseBuffer(core);
+  const allSources: (AudioBufferSourceNode | OscillatorNode)[] = [];
+
+  // ── Layer 1: Repulsor drone (two detuned low oscillators) ──
+  const droneOsc1 = ctx.createOscillator();
+  droneOsc1.type = 'sine';
+  droneOsc1.frequency.value = 66;
+  allSources.push(droneOsc1);
+
+  const droneOsc2 = ctx.createOscillator();
+  droneOsc2.type = 'triangle';
+  droneOsc2.frequency.value = 69; // slight detune → soft beating
+  allSources.push(droneOsc2);
+
+  const droneLp = ctx.createBiquadFilter();
+  droneLp.type = 'lowpass';
+  droneLp.frequency.value = 260;
+
+  const droneGain = ctx.createGain();
+  droneGain.gain.value = 0.08;
+
+  const droneMerge = ctx.createGain();
+  droneMerge.gain.value = 0.5;
+  droneOsc1.connect(droneMerge);
+  droneOsc2.connect(droneMerge);
+  droneMerge.connect(droneLp).connect(droneGain);
+
+  // ── Layer 2: Airy rush (band-passed noise, opens up with speed) ──
+  const rushSrc = ctx.createBufferSource();
+  rushSrc.buffer = noiseBuf;
+  rushSrc.loop = true;
+  allSources.push(rushSrc);
+
+  const rushBp = ctx.createBiquadFilter();
+  rushBp.type = 'bandpass';
+  rushBp.frequency.value = 480;
+  rushBp.Q.value = 0.6;
+
+  const rushGain = ctx.createGain();
+  rushGain.gain.value = 0.015;
+
+  rushSrc.connect(rushBp).connect(rushGain);
+
+  // ── Layer 3: Electric whine shimmer ──
+  const whineOsc = ctx.createOscillator();
+  whineOsc.type = 'triangle';
+  whineOsc.frequency.value = 280;
+  allSources.push(whineOsc);
+
+  const whineGain = ctx.createGain();
+  whineGain.gain.value = 0.012;
+
+  whineOsc.connect(whineGain);
+
+  // ── Output chain ──
+  const mixGain = ctx.createGain();
+  mixGain.gain.setValueAtTime(0, t);
+  mixGain.gain.linearRampToValueAtTime(0.13, t + 1.0);
+
+  droneGain.connect(mixGain);
+  rushGain.connect(mixGain);
+  whineGain.connect(mixGain);
+
+  const outputFilter = ctx.createBiquadFilter();
+  outputFilter.type = 'lowpass';
+  outputFilter.frequency.value = 4200;
+
+  const panner = ctx.createPanner();
+  panner.panningModel = 'HRTF';
+  panner.distanceModel = 'inverse';
+  panner.refDistance = 16;
+  panner.maxDistance = 90;
+  panner.rolloffFactor = 1.8;
+  panner.coneInnerAngle = 360;
+  panner.coneOuterAngle = 360;
+
+  mixGain.connect(outputFilter).connect(panner).connect(core.getBus('vehicle'));
+
+  droneOsc1.start(t);
+  droneOsc2.start(t);
+  rushSrc.start(t);
+  whineOsc.start(t);
+
+  hoverSounds.set(id, {
+    droneOsc1,
+    droneOsc2,
+    droneGain,
+    rushSrc,
+    rushBp,
+    rushGain,
+    whineOsc,
+    whineGain,
+    mixGain,
+    outputFilter,
+    panner,
+    allSources,
+    wasLocal: false,
+    stopping: false,
+    stopTimer: null,
+  });
+}
+
+export function updateHoverSound(
+  core: AudioCore,
+  id: number,
+  position: Vec3Like,
+  speed: number,
+  isLocal: boolean,
+  apparentPosition?: Vec3Like,
+  propagationOcclusion?: number,
+): void {
+  const nodes = hoverSounds.get(id);
+  if (!nodes || nodes.stopping || !core.ctx) return;
+  const t = core.ctx.currentTime;
+
+  // Speed factor 0–1 (hover cruise ~46)
+  const speedFactor = Math.min(1, speed / 46);
+
+  // ── Drone: rises slightly and swells with speed ──
+  const droneFreq = 62 + speedFactor * 26;
+  nodes.droneOsc1.frequency.setTargetAtTime(droneFreq, t, 0.12);
+  nodes.droneOsc2.frequency.setTargetAtTime(droneFreq * 1.045, t, 0.12);
+  const droneVol = 0.07 + speedFactor * 0.05;
+  nodes.droneGain.gain.setTargetAtTime(droneVol, t, 0.18);
+
+  // ── Rush: louder & brighter with speed ──
+  const rushVol = 0.012 + speedFactor * 0.07;
+  nodes.rushGain.gain.setTargetAtTime(rushVol, t, 0.2);
+  const rushCutoff = 420 + speedFactor * 900;
+  nodes.rushBp.frequency.setTargetAtTime(rushCutoff, t, 0.18);
+
+  // ── Whine: pitch climbs with speed ──
+  const whineFreq = 260 + speedFactor * 200;
+  nodes.whineOsc.frequency.setTargetAtTime(whineFreq, t, 0.12);
+  const whineVol = 0.008 + speedFactor * 0.014;
+  nodes.whineGain.gain.setTargetAtTime(whineVol, t, 0.15);
+
+  // ── Local vs remote tonal adjustment ──
+  if (isLocal !== nodes.wasLocal) {
+    nodes.wasLocal = isLocal;
+    const cutoff = isLocal ? 2400 : 4200;
+    const vol = isLocal ? 0.1 : 0.13;
+    nodes.outputFilter.frequency.setTargetAtTime(cutoff, t, 0.3);
+    nodes.mixGain.gain.setTargetAtTime(vol, t, 0.3);
+  }
+
+  // ── Panner position: use apparent position if available (sound propagation) ──
+  core.setPannerPosition(nodes.panner, apparentPosition ?? position, t);
+
+  // ── Propagation occlusion ──
+  if (propagationOcclusion !== undefined && propagationOcclusion > 0.01) {
+    const baseCutoff = nodes.wasLocal ? 2400 : 4200;
+    const occludedCutoff = baseCutoff * (1 - propagationOcclusion * 0.7);
+    nodes.outputFilter.frequency.setTargetAtTime(Math.max(200, occludedCutoff), t, 0.1);
+    const baseVol = nodes.wasLocal ? 0.1 : 0.13;
+    const occludedVol = baseVol * (1 - propagationOcclusion * 0.4);
+    nodes.mixGain.gain.setTargetAtTime(occludedVol, t, 0.15);
+  }
+}
+
+export function stopHoverSound(core: AudioCore, id: number, destroyed = false): void {
+  const nodes = hoverSounds.get(id);
+  if (!nodes || nodes.stopping) return;
+  nodes.stopping = true;
+  if (!core.ctx) {
+    hoverSounds.delete(id);
+    return;
+  }
+  const t = core.ctx.currentTime;
+
+  if (destroyed) {
+    const fadeTime = 0.5;
+    nodes.droneOsc1.frequency.setTargetAtTime(34, t, 0.12);
+    nodes.droneOsc2.frequency.setTargetAtTime(35, t, 0.12);
+    nodes.whineOsc.frequency.setTargetAtTime(120, t, 0.1);
+    nodes.mixGain.gain.setTargetAtTime(0, t, 0.12);
+    nodes.stopTimer = setTimeout(() => cleanupHoverSound(id), fadeTime * 1000);
+  } else {
+    const fadeTime = 0.7;
+    nodes.mixGain.gain.setTargetAtTime(0, t, 0.18);
+    nodes.stopTimer = setTimeout(() => cleanupHoverSound(id), fadeTime * 1000);
+  }
+}
+
+function cleanupHoverSound(id: number): void {
+  const nodes = hoverSounds.get(id);
+  if (!nodes) return;
+  for (const src of nodes.allSources) {
+    try { src.stop(); } catch { /* already stopped */ }
+    src.disconnect();
+  }
+  nodes.mixGain.disconnect();
+  nodes.outputFilter.disconnect();
+  nodes.panner.disconnect();
+  hoverSounds.delete(id);
+}
+
+/** Called by AudioSystem.dispose() to clean up all hover sounds. */
+export function disposeAllHoverSounds(): void {
+  for (const id of Array.from(hoverSounds.keys())) {
+    const nodes = hoverSounds.get(id);
+    if (nodes?.stopTimer) clearTimeout(nodes.stopTimer);
+    cleanupHoverSound(id);
+  }
+  hoverSounds.clear();
+}

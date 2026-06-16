@@ -62,6 +62,16 @@ export interface VehicleType {
   getPilotSeatHeight(): number;
 
   /**
+   * Local-space eye offset for a first-person passenger (gunner) seat, or null
+   * if this vehicle has no rideable gunner seat. When non-null, a non-pilot
+   * occupant rides first-person from this offset and can fire their infantry
+   * weapon (instead of the third-person chase camera). The offset is in the
+   * vehicle's local frame (forward = -Z) and is transformed by the vehicle's
+   * yaw to place the camera, matching the server seat transform.
+   */
+  getPassengerCameraOffset?(): { x: number; y: number; z: number } | null;
+
+  /**
    * Called every frame for each live instance of this type.
    * Handles type-specific animation (rotors, treads, hover bob, etc.).
    *
@@ -114,6 +124,12 @@ export interface VehicleTypeFrameContext {
       isLocal: boolean,
     ): void;
     updateJetEngineSound(
+      entityId: number,
+      position: THREE.Vector3,
+      speed: number,
+      isLocal: boolean,
+    ): void;
+    updateHoverSound(
       entityId: number,
       position: THREE.Vector3,
       speed: number,

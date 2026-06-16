@@ -388,6 +388,34 @@ export class AudioSystem {
     this.core.rayState.unregisterSource(id);
   }
 
+  // ── Vehicle (Hover Bike) ──
+
+  startHoverSound(id: number): void {
+    VehicleAudio.startHoverSound(this.core, id);
+    this.core.rayState.registerSource(id, { x: 0, y: 0, z: 0 });
+  }
+
+  updateHoverSound(
+    id: number,
+    position: Vec3Like,
+    speed: number,
+    isLocal: boolean,
+  ): void {
+    this.core.rayState.updateSourcePosition(id, position);
+
+    const { apparentPos, occlusion } = this.computeApparentPosition(id, position);
+
+    VehicleAudio.updateHoverSound(
+      this.core, id, position, speed, isLocal,
+      apparentPos, occlusion,
+    );
+  }
+
+  stopHoverSound(id: number, destroyed?: boolean): void {
+    VehicleAudio.stopHoverSound(this.core, id, destroyed);
+    this.core.rayState.unregisterSource(id);
+  }
+
   /**
    * Compute the apparent position for a sound source based on ray-traced
    * propagation data. If the source has direct LOS, returns the real position.
@@ -455,6 +483,7 @@ export class AudioSystem {
 
     VehicleAudio.disposeAllHelicopterSounds();
     VehicleAudio.disposeAllJetSounds();
+    VehicleAudio.disposeAllHoverSounds();
     this.core.dispose();
   }
 }

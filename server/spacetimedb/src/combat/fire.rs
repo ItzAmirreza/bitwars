@@ -46,7 +46,19 @@ pub fn fire_weapon(
         return Err("Cannot fire while spawn protected".to_string());
     }
     if player.mounted_vehicle_id != 0 {
-        return Err("Cannot fire while piloting".to_string());
+        // The pilot can't fire infantry weapons while driving, but a passenger
+        // (gunner) riding along can. If the vehicle row is missing, fall back to
+        // blocking — never trust an unverifiable mount.
+        let is_pilot = ctx
+            .db
+            .vehicle()
+            .entity_id()
+            .find(&player.mounted_vehicle_id)
+            .map(|v| v.pilot_identity == Some(sender))
+            .unwrap_or(true);
+        if is_pilot {
+            return Err("Cannot fire while piloting".to_string());
+        }
     }
 
     let def = weapons::get_weapon(weapon);

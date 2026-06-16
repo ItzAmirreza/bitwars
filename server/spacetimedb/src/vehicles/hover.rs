@@ -76,7 +76,10 @@ pub fn tick_hover(
     };
 
     // ── Steering ──
-    entity.rot.yaw += yaw_input * hover_max_yaw_rate() * dt;
+    // Yaw is negated so the bike turns toward the pressed direction (A = left,
+    // D = right). Keep this sign in lockstep with the client prediction in
+    // VehiclePhysics.tickHover, or reconciliation will fight the input.
+    entity.rot.yaw -= yaw_input * hover_max_yaw_rate() * dt;
     if entity.rot.yaw > std::f32::consts::PI {
         entity.rot.yaw -= TAU;
     }

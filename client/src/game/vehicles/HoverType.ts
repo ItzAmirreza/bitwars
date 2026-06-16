@@ -53,6 +53,16 @@ export class HoverType implements VehicleType {
     return HOVER.pilotSeatHeight;
   }
 
+  /**
+   * First-person eye offset for the rear gunner seat. The server seats the
+   * passenger at local (0, 1.3, 0.95); we sit the camera a head-height above
+   * and a touch forward of the saddle so the view clears the rear turbine and
+   * the rider can aim their infantry weapon freely.
+   */
+  getPassengerCameraOffset(): { x: number; y: number; z: number } {
+    return { x: 0, y: 2.5, z: 0.6 };
+  }
+
   // ══════════════════════════════════════════════════════════════
   //  MODEL BUILDER
   // ══════════════════════════════════════════════════════════════
@@ -258,7 +268,7 @@ export class HoverType implements VehicleType {
   updatePerFrame(
     instance: VehicleInstance,
     delta: number,
-    _isLocal: boolean,
+    isLocal: boolean,
     ctx: VehicleTypeFrameContext,
   ): void {
     const mesh = instance.mesh;
@@ -330,6 +340,26 @@ export class HoverType implements VehicleType {
         }
       });
     }
+
+    // ── Hover engine audio (speed derived from frame-to-frame position delta;
+    //    the bob animation lives on the orient wrapper, so mesh.position stays
+    //    clean) ──
+    const prevPos = mesh.userData.hoverPrevPos as THREE.Vector3 | undefined;
+    let hSpeed = (mesh.userData.hoverSpeed as number) ?? 0;
+    if (prevPos && delta > 0) {
+      const rawVx = (mesh.position.x - prevPos.x) / delta;
+      const rawVz = (mesh.position.z - prevPos.z) / delta;
+      const rawSpeed = Math.sqrt(rawVx * rawVx + rawVz * rawVz);
+      const sm = 1 - Math.pow(0.00001, delta); // ~100ms EMA
+      hSpeed = hSpeed + (rawSpeed - hSpeed) * sm;
+      mesh.userData.hoverSpeed = hSpeed;
+    }
+    if (!mesh.userData.hoverPrevPos) {
+      mesh.userData.hoverPrevPos = mesh.position.clone();
+    } else {
+      (mesh.userData.hoverPrevPos as THREE.Vector3).copy(mesh.position);
+    }
+    ctx.audio.updateHoverSound(instance.entityId, mesh.position, hSpeed, isLocal);
   }
 
   // ══════════════════════════════════════════════════════════════

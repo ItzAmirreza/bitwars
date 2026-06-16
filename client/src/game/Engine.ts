@@ -119,6 +119,10 @@ export interface EngineState {
   vehicleReloading: boolean;
   vehicleWeaponSlots: { name: string; color: string }[];
   isVehiclePilot: boolean;
+  /** Which reticle the crosshair should draw: the vehicle weapon reticle (armed
+   *  pilot), the infantry crosshair (on foot or passenger gunner), or nothing
+   *  (driver of a weaponless vehicle, e.g. the hover bike). */
+  crosshairReticle: "vehicle" | "infantry" | "none";
   aaTargets: {
     screenX: number;
     screenY: number;
@@ -1680,6 +1684,20 @@ export class Engine {
     }
   }
 
+  /** True when the local player rides a vehicle as a first-person passenger
+   *  gunner (may fire their infantry weapon). Used by InfantryFireController. */
+  get isMountedPassengerGunner(): boolean {
+    return (
+      this.mountedVehicleId !== 0 &&
+      this.vehicleManager.isFirstPersonPassenger()
+    );
+  }
+
+  /** Server-authoritative seat eye for a passenger gunner's shot origin. */
+  getMountedFireOrigin(): { x: number; y: number; z: number } | null {
+    return this.vehicleManager.getPassengerFireOrigin();
+  }
+
   // ── INPUT ──
 
   private onMouseDown = (e: MouseEvent): void => {
@@ -2229,8 +2247,12 @@ export class Engine {
       if (this.mountedVehicleId !== 0) {
         if (this.vehicleManager.isMountedVehiclePilot()) {
           this.startVehicleReload();
+          return;
         }
-        return;
+        // Passenger gunner reloads their infantry weapon; any other passenger
+        // has nothing to reload.
+        if (!this.isMountedPassengerGunner) return;
+        // fall through to the infantry reload path below
       }
       this.weapons.reload(); // Client prediction
       this.audio.playReload(this.localAudioSource(-0.15));
@@ -2239,9 +2261,11 @@ export class Engine {
       const reloadWeaponIndex = this.weapons.currentWeapon;
       const token = ++this.reloadToken;
       window.setTimeout(() => {
-        // Skip if superseded by another reload, dead, mounted, or weapon switched.
+        // Skip if superseded by another reload, dead, switched weapon, or
+        // mounted (unless riding as a passenger gunner).
         if (token !== this.reloadToken) return;
-        if (this.health <= 0 || this.mountedVehicleId !== 0) return;
+        if (this.health <= 0) return;
+        if (this.mountedVehicleId !== 0 && !this.isMountedPassengerGunner) return;
         if (this.weapons.currentWeapon !== reloadWeaponIndex) return;
         this.audio.playReloadComplete(this.localAudioSource(-0.15));
       }, 700);
@@ -2282,12 +2306,14 @@ export class Engine {
       event.movementX * this.controls.sensitivity;
     this.vehicleManager.vehiclePilotPitch -=
       event.movementY * this.controls.sensitivity;
+    // A passenger gunner aims like infantry, so give them a near-full pitch
+    // range; the pilot stays clamped to the vehicle's chase-cam limits.
+    const isGunner = this.vehicleManager.isFirstPersonPassenger();
+    const pitchMin = isGunner ? -1.45 : this.vehicleManager.PILOT_PITCH_MIN;
+    const pitchMax = isGunner ? 1.45 : this.vehicleManager.PILOT_PITCH_MAX;
     this.vehicleManager.vehiclePilotPitch = Math.max(
-      this.vehicleManager.PILOT_PITCH_MIN,
-      Math.min(
-        this.vehicleManager.PILOT_PITCH_MAX,
-        this.vehicleManager.vehiclePilotPitch,
-      ),
+      pitchMin,
+      Math.min(pitchMax, this.vehicleManager.vehiclePilotPitch),
     );
     // Wrap to [-PI, PI]
     if (this.vehicleManager.vehiclePilotYaw > Math.PI)
@@ -4052,14 +4078,22 @@ export class Engine {
     this.vehicleManager.updatePerFrame(delta);
 
     if (this.mountedVehicleId !== 0) {
-      this.vehicleManager.syncMountedCameraToVehicle();
-      this.vehicleManager.syncVehicleInput();
-      if (
-        (this.mouseDown || this.autoFireHeld)
-        && this.controls.locked
-        && this.vehicleManager.isMountedVehiclePilot()
-      ) {
-        this.tryVehicleFire();
+      if (this.vehicleManager.isFirstPersonPassenger()) {
+        // Passenger gunner: first-person seat view + infantry fire.
+        this.vehicleManager.syncPassengerFirstPersonCamera();
+        if ((this.mouseDown || this.autoFireHeld) && this.controls.locked) {
+          this.tryFire();
+        }
+      } else {
+        this.vehicleManager.syncMountedCameraToVehicle();
+        this.vehicleManager.syncVehicleInput();
+        if (
+          (this.mouseDown || this.autoFireHeld)
+          && this.controls.locked
+          && this.vehicleManager.isMountedVehiclePilot()
+        ) {
+          this.tryVehicleFire();
+        }
       }
     }
 
@@ -4461,7 +4495,10 @@ export class Engine {
     this.renderer.render(this.scene, this.camera);
     this.renderer.autoClear = false;
     this.renderer.clearDepth();
-    if (this.mountedVehicleId === 0 && this.scopeFovLerp < 0.5) {
+    if (
+      (this.mountedVehicleId === 0 || this.isMountedPassengerGunner)
+      && this.scopeFovLerp < 0.5
+    ) {
       this.renderer.render(this.weaponModel.scene, this.weaponModel.camera);
     }
     this.postfx.render(this.renderer);
@@ -4661,6 +4698,14 @@ export class Engine {
         ] > performance.now(),
       vehicleWeaponSlots,
       isVehiclePilot,
+      crosshairReticle:
+        this.mountedVehicleId === 0
+          ? "infantry"
+          : this.vehicleManager.getMountedWeaponSlotCount() > 0
+            ? "vehicle"
+            : this.isMountedPassengerGunner
+              ? "infantry"
+              : "none",
       aaTargets: this.vehicleManager.getAATargets(
         this.camera,
         ANTI_AIR.trackingRange,

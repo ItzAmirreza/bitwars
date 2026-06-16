@@ -379,8 +379,9 @@ export function tickHover(
   const str = clamp(input.strafe, -1, 1);
   const ywIn = clamp(input.yaw, -1, 1);
 
-  // Steering
-  yaw += ywIn * HOVER.maxYawRate * TICK_DT;
+  // Steering — negated so the bike turns toward the pressed direction
+  // (A = left, D = right). MUST match the sign in server/vehicles/hover.rs.
+  yaw -= ywIn * HOVER.maxYawRate * TICK_DT;
   if (yaw > PI) yaw -= TAU;
   if (yaw < -PI) yaw += TAU;
 
