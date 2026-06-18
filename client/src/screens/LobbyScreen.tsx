@@ -4,6 +4,7 @@ import { CLIENT_BUILD_HASH } from "../versionCheck";
 import { menuAudio } from "../menuAudio";
 import { PixelArtBg } from "./PixelArtBg";
 import { GAME_MODES, getGameMode } from "../gameModes";
+import { characterPresetForName } from "../characterPresets";
 import {
   getActiveProvider,
   getAuthMode,
@@ -46,7 +47,6 @@ export function LobbyScreen() {
     setScreen,
     setUsername,
     resetSession,
-    selectedCharacterPreset,
     selectedGameMode,
     setSelectedGameMode,
   } = useGameStore();
@@ -157,7 +157,7 @@ export function LobbyScreen() {
     try {
       await connection.reducers.setUsername({
         username: name,
-        characterPreset: selectedCharacterPreset,
+        characterPreset: characterPresetForName(name),
       });
       setUsername(name);
       menuAudio.playUINavigate();

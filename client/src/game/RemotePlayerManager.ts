@@ -49,8 +49,8 @@ const GLINT_MAX_DIST = 200;
 const GLINT_MIN_DIST = 8;
 const GLINT_PULSE_SPEED = 4;
 const REMOTE_PLAYER_FOOT_OFFSET = 1.7;
-const REMOTE_PLAYER_EYE_HEIGHT = 1.72;
-const REMOTE_PLAYER_NAMETAG_Y = 2.48;
+const REMOTE_PLAYER_EYE_HEIGHT = 2.5;
+const REMOTE_PLAYER_NAMETAG_Y = 3.4;
 
 function damp(current: number, target: number, lambda: number, delta: number): number {
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-lambda * delta));
@@ -175,13 +175,13 @@ export class RemotePlayerManager {
     rig.root.position.set(0, bobY - crouchDrop, 0);
     rig.root.rotation.set(0, bodyTwist, 0);
 
-    const upperBodyY = 1.22 - crouchAlpha * 0.08 - slideAlpha * 0.06;
+    const upperBodyY = 1.125 - crouchAlpha * 0.08 - slideAlpha * 0.06;
     rig.upperBody.position.set(0, upperBodyY, 0.01);
     rig.upperBody.rotation.x = upperAimX + forwardLean;
     rig.upperBody.rotation.y = bodyTwist * 0.25;
     rig.upperBody.rotation.z = bodyLeanZ;
 
-    rig.head.position.y = 0.72 - crouchAlpha * 0.06 - slideAlpha * 0.03;
+    rig.head.position.y = 1.125 - crouchAlpha * 0.06 - slideAlpha * 0.03;
     rig.head.rotation.x = -upperAimX * 0.2 - sprintAlpha * 0.06 + climbAlpha * 0.06;
     rig.head.rotation.y = -bodyTwist * 0.35;
     rig.head.rotation.z = -bodyLeanZ * 0.5;
@@ -248,8 +248,8 @@ export class RemotePlayerManager {
     rig.rightArm.rotation.y = rightArmY;
     rig.rightArm.rotation.z = rightArmZ;
 
-    rig.leftLeg.position.y = 0.96 - crouchAlpha * 0.18 - slideAlpha * 0.14;
-    rig.rightLeg.position.y = 0.96 - crouchAlpha * 0.18 - slideAlpha * 0.14;
+    rig.leftLeg.position.y = 1.125 - crouchAlpha * 0.18 - slideAlpha * 0.14;
+    rig.rightLeg.position.y = 1.125 - crouchAlpha * 0.18 - slideAlpha * 0.14;
     rig.leftLeg.rotation.x = leftLegX;
     rig.leftLeg.rotation.z = leftLegZ;
     rig.rightLeg.rotation.x = rightLegX;
@@ -298,8 +298,8 @@ export class RemotePlayerManager {
       setRemoteWeaponModel(group, normalizedWeapon, normalizedPreset);
 
       const canvas = document.createElement('canvas');
-      canvas.width = 512;
-      canvas.height = 128;
+      canvas.width = 1024;
+      canvas.height = 256;
       const texture = new THREE.CanvasTexture(canvas);
       texture.minFilter = THREE.LinearFilter;
       texture.magFilter = THREE.LinearFilter;
@@ -308,10 +308,11 @@ export class RemotePlayerManager {
         map: texture,
         transparent: true,
         depthTest: false,
+        depthWrite: false,
       }));
       sprite.name = 'remote-player-nametag';
       sprite.position.y = REMOTE_PLAYER_NAMETAG_Y;
-      sprite.scale.set(2.4, 0.6, 1);
+      sprite.scale.set(3.0, 0.75, 1);
       group.add(sprite);
 
       const runtime = this.getRuntime(group);

@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import type { DbConnection } from './module_bindings';
-import { normalizeCharacterPreset } from './characterPresets';
 import { normalizeGameMode } from './gameModes';
 
 export type Screen = 'login' | 'lobby' | 'game';
@@ -39,24 +38,6 @@ function saveSettings(s: GameSettings): void {
   try { localStorage.setItem('bitwars-settings', JSON.stringify(s)); } catch { /* ignore */ }
 }
 
-function loadCharacterPreset(): number {
-  try {
-    const raw = localStorage.getItem('bitwars-character-preset');
-    if (raw !== null) return normalizeCharacterPreset(Number(raw));
-  } catch {
-    // ignore
-  }
-  return 0;
-}
-
-function saveCharacterPreset(preset: number): void {
-  try {
-    localStorage.setItem('bitwars-character-preset', String(normalizeCharacterPreset(preset)));
-  } catch {
-    // ignore
-  }
-}
-
 function loadGameMode(): string {
   try {
     const raw = localStorage.getItem('bitwars-game-mode');
@@ -85,7 +66,6 @@ interface GameStore {
   versionStale: boolean;
   settings: GameSettings;
   showSettings: boolean;
-  selectedCharacterPreset: number;
   selectedGameMode: string;
 
   setScreen: (screen: Screen) => void;
@@ -98,7 +78,6 @@ interface GameStore {
   setSettings: (partial: Partial<GameSettings>) => void;
   resetSettings: () => void;
   setShowSettings: (show: boolean) => void;
-  setSelectedCharacterPreset: (preset: number) => void;
   setSelectedGameMode: (mode: string) => void;
   resetSession: (error?: string | null) => void;
 }
@@ -113,7 +92,6 @@ export const useGameStore = create<GameStore>((set) => ({
   versionStale: false,
   settings: loadSettings(),
   showSettings: false,
-  selectedCharacterPreset: loadCharacterPreset(),
   selectedGameMode: loadGameMode(),
 
   setScreen: (screen) => set({ screen }),
@@ -134,11 +112,6 @@ export const useGameStore = create<GameStore>((set) => ({
     set({ settings: { ...DEFAULT_SETTINGS } });
   },
   setShowSettings: (show) => set({ showSettings: show }),
-  setSelectedCharacterPreset: (preset) => {
-    const normalized = normalizeCharacterPreset(preset);
-    saveCharacterPreset(normalized);
-    set({ selectedCharacterPreset: normalized });
-  },
   setSelectedGameMode: (mode) => {
     const normalized = normalizeGameMode(mode);
     saveGameMode(normalized);
