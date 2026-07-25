@@ -39,3 +39,6 @@ Thumbs.db
 
 # Bot auth tokens (written to .context/bot-tokens/ by the bot runner)
 .context/
+
+# Design preview harness output (see client/scripts/preview-shot.mjs)
+.preview-shots/

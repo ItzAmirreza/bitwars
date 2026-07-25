@@ -19,6 +19,8 @@ import { PostFX, type PostFXQuality } from "./PostFX";
 import { PhysicsSystem } from "./PhysicsSystem";
 import { ProjectileManager } from "./ProjectileManager";
 import { SkySystem } from "./SkySystem";
+import { applyRendererProfile, createLightRig, CLEAR_COLOR, FOG_NEAR, FOG_FAR } from "./lightingRig";
+import { getAdsProfile } from "./WeaponRegistry";
 import { LanternSystem } from "./LanternSystem";
 import type { LanternContext } from "./LanternSystem";
 import {
@@ -411,8 +413,13 @@ export class Engine {
   private baseFov = 75;
   private wasSliding = false;
   private relockAfterOverlay = false;
-  private sniperScoped = false;
-  private scopeFovLerp = 0; // 0 = unscoped, 1 = fully scoped
+  /** Right mouse held — the player wants to be aiming. */
+  private aimHeld = false;
+  /** Eased aim blend 0..1. Drives FOV, sensitivity and the weapon pose together. */
+  private adsLerp = 0;
+  // Full-screen scope overlay blend. Only non-zero for weapons whose ADS profile
+  // sets `hideModel` (the sniper) — FOV and sensitivity come from `adsLerp`.
+  private scopeOverlayLerp = 0;
   chatOpen = false;
   private loadoutMenuOpen = false;
   private tacticalMapOpen = false;
@@ -522,15 +529,8 @@ export class Engine {
       antialias: true,
       powerPreference: "high-performance",
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    applyRendererProfile(this.renderer);
     this.renderer.setSize(w, h);
-    this.renderer.shadowMap.enabled = true;
-    // Soft PCF hides the per-frame edge aliasing that makes sweeping shadows
-    // look noisy as the sun moves.
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.setClearColor(0x5a5856);
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
     container.appendChild(this.renderer.domElement);
 
     // ── Camera ──
@@ -538,39 +538,16 @@ export class Engine {
 
     // ── Scene ──
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x5a5856, 200, 500);
+    this.scene.fog = new THREE.Fog(CLEAR_COLOR, FOG_NEAR, FOG_FAR);
     this.chunkBoundaryViewer = new ChunkBoundaryViewer(this.scene);
 
     // ── Lighting ──
-    this.hemiLight = new THREE.HemisphereLight(0x8a8a95, 0x2a2218, 0.8);
-    this.scene.add(this.hemiLight);
-
-    this.ambientLight = new THREE.AmbientLight(0x505058, 0.5);
-    this.scene.add(this.ambientLight);
-
-    this.sun = new THREE.DirectionalLight(0xffe0b0, 2.5);
-    this.sun.position.set(50, 80, 30);
-    this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.near = 1;
-    this.sun.shadow.camera.far = 300;
-    this.sun.shadow.camera.left = -80;
-    this.sun.shadow.camera.right = 80;
-    this.sun.shadow.camera.top = 80;
-    this.sun.shadow.camera.bottom = -80;
-    // A near-zero normal bias let voxel faces self-shadow into a crawling
-    // acne pattern that shifted with the sun. Offsetting samples along the
-    // surface normal (~⅓ of a block) kills it without visible peter-panning.
-    this.sun.shadow.bias = -0.0004;
-    this.sun.shadow.normalBias = 0.35;
-    this.scene.add(this.sun);
-    this.scene.add(this.sun.target);
-
-    this.moon = new THREE.DirectionalLight(0x9bb4ff, 0.35);
-    this.moon.position.set(-40, 60, -25);
-    this.moon.castShadow = false;
-    this.scene.add(this.moon);
-    this.scene.add(this.moon.target);
+    // Shared with the preview harness so offline shots match the live scene.
+    const rig = createLightRig(this.scene);
+    this.hemiLight = rig.hemi;
+    this.ambientLight = rig.ambient;
+    this.sun = rig.sun;
+    this.moon = rig.moon;
 
     // ── Sky system (procedural sky, dynamic lighting, weather) ──
     this.sky = new SkySystem(
@@ -1712,7 +1689,7 @@ export class Engine {
       }
     }
     if (e.button === 2 && this.controls.locked && this.mountedVehicleId === 0) {
-      this.toggleSniperScope();
+      this.setAimHeld(true);
     }
   };
 
@@ -2231,6 +2208,7 @@ export class Engine {
   private onMouseUp = (e: MouseEvent): void => {
     if (!this.active) return;
     if (e.button === 0) this.mouseDown = false;
+    if (e.button === 2) this.setAimHeld(false);
   };
   private onKeyDown = (e: KeyboardEvent): void => {
     if (!this.active) return;
@@ -2255,6 +2233,8 @@ export class Engine {
         // fall through to the infantry reload path below
       }
       this.weapons.reload(); // Client prediction
+      // Working the magazine takes the weapon off the sights.
+      this.cancelAim();
       this.audio.playReload(this.localAudioSource(-0.15));
       // Server refills infantry ammo instantly; the reload "feel" is the ~0.65s
       // playReload click sequence. Confirm "ready" right as that finishes.
@@ -2551,21 +2531,29 @@ export class Engine {
 
   private applyLocalWeaponSwitch(weaponIndex: number): void {
     if (weaponIndex === this.lastWeaponIndex) return;
-    this.unscopeSniper();
+    this.cancelAim();
     this.weaponModel.switchWeapon(weaponIndex);
     this.audio.playSwitch(this.localAudioSource(-0.1));
     this.lastWeaponIndex = weaponIndex;
     this.noteLocalWeaponSwitch();
   }
 
-  private toggleSniperScope(): void {
-    if (this.weapons.currentWeapon !== 5) return;
-    if (this.health <= 0) return;
-    this.sniperScoped = !this.sniperScoped;
+  /**
+   * Hold-to-aim, on every weapon. Per-weapon feel lives in the ADS profile
+   * (`getAdsProfile`); this only tracks intent.
+   */
+  private setAimHeld(held: boolean): void {
+    this.aimHeld = held && this.health > 0 && this.mountedVehicleId === 0;
   }
 
-  private unscopeSniper(): void {
-    this.sniperScoped = false;
+  /** Drop out of aim. Any state change that invalidates the sight picture. */
+  private cancelAim(): void {
+    this.aimHeld = false;
+  }
+
+  /** Eased aim blend, 0 (hip) to 1 (fully sighted). Read by the fire pipeline. */
+  adsBlend(): number {
+    return this.adsLerp;
   }
 
   private getServerCurrentWeapon(): number | undefined {
@@ -2912,7 +2900,7 @@ export class Engine {
           this.deaths = player.deaths;
           this.mountedVehicleId = Number(player.mountedVehicleId ?? 0);
           if (wasMounted !== (this.mountedVehicleId !== 0)) {
-            this.unscopeSniper();
+            this.cancelAim();
             this.vehicleManager.resetLocalPilotSmoothing();
             this.wasMountedVehiclePilot = false;
             if (this.mountedVehicleId !== 0) {
@@ -2945,7 +2933,7 @@ export class Engine {
             }
           }
           if (player.health <= 0 && oldHealth > 0) {
-            this.unscopeSniper();
+            this.cancelAim();
           }
           if (player.health < oldHealth) {
             // Defer indicator trigger so shot_event callbacks from the same
@@ -4290,9 +4278,12 @@ export class Engine {
     }
     this.wasSliding = this.controls.isSliding;
 
-    // Unscope when sprinting
-    if (this.sniperScoped && this.controls.isSprinting) {
-      this.unscopeSniper();
+    // Sprinting breaks the aim — you cannot hold a sight picture at a run.
+    // Losing pointer lock also drops it: without this, alt-tabbing or opening an
+    // overlay mid-hold leaves the player stuck zoomed with no way to release,
+    // because the mouseup lands outside the canvas and never reaches us.
+    if (this.aimHeld && (this.controls.isSprinting || !this.controls.locked)) {
+      this.cancelAim();
     }
 
     // Auto-fire
@@ -4450,27 +4441,34 @@ export class Engine {
     const savedFov = this.camera.fov;
     let fovChanged = false;
 
-    // Sniper scope FOV lerp
-    const scopeTarget = this.sniperScoped ? 1 : 0;
-    const scopeLerpSpeed = this.sniperScoped ? 12 : 16; // zoom in slightly slower than zoom out
-    this.scopeFovLerp += (scopeTarget - this.scopeFovLerp) * Math.min(1, delta * scopeLerpSpeed);
-    if (Math.abs(this.scopeFovLerp - scopeTarget) < 0.005) this.scopeFovLerp = scopeTarget;
+    // ── Aim-down-sights ──
+    // One eased value drives FOV, sensitivity and the weapon pose. Easing them
+    // separately is what makes ADS feel mushy: the sights arrive before or after
+    // the zoom and the alignment visibly slides.
+    const ads = getAdsProfile(this.weapons.currentWeapon);
+    const adsTarget = this.aimHeld ? 1 : 0;
+    // Out is always faster than in — snapping out of aim to react is a core FPS
+    // action and must never feel sticky.
+    const adsSpeed = this.aimHeld ? ads.inSpeed : ads.outSpeed;
+    this.adsLerp += (adsTarget - this.adsLerp) * Math.min(1, delta * adsSpeed);
+    if (Math.abs(this.adsLerp - adsTarget) < 0.005) this.adsLerp = adsTarget;
+    this.scopeOverlayLerp = ads.hideModel ? this.adsLerp : 0;
+    this.weaponModel.setAds(this.adsLerp);
 
-    // Reduce sensitivity when scoped
-    const scopeSensScale = 1 - this.scopeFovLerp * 0.65;
-    this.controls.sensitivityScale = scopeSensScale;
+    // Sensitivity drops with zoom so on-screen angular speed stays consistent.
+    this.controls.sensitivityScale = 1 - this.adsLerp * (1 - ads.sensScale);
 
-    // Sprint/Slide FOV effect (disabled when scoped)
-    const scopeFovOffset = -this.scopeFovLerp * (this.baseFov - 20); // zoom to ~20 FOV
-    const sprintOffset = this.sniperScoped ? 0 : this.controls.sprintFovOffset;
-    if (Math.abs(sprintOffset) > 0.01 || Math.abs(scopeFovOffset) > 0.01) {
-      this.camera.fov = this.baseFov + sprintOffset + scopeFovOffset;
+    // Sprint FOV is suppressed while aiming — the two fight each other.
+    const adsFovOffset = -this.adsLerp * (this.baseFov - ads.fov);
+    const sprintOffset = this.aimHeld ? 0 : this.controls.sprintFovOffset;
+    if (Math.abs(sprintOffset) > 0.01 || Math.abs(adsFovOffset) > 0.01) {
+      this.camera.fov = this.baseFov + sprintOffset + adsFovOffset;
       this.camera.updateProjectionMatrix();
       fovChanged = true;
     }
 
-    // Head bob offset (suppressed when scoped)
-    const bobScale = 1 - this.scopeFovLerp;
+    // Head bob offset (suppressed while aiming)
+    const bobScale = 1 - this.adsLerp;
     this.camera.position.y += this.controls.headBobY * bobScale;
     this.camera.position.x += this.controls.headBobX * bobScale;
 
@@ -4497,7 +4495,7 @@ export class Engine {
     this.renderer.clearDepth();
     if (
       (this.mountedVehicleId === 0 || this.isMountedPassengerGunner)
-      && this.scopeFovLerp < 0.5
+      && this.scopeOverlayLerp < 0.5
     ) {
       this.renderer.render(this.weaponModel.scene, this.weaponModel.camera);
     }
@@ -4714,7 +4712,9 @@ export class Engine {
       nearVehicleName,
       activeBuffs: this.getActiveBuffs(),
       damageIndicators: this.buildDamageIndicatorHudState(),
-      sniperScoped: this.sniperScoped,
+      // Drives the full-screen scope overlay, so it tracks the eased blend
+      // rather than raw intent — the overlay should appear as the zoom lands.
+      sniperScoped: this.scopeOverlayLerp > 0.5,
     });
   }
 

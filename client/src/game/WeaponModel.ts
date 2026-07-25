@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { WEAPON_MODELS } from './weaponModels';
 
 /**
  * First-person weapon model rendered in a separate pass
@@ -10,6 +11,10 @@ export class WeaponModel {
   camera: THREE.PerspectiveCamera;
 
   private weapons: THREE.Group[] = [];
+  private basePositions: THREE.Vector3[] = [];
+  private adsPositions: THREE.Vector3[] = [];
+  /** Aim blend 0..1, set by Engine each frame. */
+  private ads = 0;
   private current = 0;
   private bobTime = 0;
   private isMoving = false;
@@ -46,215 +51,14 @@ export class WeaponModel {
     dir.position.set(1, 2, 1);
     this.scene.add(dir);
 
-    this.weapons = [
-      this.buildRifle(),
-      this.buildShotgun(),
-      this.buildRPG(),
-      this.buildMachineGun(),
-      this.buildGrenadeLauncher(),
-      this.buildSniper(),
-    ];
+    this.weapons = WEAPON_MODELS.map((def) => def.firstPerson());
+    this.basePositions = WEAPON_MODELS.map((def) => new THREE.Vector3(...def.fpAnchor));
+    this.adsPositions = WEAPON_MODELS.map((def) => new THREE.Vector3(...def.adsAnchor));
 
     this.weapons.forEach((w) => this.scene.add(w));
     this.showWeapon(0);
   }
 
-  private mat(color: number, emissive?: number): THREE.MeshLambertMaterial {
-    return new THREE.MeshLambertMaterial({
-      color,
-      ...(emissive != null ? { emissive, emissiveIntensity: 0.4 } : {}),
-    });
-  }
-
-  // ── Rifle: Blocky assault rifle ──
-  private buildRifle(): THREE.Group {
-    const g = new THREE.Group();
-    const dark = this.mat(0x1a1a22);
-    const metal = this.mat(0x3a3a44);
-    const accent = this.mat(0x2244aa, 0x112244);
-
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.3), metal);
-    body.position.set(0, 0, 0);
-    g.add(body);
-
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.35), dark);
-    barrel.position.set(0, 0, -0.3);
-    g.add(barrel);
-
-    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, 0.05), dark);
-    mag.position.set(0, -0.08, 0.02);
-    g.add(mag);
-
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.015, 0.15), accent);
-    stripe.position.set(0, 0.04, -0.08);
-    g.add(stripe);
-
-    g.position.set(0.28, -0.26, -0.45);
-    return g;
-  }
-
-  // ── Shotgun: Chunky double block ──
-  private buildShotgun(): THREE.Group {
-    const g = new THREE.Group();
-    const wood = this.mat(0x5a3a1a);
-    const dark = this.mat(0x1a1a1a);
-    const accent = this.mat(0xcc6600, 0x552200);
-
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.07, 0.4), dark);
-    barrel.position.set(0, 0, -0.18);
-    g.add(barrel);
-
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.07, 0.2), wood);
-    body.position.set(0, 0, 0.08);
-    g.add(body);
-
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.18), wood);
-    stock.position.set(0, -0.01, 0.24);
-    g.add(stock);
-
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.015, 0.06), accent);
-    stripe.position.set(0, 0.04, -0.1);
-    g.add(stripe);
-
-    g.position.set(0.3, -0.28, -0.42);
-    return g;
-  }
-
-  // ── RPG: Big square tube ──
-  private buildRPG(): THREE.Group {
-    const g = new THREE.Group();
-    const olive = this.mat(0x3a4a2a);
-    const dark = this.mat(0x1a1a1a);
-    const red = this.mat(0xcc2200, 0x551100);
-
-    const tube = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.5), olive);
-    tube.position.set(0, 0, -0.1);
-    g.add(tube);
-
-    const flare = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.11, 0.06), dark);
-    flare.position.set(0, 0, -0.38);
-    g.add(flare);
-
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, 0.04), dark);
-    grip.position.set(0, -0.08, 0.05);
-    g.add(grip);
-
-    const tip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), red);
-    tip.position.set(0, 0, -0.44);
-    g.add(tip);
-
-    g.position.set(0.32, -0.3, -0.38);
-    return g;
-  }
-
-  // ── Machine Gun: Boxy belt-fed ──
-  private buildMachineGun(): THREE.Group {
-    const g = new THREE.Group();
-    const body = this.mat(0x1a222c);
-    const steel = this.mat(0x3b4658);
-    const cyan = this.mat(0x2a8fa8, 0x115566);
-
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.45), steel);
-    barrel.position.set(0, 0.01, -0.2);
-    g.add(barrel);
-
-    const shroud = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.08, 0.22), body);
-    shroud.position.set(0, 0.01, 0.04);
-    g.add(shroud);
-
-    const boxMag = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.08), body);
-    boxMag.position.set(-0.02, -0.06, 0.08);
-    g.add(boxMag);
-
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.14), steel);
-    stock.position.set(0, -0.005, 0.24);
-    g.add(stock);
-
-    const accent = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.015, 0.14), cyan);
-    accent.position.set(0, 0.06, 0.04);
-    g.add(accent);
-
-    g.position.set(0.3, -0.26, -0.46);
-    return g;
-  }
-
-  // ── Grenade Launcher: Square tube with drum cube ──
-  private buildGrenadeLauncher(): THREE.Group {
-    const g = new THREE.Group();
-    const dark = this.mat(0x1c1f22);
-    const olive = this.mat(0x3a4d2a);
-    const green = this.mat(0x52b82f, 0x17480f);
-
-    const tube = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.4), olive);
-    tube.position.set(0, 0.01, -0.12);
-    g.add(tube);
-
-    const breech = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.1, 0.12), dark);
-    breech.position.set(0, 0.01, 0.14);
-    g.add(breech);
-
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.15), olive);
-    stock.position.set(0, -0.005, 0.28);
-    g.add(stock);
-
-    const drum = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), green);
-    drum.position.set(0, -0.08, 0.06);
-    g.add(drum);
-
-    g.position.set(0.31, -0.29, -0.4);
-    return g;
-  }
-
-  // ── Sniper: Long barrel, scope on top, slim stock ──
-  private buildSniper(): THREE.Group {
-    const g = new THREE.Group();
-    const dark = this.mat(0x1a1a22);
-    const metal = this.mat(0x2a2a34);
-    const purple = this.mat(0x7722cc, 0x440088);
-
-    // Long barrel
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.55), dark);
-    barrel.position.set(0, 0, -0.22);
-    g.add(barrel);
-
-    // Body / receiver
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.22), metal);
-    body.position.set(0, 0, 0.08);
-    g.add(body);
-
-    // Scope
-    const scope = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.04, 0.18), dark);
-    scope.position.set(0, 0.05, -0.02);
-    g.add(scope);
-
-    // Scope lens (front)
-    const lens = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.03, 0.01), purple);
-    lens.position.set(0, 0.05, -0.11);
-    g.add(lens);
-
-    // Scope lens (rear)
-    const lensR = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.03, 0.01), purple);
-    lensR.position.set(0, 0.05, 0.07);
-    g.add(lensR);
-
-    // Slim stock
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.2), metal);
-    stock.position.set(0, -0.01, 0.28);
-    g.add(stock);
-
-    // Magazine
-    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.07, 0.04), dark);
-    mag.position.set(0, -0.06, 0.1);
-    g.add(mag);
-
-    // Bolt handle accent
-    const bolt = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.015, 0.03), purple);
-    bolt.position.set(0.03, 0.01, 0.06);
-    g.add(bolt);
-
-    g.position.set(0.28, -0.26, -0.48);
-    return g;
-  }
 
   private showWeapon(index: number): void {
     this.weapons.forEach((w, i) => {
@@ -364,32 +168,51 @@ export class WeaponModel {
     const w = this.weapons[this.current];
     if (!w) return;
 
-    const base = this.getBasePos(this.current);
+    // Blend the rest pose toward the sighted pose. `ads` is driven by Engine so
+    // the model and the camera FOV move on exactly the same curve — if these
+    // drift apart the sights visibly slide off centre mid-transition.
+    const ads = this.ads;
+    const hip = this.getBasePos(this.current);
+    const aim = this.getAdsPos(this.current);
+    const baseX = hip.x + (aim.x - hip.x) * ads;
+    const baseY = hip.y + (aim.y - hip.y) * ads;
+    const baseZ = hip.z + (aim.z - hip.z) * ads;
+
+    // Aiming suppresses the idle/movement sway that makes hip-fire feel loose.
+    // Left in at full strength it fights the sight alignment and reads as drift.
+    const sway = 1 - ads * 0.88;
 
     // Movement reactions
-    const weaponTiltZ = -this.strafeTilt * 0.04; // ~2.3 degrees
+    const weaponTiltZ = -this.strafeTilt * 0.04 * sway; // ~2.3 degrees at the hip
     const sprintLowerY = -this.sprintLower * 0.06;
     const sprintLowerRot = this.sprintLower * 0.15;
     const slideOffsetX = this.isSliding ? -0.05 : 0;
     const slideLowerY = this.isSliding ? -0.04 : 0;
 
-    w.position.x = base.x + bobX + slideOffsetX;
-    w.position.y = base.y + bobY + switchOffsetY + sprintLowerY + slideLowerY;
-    w.position.z = base.z + this.recoilZ * 0.015;
-    w.rotation.x = this.recoilRot * 0.05 + sprintLowerRot;
+    w.position.x = baseX + (bobX + slideOffsetX) * sway;
+    w.position.y = baseY + (bobY + sprintLowerY + slideLowerY) * sway + switchOffsetY;
+    // Recoil punch stays mostly intact while aimed — it is the shot's feedback.
+    w.position.z = baseZ + this.recoilZ * 0.015 * (1 - ads * 0.35);
+    w.rotation.x = this.recoilRot * 0.05 * (1 - ads * 0.35) + sprintLowerRot * sway;
     w.rotation.z = weaponTiltZ;
   }
 
+  /**
+   * Aim blend, 0 (hip) to 1 (fully sighted). Engine owns the easing so the
+   * weapon pose, camera FOV and sensitivity all move together.
+   */
+  setAds(t: number): void {
+    this.ads = Math.max(0, Math.min(1, t));
+  }
+
+  /** Sighted position of a weapon in view space; owned by the weapon's model file. */
+  private getAdsPos(index: number): THREE.Vector3 {
+    return this.adsPositions[index] ?? this.adsPositions[0]!;
+  }
+
+  /** Rest position of a weapon in view space; owned by the weapon's model file. */
   private getBasePos(index: number): THREE.Vector3 {
-    const positions = [
-      new THREE.Vector3(0.28, -0.26, -0.45),  // Rifle
-      new THREE.Vector3(0.30, -0.28, -0.42),  // Shotgun
-      new THREE.Vector3(0.32, -0.30, -0.38),  // RPG
-      new THREE.Vector3(0.30, -0.26, -0.46),  // Machine Gun
-      new THREE.Vector3(0.31, -0.29, -0.40),  // Grenade Launcher
-      new THREE.Vector3(0.28, -0.26, -0.48),  // Sniper
-    ];
-    return positions[index] || positions[0];
+    return this.basePositions[index] ?? this.basePositions[0]!;
   }
 
   resize(aspect: number): void {

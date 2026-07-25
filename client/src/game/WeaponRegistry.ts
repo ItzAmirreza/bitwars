@@ -142,6 +142,61 @@ export function getRecoilProfile(index: number): RecoilProfile {
   return RECOIL_PROFILES[index] ?? DEFAULT_RECOIL;
 }
 
+// ── Client-only aim-down-sights profiles ──
+//
+// ADS is hold-to-aim on every weapon, sniper included. Mixing hold on five
+// weapons with a toggle on one is the kind of inconsistency players feel as
+// jank even when they can't name it.
+//
+// Like recoil, none of this is simulated server-side — accuracy is enforced by
+// the server's existing range and line-of-sight checks, so these values only
+// change how aiming *feels* and what the local spread cone looks like.
+export interface AdsProfile {
+  /** Camera FOV at full aim. Lower = more zoom. */
+  fov: number;
+  /** Lerp rate entering the aim. Heavier weapons should be slower. */
+  inSpeed: number;
+  /** Lerp rate leaving it. Always faster than `inSpeed` — snapping out of aim
+   *  to react is a core FPS action and must never feel sticky. */
+  outSpeed: number;
+  /** Mouse sensitivity multiplier at full aim. Roughly tracks the zoom so the
+   *  on-screen angular speed stays consistent. */
+  sensScale: number;
+  /** Multiplier on fire bloom while aimed — the accuracy reward for aiming. */
+  bloomScale: number;
+  /** Multiplier on camera recoil kick while aimed. */
+  recoilScale: number;
+  /** Hide the first-person model at full aim (weapons with a full-screen optic). */
+  hideModel: boolean;
+}
+
+const DEFAULT_ADS: AdsProfile = {
+  fov: 58, inSpeed: 14, outSpeed: 20, sensScale: 0.78,
+  bloomScale: 0.5, recoilScale: 0.8, hideModel: false,
+};
+
+const ADS_PROFILES: Record<number, AdsProfile> = {
+  // Rifle — fast, modest zoom. The default gunfight weapon, so aiming must be
+  // near-instant; the reward is a tight cone, not magnification.
+  0: { fov: 54, inSpeed: 18, outSpeed: 24, sensScale: 0.72, bloomScale: 0.4, recoilScale: 0.72, hideModel: false },
+  // Shotgun — snappy but barely zooms. Pellet spread is the weapon's identity,
+  // so aiming tightens it only slightly.
+  1: { fov: 66, inSpeed: 16, outSpeed: 24, sensScale: 0.86, bloomScale: 0.8, recoilScale: 0.9, hideModel: false },
+  // RPG — slow and heavy. Aiming a launcher should cost you mobility.
+  2: { fov: 60, inSpeed: 9, outSpeed: 15, sensScale: 0.8, bloomScale: 0.5, recoilScale: 0.9, hideModel: false },
+  // Machine Gun — slowest to settle; rewards pre-aiming a lane over reacting.
+  3: { fov: 58, inSpeed: 8, outSpeed: 14, sensScale: 0.76, bloomScale: 0.45, recoilScale: 0.7, hideModel: false },
+  // Grenade Launcher — moderate, uses the ladder sight.
+  4: { fov: 62, inSpeed: 12, outSpeed: 18, sensScale: 0.82, bloomScale: 0.55, recoilScale: 0.85, hideModel: false },
+  // Sniper — full scope. Deliberately slow in and heavily desensitised so
+  // quickscoping is not free, and the model gives way to the scope overlay.
+  5: { fov: 20, inSpeed: 11, outSpeed: 17, sensScale: 0.35, bloomScale: 0.2, recoilScale: 1, hideModel: true },
+};
+
+export function getAdsProfile(index: number): AdsProfile {
+  return ADS_PROFILES[index] ?? DEFAULT_ADS;
+}
+
 // ── Client-only HUD descriptions ──
 
 const WEAPON_DESCRIPTIONS: Record<number, string> = {

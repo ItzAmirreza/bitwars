@@ -28,7 +28,7 @@
   "blockColors": {
     "Concrete": "#7a7a78",
     "DarkConcrete": "#5a5a58",
-    "Asphalt": "#2a2a2e",
+    "Asphalt": "#3a3a42",
     "Rebar": "#8b4513",
     "Brick": "#6b3a2a",
     "Metal": "#4a4e52",
@@ -40,7 +40,7 @@
     "Stone": "#6a6a6a",
     "Snow": "#d8d8e0",
     "Lantern": "#ffcf78",
-    "Bedrock": "#1a1a2e"
+    "Bedrock": "#26263a"
   },
 
   "entityKinds": {

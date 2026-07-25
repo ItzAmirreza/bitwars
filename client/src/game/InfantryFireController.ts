@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { BLOCK_COLORS } from './VoxelWorld';
 import { WeaponSystem, WEAPONS } from './Weapons';
 import type { FireResult } from './Weapons';
-import { getRecoilProfile } from './WeaponRegistry';
+import { getAdsProfile, getRecoilProfile } from './WeaponRegistry';
 import type { AudioSystem } from './AudioSystem';
 import type { VFX } from './VFX';
 import type { WeaponModel } from './WeaponModel';
@@ -29,6 +29,8 @@ export interface InfantryFireContext {
   getMountedFireOrigin(): { x: number; y: number; z: number } | null;
   hitMarkerTimer: number;
   hitMarkerType: 'block' | 'player' | 'vehicle' | 'none';
+  /** Eased aim-down-sights blend, 0 (hip) to 1 (fully sighted). */
+  adsBlend(): number;
   weapons: WeaponSystem;
   audio: AudioSystem;
   vfx: VFX;
@@ -104,15 +106,27 @@ export class InfantryFireController {
 
     // Muzzle flash + shake + recoil (always)
     ctx.vfx.emitMuzzleFlash();
-    ctx.vfx.shake(isSniper ? 0.7 : isGrenade ? 0.55 : isRPG ? 0.5 : isShotgun ? 0.8 : isMachineGun ? 0.25 : 0.3);
+    // Aiming steadies the weapon, so screen shake is pulled back with it —
+    // full hip-fire shake while sighted throws the sight picture off target.
+    const adsBlend = ctx.adsBlend();
+    const shakeScale = 1 - adsBlend * 0.45;
+    ctx.vfx.shake(
+      (isSniper ? 0.7 : isGrenade ? 0.55 : isRPG ? 0.5 : isShotgun ? 0.8 : isMachineGun ? 0.25 : 0.3)
+      * shakeScale,
+    );
     ctx.weaponModel.triggerRecoil(WEAPONS[result.weaponIndex].recoil);
     // Camera recoil — kicks the view up (auto-recovers) + blooms the crosshair.
+    // Aiming is what buys accuracy here: bloom and kick both scale down with the
+    // aim blend, so holding the sight is mechanically better and not just a zoom.
     const rp = getRecoilProfile(result.weaponIndex);
+    const ap = getAdsProfile(result.weaponIndex);
+    const recoilScale = 1 - adsBlend * (1 - ap.recoilScale);
+    const bloomScale = 1 - adsBlend * (1 - ap.bloomScale);
     ctx.controls.addRecoil(
-      rp.vertical,
-      (Math.random() - 0.5) * 2 * rp.horizontal,
+      rp.vertical * recoilScale,
+      (Math.random() - 0.5) * 2 * rp.horizontal * recoilScale,
       rp.recovery,
-      rp.bloom,
+      rp.bloom * bloomScale,
       rp.bloomMax,
       rp.bloomRecovery,
     );

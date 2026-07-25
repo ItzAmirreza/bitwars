@@ -91,7 +91,12 @@ const AO_SIGNS: number[][][] = [
   [[-1, 1], [1, 1], [1, -1], [-1, -1]],
 ];
 
-const AO_CURVE = [0.45, 0.68, 0.85, 1.0];
+// AO multiplies the block's base colour, so the darkest palette entries take it
+// worst: Asphalt (#2a2a2e) at the old 0.45 floor landed near pure black in any
+// concave corner, taking the block's shape with it. The floor is lifted now that
+// the shader draws explicit per-block seams — AO no longer has to carry
+// legibility on its own, it just has to suggest contact shadow.
+const AO_CURVE = [0.62, 0.77, 0.9, 1.0];
 
 // ── Noise helper ──
 
@@ -344,11 +349,19 @@ export function buildChunkMeshData(input: ChunkMeshBuildInput): ChunkMeshData {
         }
       }
 
-      // Keep the original fine-grained variation profile for visual richness.
-      const variation = (hash2d(wx * 7 + wy, wz * 13 + wy) - 0.5) * 0.06;
-      cr = Math.max(0, Math.min(1, cr + variation));
-      cg = Math.max(0, Math.min(1, cg + variation));
-      cb = Math.max(0, Math.min(1, cb + variation));
+      // Break up large single-material surfaces so they read as material rather
+      // than as flat paint.
+      //
+      // This has to scale the colour, not offset it. These channels are in
+      // LINEAR space, where a dark block sits far lower than its hex suggests:
+      // Asphalt (#3a3a42) is ~0.042 linear, so the old ±0.03 additive delta was
+      // a ±70% swing on asphalt but only ±15% on Concrete (~0.194). That is why
+      // dark surfaces looked like noise while light ones looked fine.
+      // Multiplying keeps the variation perceptually even across the palette.
+      const variation = 1 + (hash2d(wx * 7 + wy, wz * 13 + wy) - 0.5) * 0.12;
+      cr = Math.max(0, Math.min(1, cr * variation));
+      cg = Math.max(0, Math.min(1, cg * variation));
+      cb = Math.max(0, Math.min(1, cb * variation));
 
       // Quantize to 8-bit channels for deterministic merge keys while
       // keeping the visual result effectively identical to the pre-greedy path.

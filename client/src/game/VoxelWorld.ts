@@ -38,12 +38,150 @@ export const BlockType = BLOCK_TYPES as {
 };
 export type BlockType = (typeof BlockType)[keyof typeof BlockType];
 
+/**
+ * Tuning for the per-block seam lines drawn in the chunk fragment shader.
+ *
+ * `darken` is a multiplier on the lit colour, so it has to stay well above zero
+ * — the darkest blocks in the palette (Asphalt, Bedrock) are already near-black
+ * and a hard seam would crush them to pure black.
+ */
+export interface EdgeSettings {
+  /** 0 disables the seams entirely. */
+  strength: number;
+  /** Colour multiplier at the centre of a seam. */
+  darken: number;
+  /** Seam half-width in pixels. */
+  width: number;
+  /** Distance where seams start fading out. */
+  fadeNear: number;
+  /** Distance where seams are gone. */
+  fadeFar: number;
+}
+
+export const EDGE_DEFAULTS: EdgeSettings = {
+  strength: 0.55,
+  darken: 0.72,
+  width: 1.1,
+  fadeNear: 32,
+  fadeFar: 78,
+};
+
 export function packChunkId(cx: number, cy: number, cz: number): number {
   return (cx & 0xFF) | ((cy & 0xFF) << 8) | ((cz & 0xFF) << 16);
 }
 
 export function unpackChunkId(id: number): [number, number, number] {
   return [id & 0xFF, (id >> 8) & 0xFF, (id >> 16) & 0xFF];
+}
+
+/**
+ * The chunk material: flat-shaded vertex colours plus the per-block seam pass.
+ *
+ * Exported so the preview harness (`src/preview/`) renders voxel subjects with
+ * the exact shader the game uses — a lookalike would silently drift from it and
+ * make offline design shots untrustworthy.
+ *
+ * `onCompiled` fires once when three compiles the program, handing back the
+ * shader object so callers can retune the seam uniforms at runtime.
+ */
+export function createChunkMaterial(
+  onCompiled?: (shader: { uniforms: Record<string, { value: unknown }> }) => void,
+): THREE.MeshPhongMaterial {
+  const mat = new THREE.MeshPhongMaterial({
+    vertexColors: true,
+    emissive: new THREE.Color(0x10182a),
+    emissiveIntensity: 0.34,
+    shininess: 6,
+    specular: new THREE.Color(0x111418),
+  });
+
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uBombActive = { value: 0.0 };
+      shader.uniforms.uBombPos = { value: new THREE.Vector3() };
+      shader.uniforms.uBombRadius = { value: 10.0 };
+
+      // Per-block edge definition. Greedy meshing merges coplanar faces, so a
+      // flat plain is a handful of large quads and per-vertex AO — which only
+      // fires at concave corners — leaves it with no internal detail at all.
+      // These uniforms drive a world-space grid that redraws the block seams.
+      shader.uniforms.uEdgeStrength = { value: EDGE_DEFAULTS.strength };
+      shader.uniforms.uEdgeDarken = { value: EDGE_DEFAULTS.darken };
+      shader.uniforms.uEdgeWidth = { value: EDGE_DEFAULTS.width };
+      shader.uniforms.uEdgeFadeNear = { value: EDGE_DEFAULTS.fadeNear };
+      shader.uniforms.uEdgeFadeFar = { value: EDGE_DEFAULTS.fadeFar };
+      onCompiled?.(shader);
+
+      // Vertex shader: pass world position to fragment
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vWorldPos;`,
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vWorldPos;
+        uniform float uBombActive;
+        uniform vec3 uBombPos;
+        uniform float uBombRadius;
+        uniform float uEdgeStrength;
+        uniform float uEdgeDarken;
+        uniform float uEdgeWidth;
+        uniform float uEdgeFadeNear;
+        uniform float uEdgeFadeFar;`,
+      );
+
+      // Both effects run after lighting, so they share one anchor. Keep them in
+      // a single replace — chaining two replaces on the same include nests them.
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+
+        // ── Per-block edge definition ──
+        if (uEdgeStrength > 0.0) {
+          // Derive the flat face normal from screen-space derivatives rather
+          // than vNormal: the voxel mesh is flat-shaded per quad, and this is
+          // correct regardless of which varyings the lit material provides.
+          vec3 an = abs(normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos))));
+
+          // Grid along the two world axes that lie in the face plane.
+          vec2 guv;
+          if (an.x >= an.y && an.x >= an.z)      guv = vWorldPos.yz;
+          else if (an.y >= an.z)                 guv = vWorldPos.xz;
+          else                                   guv = vWorldPos.xy;
+
+          // Distance to the nearest block seam, in pixels, so the line keeps a
+          // constant on-screen width instead of thinning out with distance.
+          vec2 seam = abs(fract(guv + 0.5) - 0.5);
+          vec2 px = seam / max(fwidth(guv), vec2(1e-5));
+          float edge = 1.0 - clamp(min(px.x, px.y) / max(uEdgeWidth, 1e-5), 0.0, 1.0);
+
+          // Past a certain range the seams are sub-pixel and collapse into
+          // moire, so fade them out and let the silhouette carry the read.
+          float camDist = distance(vWorldPos, cameraPosition);
+          edge *= 1.0 - smoothstep(uEdgeFadeNear, uEdgeFadeFar, camDist);
+
+          gl_FragColor.rgb *= mix(1.0, uEdgeDarken, edge * uEdgeStrength);
+        }
+
+        if (uBombActive > 0.5) {
+          float dist = distance(vWorldPos, uBombPos);
+          if (dist < uBombRadius) {
+            float alpha = smoothstep(0.0, uBombRadius, dist) * 0.85 + 0.15;
+            gl_FragColor.a = alpha;
+          }
+        }`,
+      );
+    };
+
+
+  return mat;
 }
 
 export class VoxelWorld {
@@ -56,6 +194,8 @@ export class VoxelWorld {
   private dirtyChunks: Set<number> = new Set();
   private chunkRevision: Map<number, number> = new Map();
   private mat: THREE.MeshPhongMaterial;
+  /** Set once the chunk material compiles; used to retune seams at runtime. */
+  private shaderRef: { uniforms: Record<string, { value: unknown }> } | null = null;
 
   private workers: Worker[] = [];
   private workersEnabled = false;
@@ -75,54 +215,24 @@ export class VoxelWorld {
     this.sizeX = sx;
     this.sizeY = sy;
     this.sizeZ = sz;
-    this.mat = new THREE.MeshPhongMaterial({
-      vertexColors: true,
-      emissive: new THREE.Color(0x10182a),
-      emissiveIntensity: 0.34,
-      shininess: 6,
-      specular: new THREE.Color(0x111418),
+    this.mat = createChunkMaterial((shader) => {
+      this.shaderRef = shader;
     });
-
-    this.mat.onBeforeCompile = (shader) => {
-      shader.uniforms.uBombActive = { value: 0.0 };
-      shader.uniforms.uBombPos = { value: new THREE.Vector3() };
-      shader.uniforms.uBombRadius = { value: 10.0 };
-
-      // Vertex shader: pass world position to fragment
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <common>',
-        `#include <common>
-        varying vec3 vWorldPos;`,
-      );
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-        vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
-      );
-
-      // Fragment shader: X-ray transparency near bomb
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <common>',
-        `#include <common>
-        varying vec3 vWorldPos;
-        uniform float uBombActive;
-        uniform vec3 uBombPos;
-        uniform float uBombRadius;`,
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <dithering_fragment>',
-        `#include <dithering_fragment>
-        if (uBombActive > 0.5) {
-          float dist = distance(vWorldPos, uBombPos);
-          if (dist < uBombRadius) {
-            float alpha = smoothstep(0.0, uBombRadius, dist) * 0.85 + 0.15;
-            gl_FragColor.a = alpha;
-          }
-        }`,
-      );
-    };
-
     this.initWorkers();
+  }
+
+  /**
+   * Retune the per-block seam lines. No-op until the chunk material has
+   * compiled, which happens on the first rendered frame that has chunks.
+   */
+  setEdgeSettings(settings: Partial<EdgeSettings>): void {
+    const u = this.shaderRef?.uniforms;
+    if (!u) return;
+    if (settings.strength !== undefined) u.uEdgeStrength!.value = settings.strength;
+    if (settings.darken !== undefined) u.uEdgeDarken!.value = settings.darken;
+    if (settings.width !== undefined) u.uEdgeWidth!.value = settings.width;
+    if (settings.fadeNear !== undefined) u.uEdgeFadeNear!.value = settings.fadeNear;
+    if (settings.fadeFar !== undefined) u.uEdgeFadeFar!.value = settings.fadeFar;
   }
 
   /** Chunk mesh jobs not yet applied to the scene (queued or in a worker). */

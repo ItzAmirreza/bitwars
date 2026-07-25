@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { WEAPONS } from './Weapons';
 import { getCharacterPreset } from '../characterPresets';
+import { buildWorldWeapon } from './weaponModels';
 
 /** Recursively dispose all geometries and materials under the given object. */
 export function disposeObjectMaterials(root: THREE.Object3D): void {
@@ -236,57 +237,20 @@ export function createRemotePlayerModel(presetValue: number): RemotePlayerRig {
   };
 }
 
+/**
+ * The weapon model other players see.
+ *
+ * Geometry lives in the per-weapon files under `weaponModels/`, shared with the
+ * first-person view so the two can't drift apart. The character preset only
+ * tints one small part — a sling tab or grip plate — because a weapon coloured
+ * head-to-toe by its owner stops being identifiable as a weapon.
+ */
 export function createRemoteWeaponModel(weaponIndex: number, presetValue: number): THREE.Group {
   const preset = getCharacterPreset(presetValue);
   const idx = normalizeWeaponIndex(weaponIndex);
-  const parsed = Number.parseInt(WEAPONS[idx]?.color.replace('#', ''), 16);
-  const mainColor = Number.isFinite(parsed) ? parsed : preset.gunColor;
 
-  const gun = new THREE.Group();
+  const gun = buildWorldWeapon(idx, preset.accentColor);
   gun.name = 'remote-player-gun';
-
-  const gunMat = new THREE.MeshLambertMaterial({ color: mainColor });
-  const bodyMat = new THREE.MeshLambertMaterial({ color: preset.gunColor });
-  const detailMat = new THREE.MeshLambertMaterial({
-    color: preset.accentColor,
-    emissive: preset.accentColor,
-    emissiveIntensity: 0.25,
-  });
-
-  const add = (
-    size: [number, number, number],
-    material: THREE.Material,
-    pos: [number, number, number],
-  ): void => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
-    mesh.position.set(...pos);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    gun.add(mesh);
-  };
-
-  if (idx === 1) {
-    add([0.12, 0.1, 0.48], bodyMat, [0, 0, -0.02]);
-    add([0.06, 0.06, 0.34], gunMat, [0, 0, -0.36]);
-    add([0.1, 0.02, 0.08], detailMat, [0, 0.06, -0.14]);
-  } else if (idx === 2) {
-    add([0.14, 0.14, 0.56], bodyMat, [0, 0, -0.08]);
-    add([0.16, 0.16, 0.08], gunMat, [0, 0, -0.4]);
-    add([0.08, 0.08, 0.08], detailMat, [0, 0, -0.48]);
-  } else if (idx === 3) {
-    add([0.12, 0.1, 0.44], bodyMat, [0, 0, 0]);
-    add([0.06, 0.06, 0.38], gunMat, [0, 0.01, -0.34]);
-    add([0.12, 0.02, 0.14], detailMat, [0, 0.06, 0.02]);
-  } else if (idx === 4) {
-    add([0.14, 0.14, 0.44], bodyMat, [0, 0, -0.06]);
-    add([0.14, 0.12, 0.12], gunMat, [0, 0, 0.2]);
-    add([0.09, 0.09, 0.09], detailMat, [0, -0.1, 0.08]);
-  } else {
-    add([0.1, 0.09, 0.34], bodyMat, [0, 0, 0]);
-    add([0.05, 0.05, 0.34], gunMat, [0, 0, -0.31]);
-    add([0.08, 0.02, 0.12], detailMat, [0, 0.05, -0.08]);
-  }
-
   return gun;
 }
 
